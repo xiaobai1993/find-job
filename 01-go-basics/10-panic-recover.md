@@ -465,7 +465,133 @@ defer func() {
 
 ---
 
-## 六、面试高频问答
+## 六、Go 1.21+ 新版本特性与应用场景
+
+这是面试高频考点，新版本对 panic/recover 体系做了重要增强。
+
+---
+
+### 1. runtime.PanicNilError（Go 1.21+）
+
+**重大变化：`panic(nil)` 现在也会产生一个非 nil 的 error！**
+
+**Go 1.20 及以前的行为：**
+```go
+func main() {
+    defer func() {
+        err := recover()
+        fmt.Printf("err = %v, err == nil: %v\n", err, err == nil)
+    }()
+    panic(nil)
+}
+// 输出：err = <nil>, err == nil: true
+```
+
+**Go 1.21+ 的行为：**
+```go
+func main() {
+    defer func() {
+        err := recover()
+        fmt.Printf("err = %v, err == nil: %v\n", err, err == nil)
+
+        // 类型断言可以判断是不是 panic(nil)
+        if _, ok := err.(runtime.PanicNilError); ok {
+            fmt.Println("这是 panic(nil) 产生的错误！")
+        }
+    }()
+    panic(nil)
+}
+// 输出：
+// err = panic called with nil argument, err == nil: false
+// 这是 panic(nil) 产生的错误！
+```
+
+**为什么要改？**
+- 历史上 `panic(nil)` 会让 `recover()` 返回 `nil`，导致很多 bug
+- 上层调用者判断 `err == nil` 就以为没有 panic，但实际上确实 panic 了
+- 很多框架的 recover 中间件因此漏掉了 panic，程序默默崩溃但日志什么都没打
+
+**面试高频追问：怎么兼容旧版本？**
+```go
+// 兼容判断方法
+func isPanicRecovered(err interface{}) bool {
+    if err == nil {
+        // Go 1.20 及以前：panic(nil) 会走到这里
+        // Go 1.21+：永远不会走到这里
+        return false
+    }
+    // Go 1.21+：所有 panic 包括 panic(nil) 都会走到这里
+    return true
+}
+```
+
+**⚠️ 注意：可以用环境变量 `GODEBUG=panicnil=1` 临时恢复旧行为，但是 Go 1.24 之后会移除这个兼容选项。**
+
+---
+
+### 2. debug.SetCrashOutput（Go 1.21+）
+
+可以把崩溃 dump 输出到指定文件，而不是 stderr。
+
+**应用场景：支付系统的崩溃现场保留**
+```go
+import "runtime/debug"
+
+func main() {
+    // 程序启动时设置，把所有崩溃 dump 写到文件里
+    f, _ := os.OpenFile("/var/log/crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    debug.SetCrashOutput(f, debug.CrashOptions{})
+
+    // 后面程序 panic 了，完整的 stack trace 都会写到 crash.log 里
+    riskyOperation()
+}
+```
+
+**支付系统特别有用：**
+- 生产环境崩溃了，stderr 可能找不到或者被覆盖
+- 用这个 API 可以把崩溃 dump 持久化到专门的 crash 日志目录
+- 配合监控告警，第一时间拿到崩溃现场
+
+---
+
+### 3. runtime.AddCleanup（Go 1.21+）
+
+不是直接的 panic 相关，但是是非常重要的资源清理机制，可以避免很多 panic 根源。
+
+```go
+import "runtime"
+
+func main() {
+    f, _ := os.Open("data.txt")
+
+    // 当 f 被 GC 时，自动调用 f.Close()
+    runtime.AddCleanup(f, (*os.File).Close, f)
+
+    // 你不需要记得 defer f.Close() 了！
+    // 即使你忘了，GC 的时候也会自动关闭，不会泄漏文件句柄
+}
+```
+
+**典型应用场景：**
+- 自动关闭文件句柄
+- 自动释放 CGO 资源
+- 自动关闭网络连接
+- 避免因为忘记释放资源导致的 OOM、too many open files 等 panic
+
+**注意：这不是 defer 的替代品，而是兜底机制。正常路径还是应该用 defer，AddCleanup 只作为最后的保险。**
+
+---
+
+### 4. Go 1.22+：改进的 Panic Stack Trace
+
+Go 1.22 优化了 panic 的栈追踪显示：
+- 更清晰的函数参数显示
+- 内联函数的栈追踪更准确
+- 可以看到 defer 函数的调用来源
+
+---
+
+## 七、面试高频问答
 
 | 问题 | 答案 |
 |------|------|
@@ -476,7 +602,12 @@ defer func() {
 | panic 的参数可以是什么类型？ | 任意类型，interface{}，所以 recover 返回的也是 interface{}，需要类型断言。 |
 | recover 之后程序还能正常运行吗？ | 可以，但是当前函数会立即返回，后面的代码不会执行，上层函数可以正常继续。 |
 | runtime panic 能被 recover 捕获吗？ | 可以，nil pointer、index out of range、divide by zero 这些都可以被捕获。 |
-| Go 1.21 之后 panic 有什么新特性？ | 新增了 runtime.PanicNilError，可以更精细地控制 nil panic 的行为。 |
+| **Go 1.21+ panic(nil) 有什么变化？** | 以前 recover() 返回 nil，现在返回 runtime.PanicNilError 类型的 error，不再是 nil。这修复了很多框架漏打日志的 bug。 |
+| **怎么判断 recover 回来的是不是 panic(nil)？** | 用类型断言：`_, ok := err.(runtime.PanicNilError)`，ok 为 true 就是 panic(nil)。 |
+| **debug.SetCrashOutput 有什么用？** | Go 1.21+ 新增，可以把 panic 的完整 stack trace 输出到指定文件，而不是 stderr。生产环境用来保留崩溃现场非常有用。 |
+| **runtime.AddCleanup 是做什么的？** | Go 1.21+ 新增，给对象注册一个清理函数，对象被 GC 时自动调用。用来兜底释放资源，避免忘记 defer 导致的句柄泄漏。 |
+| **AddCleanup 和 defer 有什么区别？** | defer 是函数返回时执行，确定性强；AddCleanup 是 GC 时执行，时机不确定。defer 是首选，AddCleanup 是兜底保险。 |
+| **GODEBUG=panicnil=1 是做什么的？** | 临时恢复 Go 1.20 及以前 panic(nil) 让 recover 返回 nil 的旧行为，用于升级兼容。Go 1.24 之后会移除这个选项。 |
 | 为什么 Go 设计成 panic 崩溃而不是返回错误？ | 因为有些错误是不可恢复的，程序继续跑反而会出更大的问题，比如数据不一致。panic 就是让程序早点死，早点发现问题。 |
 | panic 和 error 应该怎么选？ | 预期内的、用户可以处理的错误用 error；预期外的、不可恢复的严重错误用 panic。不要把 panic 当普通异常用。 |
 

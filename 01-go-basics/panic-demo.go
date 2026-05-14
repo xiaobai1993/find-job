@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"runtime/debug"
 	"strings"
 )
@@ -242,6 +243,112 @@ func demo10AnyType() {
 }
 
 // ============================================
+// 演示 11：Go 1.21+ panic(nil) 新行为
+// ============================================
+func demo11PanicNil() {
+	fmt.Println("\n=== 演示 11：Go 1.21+ panic(nil) 新行为 ===")
+
+	// 检查 Go 版本
+	version := runtime.Version()
+	fmt.Println("当前 Go 版本:", version)
+
+	defer func() {
+		err := recover()
+		fmt.Printf("recover() 返回: err = %v\n", err)
+		fmt.Printf("err == nil: %v\n", err == nil)
+
+		// 类型断言判断是不是 panic(nil)
+		if pne, ok := err.(runtime.PanicNilError); ok {
+			fmt.Println("✅ Go 1.21+ 新行为: 这是 runtime.PanicNilError:", pne)
+			fmt.Println("💡 历史坑修复：panic(nil) 不再返回 nil 了！")
+		} else if err == nil {
+			fmt.Println("⚠️  旧版本行为: Go 1.20 及以前，panic(nil) 返回 nil")
+			fmt.Println("💡 这会导致很多框架的 recover 中间件漏掉 panic，不打日志！")
+		}
+	}()
+
+	panic(nil)
+}
+
+// ============================================
+// 演示 12：Go 1.21+ debug.SetCrashOutput 保留崩溃现场
+// ============================================
+func demo12SetCrashOutput() {
+	fmt.Println("\n=== 演示 12：Go 1.21+ debug.SetCrashOutput 保留崩溃现场 ===")
+
+	fmt.Println("💡 支付系统推荐用法（需要 Go 1.21+）：")
+	fmt.Println("  func main() {")
+	fmt.Println("      f, _ := os.OpenFile(\"/var/log/crash.log\", ...)")
+	fmt.Println("      debug.SetCrashOutput(f, debug.CrashOptions{})")
+	fmt.Println("      // 业务逻辑")
+	fmt.Println("  }")
+	fmt.Println()
+	fmt.Println("💡 好处：")
+	fmt.Println("  1. 生产环境崩溃了，完整 stack trace 永久保存在文件里")
+	fmt.Println("  2. 不会因为 stderr 被重定向丢了就查不到崩溃原因")
+	fmt.Println("  3. 配合监控告警，第一时间拿到崩溃现场")
+}
+
+// ============================================
+// 演示 13：Go 1.21+ runtime.AddCleanup 资源兜底释放
+// ============================================
+func demo13AddCleanup() {
+	fmt.Println("\n=== 演示 13：Go 1.21+ runtime.AddCleanup 资源兜底释放 ===")
+
+	fmt.Println("💡 典型用法（需要 Go 1.21+）：")
+	fmt.Println("  f, _ := os.Open(\"data.txt\")")
+	fmt.Println("  // 给 f 注册清理函数，GC 时自动调用 f.Close()")
+	fmt.Println("  runtime.AddCleanup(f, (*os.File).Close, f)")
+	fmt.Println()
+	fmt.Println("💡 应用场景：")
+	fmt.Println("  1. 自动关闭文件句柄、网络连接")
+	fmt.Println("  2. 自动释放 CGO 资源")
+	fmt.Println("  3. 兜底保险，避免忘记 defer 导致的 OOM、too many open files")
+	fmt.Println()
+	fmt.Println("⚠️  注意：这不是 defer 的替代品！")
+	fmt.Println("  defer 是函数返回时执行，确定性强")
+	fmt.Println("  AddCleanup 是 GC 时执行，时机不确定，只做兜底保险")
+}
+
+// ============================================
+// 演示 14：兼容判断 panic 是否真的发生
+// ============================================
+func demo14CompatiblePanicCheck() {
+	fmt.Println("\n=== 演示 14：兼容判断 panic 是否真的发生 ===")
+
+	checkPanic := func(doPanic bool) {
+		defer func() {
+			err := recover()
+
+			// 兼容写法：不管 Go 版本，都能正确判断有没有 panic
+			hasPanic := false
+			if err != nil {
+				hasPanic = true
+			}
+
+			// Go 1.21+ 额外判断 panic(nil)
+			if _, ok := err.(runtime.PanicNilError); ok {
+				hasPanic = true
+			}
+
+			fmt.Printf("  doPanic=%v, hasPanic=%v, err=%v\n", doPanic, hasPanic, err)
+		}()
+
+		if doPanic {
+			panic(nil)
+		}
+	}
+
+	fmt.Println("测试不 panic:")
+	checkPanic(false)
+
+	fmt.Println("测试 panic(nil):")
+	checkPanic(true)
+
+	fmt.Println("💡 支付系统的 recover 中间件一定要这么写，兼容所有 Go 版本")
+}
+
+// ============================================
 // main
 // ============================================
 func main() {
@@ -255,6 +362,10 @@ func main() {
 	demo8GoroutineTemplate()
 	demo9DeferSafe()
 	demo10AnyType()
+	demo11PanicNil()
+	demo12SetCrashOutput()
+	demo13AddCleanup()
+	demo14CompatiblePanicCheck()
 
 	fmt.Println("\n" + strings.Repeat("=", 50))
 	fmt.Println("✅ 所有 panic/recover 演示完成！")
@@ -265,4 +376,9 @@ func main() {
 	fmt.Println("4. recover 之后必须打完整的调用栈")
 	fmt.Println("5. 不要把 panic 当普通异常用")
 	fmt.Println("6. 支付业务所有 goroutine 入口必须加 defer recover")
+	fmt.Println("\n==== Go 1.21+ 新增特性 ====")
+	fmt.Println("7. panic(nil) 现在返回 runtime.PanicNilError，不再是 nil")
+	fmt.Println("8. debug.SetCrashOutput 可以把崩溃日志写到指定文件")
+	fmt.Println("9. runtime.AddCleanup 可以给对象注册 GC 时自动清理函数")
+	fmt.Println("10. 升级 Go 1.21+ 要注意 panic(nil) 的兼容性问题")
 }
