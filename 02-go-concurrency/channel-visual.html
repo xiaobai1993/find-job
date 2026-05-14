@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Channel 可视化学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .code-block {
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .queue-cell {
+            transition: all 0.3s ease;
+        }
+        .queue-cell.filled {
+            background: #22c55e;
+            color: white;
+        }
+        .queue-cell.pointer {
+            border: 2px solid #f59e0b;
+        }
+        .goroutine-card {
+            transition: all 0.3s ease;
+        }
+        .goroutine-card.blocked {
+            background: #fef2f2;
+            border-color: #ef4444;
+            animation: pulse 1.5s infinite;
+        }
+        .goroutine-card.running {
+            background: #f0fdf4;
+            border-color: #22c55e;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .flow-step {
+            transition: all 0.3s ease;
+        }
+        .flow-step.active {
+            background: #dbeafe;
+            border-color: #3b82f6;
+            transform: scale(1.02);
+        }
+        .interview-card {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .interview-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .interview-answer {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .interview-answer.show {
+            max-height: 500px;
+        }
+        .tab-btn.active {
+            background: #3b82f6;
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <!-- 标题 -->
+        <header class="text-center mb-10">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Go Channel 可视化学习</h1>
+            <p class="text-gray-600">底层结构 + 读写流程 + 常见坑 + 面试题</p>
+        </header>
+
+        <!-- 导航标签 -->
+        <div class="flex gap-2 mb-6 flex-wrap">
+            <button class="tab-btn active px-4 py-2 rounded-lg border border-gray-300 bg-white font-medium" data-tab="struct">数据结构</button>
+            <button class="tab-btn px-4 py-2 rounded-lg border border-gray-300 bg-white font-medium" data-tab="write">写数据流程</button>
+            <button class="tab-btn px-4 py-2 rounded-lg border border-gray-300 bg-white font-medium" data-tab="read">读数据流程</button>
+            <button class="tab-btn px-4 py-2 rounded-lg border border-gray-300 bg-white font-medium" data-tab="pitfalls">常见坑</button>
+            <button class="tab-btn px-4 py-2 rounded-lg border border-gray-300 bg-white font-medium" data-tab="interview">面试题</button>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- 标签 1：数据结构 -->
+        <!-- ============================================ -->
+        <div id="struct" class="tab-content">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">hchan 底层结构</h2>
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- 左侧：代码 -->
+                    <div class="bg-gray-900 text-gray-100 rounded-lg p-4 code-block">
+<pre>type hchan struct {
+    <span class="text-green-400">qcount</span>   uint    <span class="text-gray-500">// 当前队列元素个数</span>
+    <span class="text-green-400">dataqsiz</span> uint    <span class="text-gray-500">// 环形队列总长度</span>
+    <span class="text-green-400">buf</span>      Pointer <span class="text-gray-500">// 环形队列指针</span>
+    <span class="text-green-400">elemsize</span> uint16  <span class="text-gray-500">// 每个元素大小</span>
+    <span class="text-yellow-400">closed</span>   uint32  <span class="text-gray-500">// 关闭标志</span>
+    <span class="text-green-400">elemtype</span> *_type  <span class="text-gray-500">// 元素类型</span>
+    <span class="text-blue-400">sendx</span>    uint    <span class="text-gray-500">// 写入位置下标</span>
+    <span class="text-blue-400">recvx</span>    uint    <span class="text-gray-500">// 读取位置下标</span>
+    <span class="text-red-400">recvq</span>    waitq   <span class="text-gray-500">// 等待读的 G 队列</span>
+    <span class="text-red-400">sendq</span>    waitq   <span class="text-gray-500">// 等待写的 G 队列</span>
+    <span class="text-purple-400">lock</span>     mutex   <span class="text-gray-500">// 互斥锁</span>
+}</pre>
+                    </div>
+                    <!-- 右侧：可视化 -->
+                    <div>
+                        <h3 class="font-semibold text-gray-700 mb-3">环形队列缓冲区</h3>
+                        <div class="mb-4">
+                            <label class="text-sm text-gray-600">调整队列大小：</label>
+                            <input type="range" id="bufSize" min="0" max="8" value="4" class="w-full mt-1">
+                            <div class="text-xs text-gray-500">当前大小: <span id="bufSizeValue">4</span> (0 = 无缓冲)</div>
+                        </div>
+                        <!-- 队列可视化 -->
+                        <div id="queueVisual" class="flex gap-2 mb-4 flex-wrap"></div>
+                        <!-- 指针位置 -->
+                        <div class="flex gap-6 text-sm">
+                            <div class="flex items-center gap-2">
+                                <span class="w-4 h-4 bg-blue-500 rounded"></span>
+                                <span>sendx: <span id="sendxVal">0</span></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="w-4 h-4 bg-orange-500 rounded"></span>
+                                <span>recvx: <span id="recvxVal">0</span></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span>qcount: <span id="qcountVal">0</span></span>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex gap-2">
+                            <button onclick="enqueue()" class="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600">写入数据</button>
+                            <button onclick="dequeue()" class="px-3 py-1 bg-orange-500 text-white rounded text-sm hover:bg-orange-600">读出数据</button>
+                            <button onclick="resetQueue()" class="px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600">重置</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                    <h3 class="font-semibold text-blue-800 mb-2">💡 核心三部分</h3>
+                    <ul class="list-disc list-inside text-blue-700 space-y-1 text-sm">
+                        <li><strong>环形队列缓冲区</strong>：有缓冲 channel 存数据的地方，无缓冲 channel 没有这部分</li>
+                        <li><strong>等待队列</strong>：recvq（读阻塞的 G）和 sendq（写阻塞的 G）</li>
+                        <li><strong>互斥锁</strong>：同一时间只允许一个 goroutine 读写 channel</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- 标签 2：写数据流程 -->
+        <!-- ============================================ -->
+        <div id="write" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">向 channel 写数据流程</h2>
+
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- 左侧：流程图 -->
+                    <div class="space-y-3">
+                        <div id="writeStep1" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">1</span>
+                                <span class="font-medium">recvq 不为空？（有 G 在等读）</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">是 → 直接把数据写给等待的 G，唤醒它，结束</p>
+                        </div>
+                        <div id="writeStep2" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">2</span>
+                                <span class="font-medium">缓冲区有空位？</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">是 → 数据写入 buf，qcount++，sendx++，结束</p>
+                        </div>
+                        <div id="writeStep3" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">3</span>
+                                <span class="font-medium">都不满足？</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">当前 G 加入 sendq，阻塞等待被读 G 唤醒</p>
+                        </div>
+                    </div>
+
+                    <!-- 右侧：动画演示 -->
+                    <div>
+                        <h3 class="font-semibold text-gray-700 mb-3">演示：写数据时</h3>
+                        <div class="border-2 border-gray-200 rounded-lg p-4">
+                            <div class="mb-4">
+                                <div class="text-sm font-medium mb-2">等待读队列 (recvq)</div>
+                                <div id="writeRecvq" class="flex gap-2 flex-wrap min-h-[40px]">
+                                    <div class="goroutine-card blocked p-2 border-2 rounded text-sm">
+                                        <div>G1（等读）</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <div class="text-sm font-medium mb-2">缓冲区 (buf)</div>
+                                <div id="writeBuf" class="flex gap-2"></div>
+                            </div>
+                            <div class="mb-4">
+                                <div class="text-sm font-medium mb-2">等待写队列 (sendq)</div>
+                                <div id="writeSendq" class="flex gap-2 flex-wrap min-h-[40px]"></div>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex gap-2">
+                            <button onclick="startWriteDemo()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">开始演示</button>
+                            <button onclick="resetWriteDemo()" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">重置</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 p-4 bg-green-50 rounded-lg">
+                    <h3 class="font-semibold text-green-800 mb-2">📝 关键结论</h3>
+                    <ul class="list-disc list-inside text-green-700 space-y-1 text-sm">
+                        <li>无缓冲 channel（size=0）直接走步骤 1 或 3，跳过缓冲区</li>
+                        <li>写阻塞的 goroutine 会被<strong>读的 goroutine</strong> 唤醒</li>
+                        <li>向已关闭的 channel 写数据 → 直接 panic</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- 标签 3：读数据流程 -->
+        <!-- ============================================ -->
+        <div id="read" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">从 channel 读数据流程</h2>
+
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- 左侧：流程图 -->
+                    <div class="space-y-3">
+                        <div id="readStep1" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-sm font-bold">1</span>
+                                <span class="font-medium">sendq 不为空 且 无缓冲区？</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">是 → 直接从等待写的 G 里读数据，唤醒它，结束</p>
+                        </div>
+                        <div id="readStep2" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-sm font-bold">2</span>
+                                <span class="font-medium">sendq 不为空 且 缓冲区满了？</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">是 → 从 buf 队首读，再从 sendq 取一个 G 的数据写到 buf 队尾，唤醒它，结束</p>
+                        </div>
+                        <div id="readStep3" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-sm font-bold">3</span>
+                                <span class="font-medium">缓冲区有数据？</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">是 → 直接从 buf 读，qcount--，recvx++，结束</p>
+                        </div>
+                        <div id="readStep4" class="flow-step p-3 border-2 border-gray-200 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-sm font-bold">4</span>
+                                <span class="font-medium">都不满足？</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mt-1 ml-8">当前 G 加入 recvq，阻塞等待被写 G 唤醒</p>
+                        </div>
+                    </div>
+
+                    <!-- 右侧：说明 -->
+                    <div>
+                        <h3 class="font-semibold text-gray-700 mb-3">💡 最容易忽略的细节</h3>
+                        <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                            <p class="text-yellow-800 font-medium mb-2">步骤 2 是很多资料没讲清楚的</p>
+                            <p class="text-yellow-700 text-sm">当缓冲区满了，同时还有 G 在等写的时候，读操作会做两件事：</p>
+                            <ol class="list-decimal list-inside text-yellow-700 text-sm mt-2 space-y-1">
+                                <li>从 buf 队首读出一个元素</li>
+                                <li>从 sendq 取出一个等待写的 G，把 G 要写的数据放到 buf 队尾</li>
+                                <li>唤醒那个等待写的 G</li>
+                            </ol>
+                            <p class="text-yellow-700 text-sm mt-2">这样缓冲区永远保持满的状态，避免数据丢失。</p>
+                        </div>
+
+                        <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                            <p class="font-medium text-gray-700 mb-2">面试高频追问</p>
+                            <p class="text-sm text-gray-600">Q: 读已关闭的 channel 会怎样？</p>
+                            <p class="text-sm text-gray-600">A: 如果缓冲区还有数据 → 正常读；读完之后 → 返回类型零值，不会阻塞，不会 panic。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- 标签 4：常见坑 -->
+        <!-- ============================================ -->
+        <div id="pitfalls" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">常见坑 & 最佳实践</h2>
+
+                <div class="space-y-4">
+                    <!-- 坑 1 -->
+                    <div class="border-2 border-red-200 rounded-lg p-4 bg-red-50">
+                        <h3 class="font-bold text-red-800 mb-2">❌ 坑 1：goroutine 泄漏（最常见）</h3>
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div class="bg-gray-900 text-gray-100 rounded p-3 code-block text-xs">
+<pre><span class="text-red-400">// 错误写法</span>
+func leak() {
+    ch := make(chan int)  // 无缓冲
+    go func() {
+        ch <- result  // 没人读就永久阻塞
+    }()
+
+    select {
+    case v := <-ch:
+        return v
+    case <-time.After(time.Second):
+        return nil  // 超时返回，子 G 卡死
+    }
+}</pre>
+                            </div>
+                            <div class="bg-gray-900 text-gray-100 rounded p-3 code-block text-xs">
+<pre><span class="text-green-400">// 正确写法</span>
+func noLeak() {
+    ch := make(chan int, 1)  // 缓冲 1
+    go func() {
+        ch <- result  // 有空位，写完就退出
+    }()
+
+    select {
+    case v := <-ch:
+        return v
+    case <-time.After(time.Second):
+        return nil
+    }
+}</pre>
+                            </div>
+                        </div>
+                        <p class="text-red-700 text-sm mt-2"><strong>原则</strong>：启动 goroutine 写 channel 前，一定要想：如果读端退出了，写端会不会堵死？</p>
+                    </div>
+
+                    <!-- 坑 2 -->
+                    <div class="border-2 border-red-200 rounded-lg p-4 bg-red-50">
+                        <h3 class="font-bold text-red-800 mb-2">❌ 坑 2：close 时机不对</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="bg-red-100">
+                                        <th class="p-2 text-left">操作</th>
+                                        <th class="p-2 text-left">结果</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-red-100">
+                                    <tr><td class="p-2">关闭 nil channel</td><td class="p-2 text-red-600 font-medium">panic</td></tr>
+                                    <tr><td class="p-2">重复关闭同一个 channel</td><td class="p-2 text-red-600 font-medium">panic</td></tr>
+                                    <tr><td class="p-2">向已关闭的 channel 写数据</td><td class="p-2 text-red-600 font-medium">panic</td></tr>
+                                    <tr><td class="p-2">从已关闭的 channel 读数据</td><td class="p-2 text-green-600">正常，返回零值 + false</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-red-700 text-sm mt-2"><strong>原则</strong>：永远是生产者负责 close channel，消费者只负责感知关闭。不要在消费者那边 close。</p>
+                    </div>
+
+                    <!-- 坑 3 -->
+                    <div class="border-2 border-red-200 rounded-lg p-4 bg-red-50">
+                        <h3 class="font-bold text-red-800 mb-2">❌ 坑 3：time.After 内存泄漏</h3>
+                        <div class="bg-gray-900 text-gray-100 rounded p-3 code-block text-xs">
+<pre>for {
+    select {
+    case msg := <-msgCh:
+        // 处理消息
+    case <-time.After(time.Minute):  // ❌ 每次循环都会创建新定时器！
+        // 超时
+    }
+}
+
+// 定时器不会在 select 退出时立刻停止，直到 1 分钟后才释放
+// 高并发场景下会积累大量未过期的定时器，内存暴涨</pre>
+                        </div>
+                        <p class="text-red-700 text-sm mt-2"><strong>解决</strong>：循环外创建定时器，或者用 context.WithTimeout</p>
+                    </div>
+
+                    <!-- 坑 4 -->
+                    <div class="border-2 border-red-200 rounded-lg p-4 bg-red-50">
+                        <h3 class="font-bold text-red-800 mb-2">❌ 坑 4：range 时忘记 close</h3>
+                        <div class="bg-gray-900 text-gray-100 rounded p-3 code-block text-xs">
+<pre>go func() {
+    for v := range ch {  // 如果 ch 没 close，这里会永远等下去
+        fmt.Println(v)
+    }
+}()
+
+// 写端退出了但没 close(ch) → 读端 goroutine 永久阻塞</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- 标签 5：面试题 -->
+        <!-- ============================================ -->
+        <div id="interview" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">面试高频题（点击看答案）</h2>
+
+                <div class="space-y-3">
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q1: channel 底层结构是什么？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <p>channel 底层是 <code>hchan</code> 结构体，包含三部分：</p>
+                                <ol class="list-decimal list-inside mt-2 space-y-1">
+                                    <li><strong>环形队列缓冲区</strong>：qcount（当前元素数）、dataqsiz（总容量）、buf（数据指针）、sendx（写位置）、recvx（读位置）</li>
+                                    <li><strong>等待队列</strong>：recvq（读阻塞的 G）、sendq（写阻塞的 G）</li>
+                                    <li><strong>其他</strong>：互斥锁 lock、元素类型 elemtype、关闭标志 closed</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q2: 有缓冲和无缓冲 channel 区别？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <ul class="space-y-2">
+                                    <li><strong>同步 vs 异步</strong>：无缓冲是同步通信，写必须等有人读才能返回；有缓冲是异步，缓冲区有空位就能写成功</li>
+                                    <li><strong>数据流向</strong>：无缓冲是 G 直接到 G 拷贝；有缓冲先走 buf，满了才阻塞</li>
+                                    <li><strong>创建方式</strong>：<code>make(chan int)</code> vs <code>make(chan int, 10)</code></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q3: 向 channel 写数据的完整流程？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <ol class="list-decimal list-inside space-y-1">
+                                    <li>先加锁</li>
+                                    <li>如果 recvq 不为空（有 G 在等读）→ 直接把数据写给第一个等待的 G，唤醒它，解锁，结束</li>
+                                    <li>如果缓冲区有空位 → 数据写入 buf，qcount++，sendx++，解锁，结束</li>
+                                    <li>以上都不满足 → 当前 G 加入 sendq，释放锁，阻塞等待</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q4: 关闭 channel 会发生什么？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <ul class="space-y-1">
+                                    <li>把 recvq 中所有读阻塞的 G 全部唤醒，每个 G 读出类型零值</li>
+                                    <li>把 sendq 中所有写阻塞的 G 全部唤醒 → 这些 G 继续执行写操作时会发现 channel 已关闭，直接 panic</li>
+                                    <li>注意：close 不会主动清空缓冲区，里面的数据还能正常读</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q5: 哪些操作会导致 panic？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <ol class="list-decimal list-inside space-y-1">
+                                    <li>关闭值为 nil 的 channel</li>
+                                    <li>重复关闭同一个 channel</li>
+                                    <li>向已经关闭的 channel 写数据</li>
+                                </ol>
+                                <p class="mt-2 text-green-600">✅ 读已关闭的 channel 不会 panic，会返回零值 + false</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q6: select 多个 case 的执行顺序？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <p><strong>随机</strong>！Go 会把所有 ready 的 case 打乱顺序，然后随机选一个执行。</p>
+                                <p class="mt-2">面试常考场景：两个 channel 同时有数据，select 不会按代码顺序选，是随机的。</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q7: 怎么防止 goroutine 泄漏？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <p>最常见的泄漏原因：goroutine 阻塞在 channel 读写上，永远等不到。</p>
+                                <ol class="list-decimal list-inside mt-2 space-y-1">
+                                    <li><strong>加缓冲区</strong>：比如缓冲 1，保证写操作不管有没有人读都能完成</li>
+                                    <li><strong>双向监听取消信号</strong>：写端 goroutine 也要监听 context 或者 done channel，超时了自己退出</li>
+                                    <li><strong>生产者负责 close</strong>：用 range 读的话，生产完一定要 close，否则 range 永远不退出</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q8: 谁负责 close channel？为什么？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <p><strong>永远是生产者（写端）负责 close</strong>。</p>
+                                <p class="mt-2">原因：如果消费者 close 了，生产者后续写数据就会直接 panic。而生产者自己知道什么时候写完，写完 close 通知消费者退出。</p>
+                                <p class="mt-2 text-red-600">反模式：不要让多个生产者去 close，会重复 close 导致 panic。这种情况用 sync.Once 或者 refcount。</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="interview-card border-2 border-gray-200 rounded-lg" onclick="toggleAnswer(this)">
+                        <div class="p-4 flex justify-between items-center">
+                            <h3 class="font-medium text-gray-800">Q9: channel 是并发安全的吗？为什么？</h3>
+                            <span class="text-gray-400">▼</span>
+                        </div>
+                        <div class="interview-answer px-4 pb-4">
+                            <div class="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                                <p><strong>是并发安全的</strong>。因为 hchan 里面有互斥锁 <code>lock</code>，任何读写操作之前都会先加锁，同一时间只允许一个 goroutine 操作。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部 -->
+        <footer class="text-center text-gray-500 text-sm mt-8">
+            <p>来源：《Go 专家编程》+ 源码分析 + 面试高频考点整理</p>
+        </footer>
+    </div>
+
+    <script>
+        // ==================== 标签切换 ====================
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.remove('hidden');
+            });
+        });
+
+        // ==================== 环形队列可视化 ====================
+        let bufSize = 4;
+        let queueData = [];
+        let sendx = 0;
+        let recvx = 0;
+
+        function renderQueue() {
+            const visual = document.getElementById('queueVisual');
+            visual.innerHTML = '';
+
+            for (let i = 0; i < bufSize; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'queue-cell w-12 h-12 border-2 border-gray-300 rounded flex items-center justify-center font-mono text-sm';
+                if (i < queueData.length) {
+                    cell.classList.add('filled');
+                    cell.textContent = queueData[i];
+                }
+                if (i === sendx) {
+                    cell.classList.add('pointer');
+                    cell.title = 'sendx（下一个写位置）';
+                }
+                if (i === recvx && i < queueData.length) {
+                    cell.style.borderColor = '#f97316';
+                    cell.title = 'recvx（下一个读位置）';
+                }
+                visual.appendChild(cell);
+            }
+
+            document.getElementById('sendxVal').textContent = sendx;
+            document.getElementById('recvxVal').textContent = recvx;
+            document.getElementById('qcountVal').textContent = queueData.length;
+        }
+
+        document.getElementById('bufSize').addEventListener('input', (e) => {
+            bufSize = parseInt(e.target.value);
+            document.getElementById('bufSizeValue').textContent = bufSize;
+            resetQueue();
+        });
+
+        function enqueue() {
+            if (bufSize === 0) {
+                alert('无缓冲 channel，必须有人读才能写成功！');
+                return;
+            }
+            if (queueData.length >= bufSize) {
+                alert('缓冲区满了！再写就会阻塞，加入 sendq');
+                return;
+            }
+            queueData.push(Math.floor(Math.random() * 100));
+            sendx = (sendx + 1) % bufSize;
+            renderQueue();
+        }
+
+        function dequeue() {
+            if (queueData.length === 0) {
+                alert('缓冲区空了！再读就会阻塞，加入 recvq');
+                return;
+            }
+            queueData.shift();
+            recvx = (recvx + 1) % bufSize;
+            if (sendx > 0) sendx--;
+            renderQueue();
+        }
+
+        function resetQueue() {
+            queueData = [];
+            sendx = 0;
+            recvx = 0;
+            renderQueue();
+        }
+
+        renderQueue();
+
+        // ==================== 写流程演示 ====================
+        let writeDemoRunning = false;
+
+        function renderWriteDemo() {
+            const recvq = document.getElementById('writeRecvq');
+            const buf = document.getElementById('writeBuf');
+            const sendq = document.getElementById('writeSendq');
+
+            recvq.innerHTML = '<div class="goroutine-card blocked p-2 border-2 rounded text-sm"><div>G1（等读）</div></div>';
+
+            buf.innerHTML = '';
+            for (let i = 0; i < 4; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'w-10 h-10 border-2 border-gray-300 rounded flex items-center justify-center text-sm';
+                buf.appendChild(cell);
+            }
+
+            sendq.innerHTML = '';
+        }
+
+        async function startWriteDemo() {
+            if (writeDemoRunning) return;
+            writeDemoRunning = true;
+
+            document.querySelectorAll('.flow-step').forEach(s => s.classList.remove('active'));
+
+            // 步骤 1
+            document.getElementById('writeStep1').classList.add('active');
+            await sleep(1000);
+
+            // 模拟：recvq 有 G，直接写给他
+            const blockedG = document.querySelector('#writeRecvq .goroutine-card');
+            blockedG.classList.remove('blocked');
+            blockedG.classList.add('running');
+            blockedG.innerHTML = '<div>G1（已读到数据，唤醒！）</div>';
+
+            await sleep(1000);
+
+            // 移除 recvq 里的 G
+            blockedG.remove();
+
+            writeDemoRunning = false;
+        }
+
+        function resetWriteDemo() {
+            renderWriteDemo();
+            document.querySelectorAll('.flow-step').forEach(s => s.classList.remove('active'));
+        }
+
+        renderWriteDemo();
+
+        // ==================== 面试题折叠 ====================
+        function toggleAnswer(card) {
+            const answer = card.querySelector('.interview-answer');
+            answer.classList.toggle('show');
+            const arrow = card.querySelector('span:last-child');
+            arrow.textContent = answer.classList.contains('show') ? '▲' : '▼';
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    </script>
+</body>
+</html>
