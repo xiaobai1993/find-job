@@ -259,6 +259,119 @@ func demo10SliceGrow() {
 }
 
 // ============================================
+// 演示 11：Go 1.22+ range 遍历整数
+// ============================================
+func demo11RangeInt() {
+	fmt.Println("\n=== 演示 11：Go 1.22+ range 遍历整数 ===")
+
+	fmt.Print("for i := range 5: ")
+	for i := range 5 {
+		fmt.Print(i, " ")
+	}
+	fmt.Println()
+
+	fmt.Print("不需要循环变量，执行 3 次: ")
+	count := 0
+	for range 3 {
+		count++
+		fmt.Print("do ")
+	}
+	fmt.Println("✅ 执行了", count, "次")
+}
+
+// ============================================
+// 演示 12：Go 1.22+ 循环变量作用域修复
+// ============================================
+func demo12LoopVarFix() {
+	fmt.Println("\n=== 演示 12：Go 1.22+ 循环变量作用域修复 ===")
+
+	nums := []int{1, 2, 3}
+	var prints []func()
+
+	// Go 1.22+：每次迭代有自己的变量
+	for _, v := range nums {
+		prints = append(prints, func() { fmt.Print(v, " ") })
+	}
+
+	fmt.Print("闭包捕获循环变量，Go 1.22+ 输出 1 2 3: ")
+	for _, p := range prints {
+		p()
+	}
+	fmt.Println("✅ 正确！每个闭包捕获的是自己迭代的变量")
+
+	// goroutine 场景同样修复了
+	fmt.Print("goroutine 直接用循环变量，Go 1.22+ 没问题: ")
+	done := make(chan struct{}, 3)
+	for _, v := range nums {
+		go func() {
+			fmt.Print(v, " ")
+			done <- struct{}{}
+		}()
+	}
+	time.Sleep(100 * time.Millisecond)
+	fmt.Println("✅ goroutine 捕获正确！")
+}
+
+// ============================================
+// 演示 13：Go 1.23+ Range Over Func 函数迭代器
+// ============================================
+func demo13RangeOverFunc() {
+	fmt.Println("\n=== 演示 13：Go 1.23+ Range Over Func 函数迭代器 ===")
+
+	// 1. 简单的计数迭代器
+	count := func(n int) func(yield func(int) bool) {
+		return func(yield func(int) bool) {
+			for i := 0; i < n; i++ {
+				if !yield(i) {
+					return
+				}
+			}
+		}
+	}
+
+	fmt.Print("遍历 count(5) 迭代器: ")
+	for i := range count(5) {
+		fmt.Print(i, " ")
+	}
+	fmt.Println()
+
+	// 2. 斐波那契迭代器
+	fibo := func(yield func(int) bool) {
+		f0, f1 := 0, 1
+		for yield(f0) {
+			f0, f1 = f1, f0+f1
+		}
+	}
+
+	fmt.Print("斐波那契 < 100: ")
+	for x := range fibo {
+		if x >= 100 {
+			break // break 会让 yield 返回 false
+		}
+		fmt.Print(x, " ")
+	}
+	fmt.Println()
+
+	// 3. 反向遍历 slice
+	reverse := func[T any](s []T) func(yield func(int, T) bool) {
+		return func(yield func(int, T) bool) {
+			for i := len(s) - 1; i >= 0; i-- {
+				if !yield(i, s[i]) {
+					return
+				}
+			}
+		}
+	}
+
+	words := []string{"a", "b", "c", "d"}
+	fmt.Print("反向遍历 slice: ")
+	for i, v := range reverse(words) {
+		fmt.Printf("[%d]=%s ", i, v)
+	}
+	fmt.Println()
+}
+
+// ============================================
 // main
 // ============================================
 func main() {
@@ -272,15 +385,23 @@ func main() {
 	demo8BigStruct()
 	demo9ArrayCopy()
 	demo10SliceGrow()
+	demo11RangeInt()       // Go 1.22+
+	demo12LoopVarFix()     // Go 1.22+
+	demo13RangeOverFunc()  // Go 1.23+
 
-	fmt.Println("\n" + strings.Repeat("=", 50))
+	fmt.Println("\n" + strings.Repeat("=", 60))
 	fmt.Println("✅ 所有 range 演示完成！")
-	fmt.Println("核心总结：")
+	fmt.Println("=== 经典规则（所有版本适用） ===")
 	fmt.Println("1. range 返回的是值拷贝，修改不生效")
-	fmt.Println("2. 不要取遍历变量的地址，永远是同一个")
-	fmt.Println("3. goroutine 里不要直接用 range 变量，要作为参数传进去")
-	fmt.Println("4. map 遍历顺序随机，不要依赖")
-	fmt.Println("5. for range channel 必须关闭，不然死锁")
-	fmt.Println("6. 大结构体用下标访问，大数组转 slice 再遍历")
-	fmt.Println("7. 遍历过程中 slice 扩容不影响遍历次数")
+	fmt.Println("2. map 遍历顺序随机，不要依赖")
+	fmt.Println("3. for range channel 必须关闭，不然死锁")
+	fmt.Println("4. 大结构体用下标访问，大数组转 slice 再遍历")
+	fmt.Println("5. 遍历过程中 slice 扩容不影响遍历次数")
+	fmt.Println("\n=== Go 1.22+ 变化 ===")
+	fmt.Println("6. ✅ 循环变量 bug 已修复，每次迭代有自己的变量")
+	fmt.Println("7. ✅ goroutine 里可直接用循环变量，不需要传参")
+	fmt.Println("8. ✅ range 支持遍历整数：for i := range 10")
+	fmt.Println("\n=== Go 1.23+ 新增 ===")
+	fmt.Println("9. ✅ Range Over Func：支持自定义函数迭代器")
+	fmt.Println("10. ✅ 彻底改变了 Go 的自定义集合设计模式")
 }

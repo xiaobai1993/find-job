@@ -4,13 +4,19 @@
 
 ## 一、先搞懂：range 到底是什么？
 
-range 是 Go 语言专门为「可迭代类型」设计的语法糖，可以方便地遍历数组、slice、string、map、channel。
+range 是 Go 语言专门为「可迭代类型」设计的语法糖。
+
+**Go 1.22 之前**：可以遍历数组、slice、string、map、channel
+
+**Go 1.22 新增**：支持遍历整数（`for i := range 10`）+ 循环变量作用域修复
+
+**Go 1.23 新增**：支持遍历函数迭代器（range over func）
 
 看起来简单，但是坑非常多，90% 的 Go 开发者都踩过至少一个。
 
 ---
 
-## 二、range 核心规则（7 条）
+## 二、range 核心规则（10 条，含新版本特性）
 
 ### 规则 1：range 返回的是**值拷贝**，不是引用（最大的坑！）
 
@@ -190,6 +196,131 @@ for range ch {}  // ❌ 这个会永久阻塞！不是 panic
 
 ### 规则 7：可以用 `_` 忽略不需要的值
 
+---
+
+### 规则 8：Go 1.22+ —— 每次迭代有自己的循环变量！（史诗级修复）
+
+**这是 Go 1.22 最重要的变化，修复了 10 多年的老坑！**
+
+**Go 1.21 及之前的行为（有坑）：**
+```go
+var prints []func()
+for i := 0; i < 3; i++ {
+    prints = append(prints, func() { println(i) })
+}
+for _, p := range prints {
+    p()  // 输出：3 3 3！（所有闭包共享同一个 i）
+}
+```
+
+**Go 1.22+ 的行为（修复了）：**
+```go
+var prints []func()
+for i := 0; i < 3; i++ {
+    prints = append(prints, func() { println(i) })
+}
+for _, p := range prints {
+    p()  // 输出：0 1 2！（每次迭代有自己的 i）
+}
+```
+
+**面试高频追问：为什么改了？**
+- 这个 bug 存在了 10 多年，90% 的 Go 开发者都踩过
+- Go 团队通过 poll 发现绝大多数开发者都认为新的行为才是"正确的"
+- 旧行为导致了无数生产环境 bug，特别是 goroutine + 闭包的场景
+
+---
+
+### 规则 9：Go 1.22+ —— range 可以遍历整数
+
+```go
+// Go 1.22+ 支持，等价于 for i := 0; i < 10; i++
+for i := range 10 {
+    fmt.Println(i)  // 输出 0, 1, 2, ..., 9
+}
+```
+
+**注意事项：**
+- 整数必须 >= 0，如果 n <= 0，循环不执行
+- 支持所有整数类型：int, int8, int16, int32, int64, uint 等
+- 特别适合需要执行 N 次的场景：`for range 5 { doSomething() }`
+
+---
+
+### 规则 10：Go 1.23+ —— range 可以遍历函数迭代器（Range Over Func）
+
+这是 Go 自 1.0 以来最大的语法变化之一，支持自定义迭代器。
+
+**基础用法：**
+```go
+// 定义一个迭代器函数，接受一个 yield 函数
+func count(n int) func(yield func(int) bool) {
+    return func(yield func(int) bool) {
+        for i := 0; i < n; i++ {
+            if !yield(i) {  // yield 返回 false 表示调用者要终止
+                return
+            }
+        }
+    }
+}
+
+// 使用 range 遍历迭代器
+for i := range count(5) {
+    fmt.Println(i)  // 输出 0, 1, 2, 3, 4
+}
+```
+
+**支持双返回值：**
+```go
+// 树的中序遍历迭代器
+type Tree[K cmp.Ordered, V any] struct {
+    left, right *Tree[K, V]
+    key         K
+    value       V
+}
+
+func (t *Tree[K, V]) Walk(yield func(key K, val V) bool) {
+    if t == nil {
+        return
+    }
+    t.left.Walk(yield)
+    if !yield(t.key, t.value) {
+        return
+    }
+    t.right.Walk(yield)
+}
+
+// 遍历树
+for k, v := range t.Walk {
+    fmt.Printf("%s = %d\n", k, v)
+}
+```
+
+**斐波那契迭代器示例：**
+```go
+func fibo(yield func(int) bool) {
+    f0, f1 := 0, 1
+    for yield(f0) {
+        f0, f1 = f1, f0+f1
+    }
+}
+
+// 打印小于 1000 的斐波那契数
+for x := range fibo {
+    if x >= 1000 {
+        break  // break 会导致 yield 返回 false
+    }
+    fmt.Printf("%d ", x)
+}
+// 输出：0 1 1 2 3 5 8 13 21 34 55 89 144 233 377 610 987
+```
+
+**底层原理：**
+- 编译器把 `for v := range f` 翻译成：调用 f，传入一个编译器生成的 yield 函数
+- yield 函数被调用时，执行一次循环体
+- break 会让 yield 返回 false，迭代器收到 false 应该立即终止
+- 迭代器返回后，循环结束
+
 ```go
 // 只需要值，不需要下标
 for _, v := range nums { ... }
@@ -206,7 +337,7 @@ for range nums {
 
 ---
 
-## 三、90% 的人都踩过的 6 个坑
+## 三、90% 的人都踩过的 7 个坑（含版本兼容注意事项）
 
 ### 坑 1：修改遍历变量的值，原数组不变
 
@@ -214,9 +345,62 @@ for range nums {
 
 ---
 
-### 坑 2：取遍历变量的地址，都是同一个地址
+### 坑 2：取遍历变量的地址，都是同一个地址（Go 1.22+ 已修复！）
 
-前面也讲过了，这是最经典的坑，特别是在 goroutine 里。
+**⚠️ 重要版本兼容性提醒：**
+
+| Go 版本 | for 循环变量 | range 循环变量 |
+|---------|-------------|---------------|
+| 1.21 及以前 | 全循环共享同一个变量 | 全循环共享同一个变量 |
+| 1.22+ | **每次迭代有自己的变量** | **每次迭代有自己的变量** |
+
+**Go 1.21 及以前（有坑）：**
+```go
+nums := []int{1, 2, 3}
+var addrs []*int
+
+for _, v := range nums {
+    addrs = append(addrs, &v)  // 都是同一个地址！
+}
+
+// 输出：3 3 3
+for _, p := range addrs {
+    fmt.Print(*p, " ")
+}
+```
+
+**Go 1.22+（已修复）：**
+```go
+nums := []int{1, 2, 3}
+var addrs []*int
+
+for _, v := range nums {
+    addrs = append(addrs, &v)  // 每次迭代的 v 是新变量！
+}
+
+// 输出：1 2 3 ✅
+for _, p := range addrs {
+    fmt.Print(*p, " ")
+}
+```
+
+**goroutine 场景同样修复了：**
+```go
+// Go 1.22+ 这样写没问题！每次 goroutine 捕获的是不同的 v
+for _, v := range nums {
+    go func() {
+        fmt.Println(v)  // 正确输出 1, 2, 3（顺序不一定）
+    }()
+}
+```
+
+**面试高频追问：Go 1.22 是怎么修复的？**
+- 每次循环迭代开始时，隐式声明一个新的循环变量
+- 把上一次迭代的变量值拷贝给新变量
+- 所以每次迭代的变量地址都不一样
+- 闭包捕获的就是各自迭代的变量了
+
+**⚠️ 兼容警告：** 如果你的代码依赖旧行为（比如故意用同一个变量的地址），升级到 Go 1.22 会出问题！不过这种情况极其罕见。
 
 ---
 
@@ -379,13 +563,18 @@ for {
 
 ---
 
-## 五、面试高频问答
+## 五、面试高频问答（含新版本问题）
 
 | 问题 | 答案 |
 |------|------|
 | range 遍历的时候修改元素值会生效吗？ | 不会，range 返回的是值拷贝，修改的是拷贝。要修改原数组需要用下标访问。 |
-| for range 里取遍历变量的地址，为什么都是同一个？ | 因为整个循环过程中遍历变量是同一个，只是每次把元素的值拷贝进去，所以地址永远一样。 |
-| goroutine 里用 range 变量有什么坑？ | 闭包捕获的是同一个遍历变量的引用，goroutine 执行的时候变量的值可能已经变了。解决方法是把变量作为参数传进去。 |
+| for range 里取遍历变量的地址，为什么都是同一个？ | **Go 1.21 及以前：** 是的，整个循环共享一个变量。**Go 1.22+：** 不是了，每次迭代有自己的变量，地址都不一样。 |
+| goroutine 里用 range 变量有什么坑？ | **Go 1.21 及以前：** 闭包捕获的是同一个遍历变量的引用，goroutine 执行的时候值可能已经变了。解决方法是把变量作为参数传进去。**Go 1.22+：** 这个坑已经被彻底修复了！ |
+| Go 1.22 对循环变量做了什么改动？ | 每次迭代有自己的循环变量，而不是整个循环共享一个。彻底修复了闭包 + goroutine 的经典 bug。 |
+| Go 1.22 循环变量改动的原理是什么？ | 每次迭代开始时隐式声明新变量，把上一次迭代的值拷贝进去，所以地址都不一样。 |
+| Go 1.22+ range 可以遍历整数吗？ | 可以！`for i := range 10` 等价于 `for i := 0; i < 10; i++`，i 从 0 到 9。 |
+| Go 1.23+ Range Over Func 是什么？ | range 支持遍历函数迭代器，迭代器函数接受一个 yield 函数，调用 yield 就产生一个迭代值。彻底改变了 Go 的自定义集合设计模式。 |
+| Range Over Func 的 yield 返回 false 表示什么？ | 表示调用者要终止迭代（比如 break 了），迭代器应该立即返回。 |
 | map 遍历顺序是稳定的吗？ | 不是，Go 故意设计成随机的，就是为了让大家不要依赖遍历顺序。 |
 | 为什么 map 遍历要设计成随机的？ | 避免开发者依赖不稳定的顺序，map 扩容的时候元素会重新哈希，顺序本来就不确定。 |
 | for range channel 什么时候结束？ | channel 关闭的时候自动结束。如果 channel 永远不关闭，会一直阻塞。 |
@@ -396,6 +585,16 @@ for {
 
 ---
 
-## 六、一句话总结
+## 六、版本演进时间线
 
-> range 是语法糖，返回值拷贝；不要取遍历变量地址，不要在 goroutine 里直接用；大结构体用下标访问，大数组转 slice 再遍历；map 顺序随机，channel 遍历必须关闭。
+| Go 版本 | 变化内容 |
+|---------|---------|
+| 1.0 | range 支持 array, slice, string, map, channel |
+| 1.22 | 🎯 **修复 10 年 bug**：每次迭代有自己的循环变量<br>🎯 **新增**：range 支持遍历整数 |
+| 1.23 | 🎯 **重大特性**：Range Over Func，支持自定义迭代器 |
+
+---
+
+## 七、一句话总结
+
+> **经典规则**：range 是语法糖，返回值拷贝；大结构体用下标访问，大数组转 slice 再遍历；map 顺序随机，channel 遍历必须关闭。<br><br>**新版本（1.22+）**：循环变量 bug 已修复，goroutine 里可放心用；新增整数遍历、函数迭代器，写代码更优雅。
