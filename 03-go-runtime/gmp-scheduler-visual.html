@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GMP 调度模型 - 交互式可视化</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Noto Sans SC',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.top-bar{background:#1e293b;border-bottom:1px solid #334155;padding:12px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.top-bar h1{font-size:18px;color:#38bdf8;white-space:nowrap}
+.tab-group{display:flex;gap:4px;margin-left:24px;flex-wrap:wrap}
+.tab-btn{padding:6px 16px;border:1px solid #475569;border-radius:6px;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s;white-space:nowrap}
+.tab-btn:hover{border-color:#38bdf8;color:#38bdf8}
+.tab-btn.active{background:#38bdf8;color:#0f172a;border-color:#38bdf8;font-weight:600}
+.panel{display:none;padding:24px;max-width:1200px;margin:0 auto}
+.panel.active{display:block}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
+.card h2{font-size:18px;margin-bottom:16px;color:#f1f5f9}
+.card h3{font-size:15px;color:#38bdf8;margin-bottom:12px}
+.desc{color:#94a3b8;font-size:13px;line-height:1.8;margin-bottom:16px}
+.role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.role-card{border-radius:10px;padding:20px;cursor:pointer;transition:all .3s;border:2px solid transparent;position:relative;overflow:hidden}
+.role-card:hover{transform:translateY(-4px)}
+.role-card.g-card{background:linear-gradient(135deg,#064e3b,#065f46);border-color:#10b981}
+.role-card.m-card{background:linear-gradient(135deg,#4c1d95,#5b21b6);border-color:#a78bfa}
+.role-card.p-card{background:linear-gradient(135deg,#7c2d12,#9a3412);border-color:#fb923c}
+.role-letter{font-size:48px;font-weight:900;opacity:.15;position:absolute;right:12px;top:4px}
+.role-name{font-size:20px;font-weight:700;margin-bottom:6px}
+.role-full{font-size:12px;color:#cbd5e1;margin-bottom:10px}
+.role-desc{font-size:13px;line-height:1.7;color:#e2e8f0}
+.role-detail{max-height:0;overflow:hidden;transition:max-height .4s ease}
+.role-card.expanded .role-detail{max-height:500px}
+.role-detail-inner{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.15);font-size:12px;line-height:1.8;color:#cbd5e1}
+.status-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.status-badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.status-badge.idle{background:#334155;color:#94a3b8}
+.status-badge.runnable{background:#065f46;color:#6ee7b7}
+.status-badge.running{background:#7c2d12;color:#fdba74}
+.status-badge.syscall{background:#4c1d95;color:#c4b5fd}
+.status-badge.waiting{background:#92400e;color:#fcd34d}
+.status-badge.dead{background:#1e293b;color:#64748b;border:1px solid #475569}
+.gmp-canvas{width:100%;min-height:420px;position:relative;background:#0f172a;border-radius:8px;border:1px solid #334155;overflow:hidden;padding:16px}
+.global-queue{padding:12px;background:rgba(56,189,248,.05);border-radius:8px;border:1px solid rgba(56,189,248,.15);margin-bottom:12px}
+.global-queue-label{font-size:11px;color:#38bdf8;font-weight:600;margin-bottom:8px}
+.m-row{display:flex;align-items:center;gap:12px;margin:10px 0;padding:8px 12px;background:rgba(139,92,246,.05);border-radius:8px;border:1px solid rgba(139,92,246,.15)}
+.m-box,.p-box{width:64px;height:64px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+.m-box{background:linear-gradient(135deg,#7c3aed,#6d28d9);border:2px solid #a78bfa}
+.m-box small,.p-box small{font-size:9px;font-weight:400}
+.m-box small{color:#c4b5fd}
+.p-box{background:linear-gradient(135deg,#ea580c,#c2410c);border:2px solid #fb923c}
+.p-box small{color:#fed7aa}
+.g-queue{display:flex;gap:4px;flex-wrap:wrap;flex:1;min-height:40px;align-items:center}
+.g-item{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;transition:all .3s}
+.g-item.runnable{background:#065f46;color:#6ee7b7;border:1px solid #10b981}
+.g-item.running{background:#7c2d12;color:#fdba74;border:1px solid #f97316;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+.step-item{display:flex;gap:16px;margin-bottom:4px;align-items:stretch}
+.step-num{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;transition:all .3s}
+.step-item.active .step-num{transform:scale(1.15);box-shadow:0 0 16px rgba(56,189,248,.5)}
+.step-content{flex:1;padding:12px 16px;border-radius:8px;border:1px solid #334155;background:#1e293b;transition:all .3s;cursor:pointer}
+.step-item.active .step-content{border-color:#38bdf8;background:#1e3a5f}
+.step-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.step-sub{font-size:12px;color:#94a3b8;line-height:1.6}
+.step-highlight{color:#fbbf24;font-weight:600}
+.step-1 .step-num{background:#065f46;color:#6ee7b7;border:2px solid #10b981}
+.step-2 .step-num{background:#1e40af;color:#93c5fd;border:2px solid #3b82f6}
+.step-3 .step-num{background:#7c2d12;color:#fdba74;border:2px solid #f97316}
+.step-4 .step-num{background:#4c1d95;color:#c4b5fd;border:2px solid #8b5cf6}
+.step-5 .step-num{background:#1e40af;color:#93c5fd;border:2px solid #3b82f6;opacity:.6}
+.step-6 .step-num{background:#4c1d95;color:#c4b5fd;border:2px solid #8b5cf6;opacity:.6}
+.step-7 .step-num{background:#334155;color:#94a3b8;border:2px solid #64748b;opacity:.6}
+.btn-group{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
+.btn{padding:8px 20px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s}
+.btn-primary{background:#2563eb;color:white}
+.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:#059669;color:white}
+.btn-success:hover{background:#047857}
+.btn-warning{background:#d97706;color:white}
+.btn-warning:hover{background:#b45309}
+.steal-arena{position:relative;min-height:300px;background:#0f172a;border-radius:8px;border:1px solid #334155;padding:20px}
+.steal-p{position:absolute;width:200px;border-radius:10px;padding:12px;border:2px solid}
+.steal-p .steal-label{font-size:12px;font-weight:700;margin-bottom:8px}
+.steal-p .steal-gs{display:flex;gap:4px;flex-wrap:wrap;min-height:28px}
+.steal-p .sg{width:28px;height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;transition:all .5s;background:#065f46;color:#6ee7b7;border:1px solid #10b981}
+.steal-p.p0{top:20px;left:20px;border-color:#f97316;background:rgba(234,88,12,.08)}
+.steal-p.p0 .steal-label{color:#fb923c}
+.steal-p.p1{top:20px;right:20px;border-color:#3b82f6;background:rgba(59,130,246,.08)}
+.steal-p.p1 .steal-label{color:#60a5fa}
+.steal-arrow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:40px;color:#fbbf24;opacity:0;transition:opacity .3s}
+.steal-arrow.show{opacity:1;animation:arrowMove 1s ease-in-out}
+@keyframes arrowMove{0%{transform:translate(-50%,-50%) translateX(-30px);opacity:0}50%{opacity:1}100%{transform:translate(-50%,-50%) translateX(30px);opacity:0}}
+.steal-info{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid #475569;border-radius:8px;padding:10px 20px;font-size:13px;color:#e2e8f0;white-space:nowrap;opacity:0;transition:opacity .3s}
+.steal-info.show{opacity:1}
+.timeline{position:relative;padding-left:30px}
+.timeline::before{content:'';position:absolute;left:14px;top:0;bottom:0;width:2px;background:#334155}
+.tl-item{position:relative;margin-bottom:24px;cursor:pointer}
+.tl-dot{position:absolute;left:-23px;top:4px;width:14px;height:14px;border-radius:50%;border:2px solid}
+.tl-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.tl-sub{font-size:12px;color:#94a3b8}
+.tl-detail{max-height:0;overflow:hidden;transition:max-height .4s ease}
+.tl-item.expanded .tl-detail{max-height:400px}
+.tl-detail-inner{margin-top:8px;padding:12px;background:#0f172a;border-radius:6px;font-size:12px;line-height:1.8;color:#cbd5e1;border:1px solid #334155}
+.tl-item.tl-bad .tl-dot{background:#7f1d1d;border-color:#ef4444}
+.tl-item.tl-bad .tl-title{color:#fca5a5}
+.tl-item.tl-good .tl-dot{background:#065f46;border-color:#10b981}
+.tl-item.tl-good .tl-title{color:#6ee7b7}
+.tl-item.tl-best .tl-dot{background:#1e40af;border-color:#3b82f6}
+.tl-item.tl-best .tl-title{color:#93c5fd}
+.syscall-flow{display:flex;flex-direction:column;gap:2px}
+.sc-step{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;border:1px solid #334155;background:#1e293b;transition:all .3s;cursor:pointer;font-size:13px}
+.sc-step:hover{border-color:#38bdf8}
+.sc-step.active{border-color:#38bdf8;background:#1e3a5f}
+.sc-arrow{text-align:center;color:#475569;font-size:18px}
+.sc-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.tip{background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);border-radius:8px;padding:12px 16px;font-size:12px;line-height:1.7;color:#93c5fd;margin-top:12px}
+.tip strong{color:#38bdf8}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>GMP 调度模型</h1>
+  <div class="tab-group">
+    <button class="tab-btn active" data-panel="gmp-struct">G/M/P 结构图</button>
+    <button class="tab-btn" data-panel="findrunnable">findrunnable 7步</button>
+    <button class="tab-btn" data-panel="work-steal">工作窃取</button>
+    <button class="tab-btn" data-panel="preempt">抢占式调度</button>
+    <button class="tab-btn" data-panel="syscall">系统调用</button>
+  </div>
+</div>
+
+<!-- 面板 1：G/M/P 结构图 -->
+<div id="gmp-struct" class="panel active">
+  <div class="card">
+    <h2>G / M / P 三大角色</h2>
+    <p class="desc">点击每个角色卡片展开详细字段说明。G = Goroutine（执行单元），M = Machine（内核线程），P = Processor（调度中介）。</p>
+    <div class="role-grid">
+      <div class="role-card g-card">
+        <div class="role-letter">G</div>
+        <div class="role-name">G - Goroutine</div>
+        <div class="role-full">用户态"线程" | 初始栈 2KB | 可有几十万个</div>
+        <div class="role-desc">执行单元，存栈、PC、状态。Go 语言级别调度的最小单位。</div>
+        <div class="role-detail">
+          <div class="role-detail-inner">
+            <b>核心字段：</b><br>stack 栈范围 [lo, hi]<br>stackguard0 栈扩容哨兵<br>pc / sp 程序计数器 / 栈指针<br>goid goroutine 唯一 ID<br>status 运行状态<br>m 绑定的内核线程<br><br>
+            <b>6 种核心状态：</b>
+            <div class="status-grid">
+              <span class="status-badge idle">_Gidle 空闲</span>
+              <span class="status-badge runnable">_Grunnable 就绪</span>
+              <span class="status-badge running">_Grunning 运行中</span>
+              <span class="status-badge syscall">_Gsyscall 系统调用</span>
+              <span class="status-badge waiting">_Gwaiting 阻塞</span>
+              <span class="status-badge dead">_Gdead 死亡</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="role-card m-card">
+        <div class="role-letter">M</div>
+        <div class="role-name">M - Machine</div>
+        <div class="role-full">内核线程 | 真正跑在 CPU 上 | 默认 GOMAXPROCS 个</div>
+        <div class="role-desc">执行载体。必须绑定一个 P 才能执行 G，g0 栈上跑调度代码。</div>
+        <div class="role-detail">
+          <div class="role-detail-inner">
+            <b>核心字段：</b><br>g0 M 自带调度 goroutine，栈 8MB<br>curg 当前正在执行的 G<br>p 当前绑定的 P<br>tid 内核线程 ID<br><br>
+            <b>关键点：</b><br>所有调度代码（schedule / findrunnable）在 g0 栈上执行<br>G 切换本质：G 栈 &rarr; g0 栈 &rarr; 调度 &rarr; 新 G 栈<br>M 数量可超过 P（阻塞系统调用时创建新 M）
+          </div>
+        </div>
+      </div>
+      <div class="role-card p-card">
+        <div class="role-letter">P</div>
+        <div class="role-name">P - Processor</div>
+        <div class="role-full">调度中介 | 本地队列 256 个 G | 无锁！</div>
+        <div class="role-desc">M 和 G 之间的中介。本地队列是核心创新，消除全局锁。</div>
+        <div class="role-detail">
+          <div class="role-detail-inner">
+            <b>核心字段：</b><br>id P 的 ID (0 ~ GOMAXPROCS-1)<br>status P 状态<br>runq[256] 本地 G 环形队列（核心！）<br>m 绑定的 M<br>gFree 空闲 G 列表，复用 G<br><br>
+            <b>核心创新：</b><br>本地队列 256 个 G，<span class="step-highlight">无锁</span>操作！<br>只有队列满时才放全局队列<br>从全局一把锁变成每个 P 无锁队列，性能提升 10 倍+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>GMP 整体结构（点击运行）</h2>
+    <p class="desc">展示 M 绑定 P，P 持有本地 G 队列的关系。G 运行中会高亮闪烁。</p>
+    <div class="btn-group">
+      <button class="btn btn-success" id="startGmpBtn">启动调度模拟</button>
+      <button class="btn btn-warning" id="resetGmpBtn">重置</button>
+    </div>
+    <div class="gmp-canvas" id="gmpCanvas">
+      <div class="global-queue">
+        <div class="global-queue-label">Global Queue（全局队列，需要加锁）</div>
+        <div class="g-queue" id="globalQ"></div>
+      </div>
+      <div id="mRows"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 面板 2：findrunnable 7步 -->
+<div id="findrunnable" class="panel">
+  <div class="card">
+    <h2>findrunnable() &mdash; 找 G 的 7 步优先级</h2>
+    <p class="desc">这是调度器最核心的函数，面试 100% 会问顺序。点击"逐步演示"观看动画，点击任意步骤展开详细说明。</p>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="stepPlayBtn">逐步演示</button>
+      <button class="btn btn-warning" id="stepResetBtn">重置</button>
+    </div>
+    <div id="stepsContainer"></div>
+    <div class="tip"><strong>面试必背：</strong>1. 本地队列 &rarr; 2. 全局队列(61次) &rarr; 3. 偷其他P &rarr; 4. netpoll非阻塞 &rarr; 5. 全局再查 &rarr; 6. netpoll阻塞 &rarr; 7. M休眠</div>
+  </div>
+</div>
+
+<!-- 面板 3：工作窃取 -->
+<div id="work-steal" class="panel">
+  <div class="card">
+    <h2>工作窃取（Work Stealing）</h2>
+    <p class="desc">P1 本地队列为空时，随机选一个 P0，偷它一半的 G 过来。点击"开始窃取"观看动画。</p>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="stealBtn">开始窃取</button>
+      <button class="btn btn-warning" id="stealResetBtn">重置</button>
+    </div>
+    <div class="steal-arena" id="stealArena">
+      <div class="steal-p p0" id="stealP0">
+        <div class="steal-label">P0（忙）</div>
+        <div class="steal-gs" id="stealP0Gs"></div>
+      </div>
+      <div class="steal-arrow" id="stealArrow">&rarr;</div>
+      <div class="steal-p p1" id="stealP1">
+        <div class="steal-label">P1（空闲）</div>
+        <div class="steal-gs" id="stealP1Gs"></div>
+      </div>
+      <div class="steal-info" id="stealInfo"></div>
+    </div>
+    <div class="tip"><strong>为什么偷一半？</strong>负载均衡！P0 有 10 个 G，P1 偷 5 个，两边各 5 个，均衡了。<br><strong>为什么随机选 P？</strong>避免所有 P 都去偷同一个 P，锁竞争更均匀。</div>
+  </div>
+</div>
+
+<!-- 面板 4：抢占式调度 -->
+<div id="preempt" class="panel">
+  <div class="card">
+    <h2>抢占式调度三阶段演进</h2>
+    <p class="desc">点击每个阶段展开详细说明。这是 GMP 面试最高频的考点。</p>
+    <div class="timeline">
+      <div class="tl-item tl-bad">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.0 ~ 1.13 &mdash; 协作式抢占</div>
+        <div class="tl-sub">编译器在函数入口插检查代码，只有函数调用时才检查抢占</div>
+        <div class="tl-detail"><div class="tl-detail-inner">
+          <b>致命问题：</b>死循环不调函数 = 永远占着 P！<br><br>
+          for {} // 死循环，没有函数调用<br><br>
+          一个 G 跑死循环，其他 G 永远拿不到 CPU。<br>
+          调度延迟可达几十秒，生产环境经常出现整个服务卡住。<br><br>
+          <b style="color:#fca5a5">❌ 只在函数调用时检查 &rarr; 死循环卡死 P</b>
+        </div></div>
+      </div>
+      <div class="tl-item tl-good">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.14 ~ 1.20 &mdash; 基于信号的异步抢占</div>
+        <div class="tl-sub">sysmon 发 SIGURG 信号，M 收到信号后强制切换 G</div>
+        <div class="tl-detail"><div class="tl-detail-inner">
+          <b>原理：</b><br>
+          1. sysmon 监控线程发现 G 跑了超过 10ms<br>
+          2. 给 G 所在的 M 发 SIGURG 信号<br>
+          3. M 收到信号，把 G 的 PC 改成 asyncPreempt()<br>
+          4. 执行抢占，让出 P，重新调度<br><br>
+          <b style="color:#6ee7b7">✅ 任何时候都可以抢占！调度延迟从几十 ms 降到几十 us</b><br><br>
+          <b>小问题：</b>信号会打断系统调用，极端场景寄存器保存有问题
+        </div></div>
+      </div>
+      <div class="tl-item tl-best">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.21+ &mdash; 基于寄存器的异步抢占</div>
+        <div class="tl-sub">不依赖信号，直接写 special 寄存器触发抢占</div>
+        <div class="tl-detail"><div class="tl-detail-inner">
+          <b>原理：</b><br>
+          1. 每个 M 有一个 special 寄存器<br>
+          2. sysmon 要抢占时，直接把这个寄存器设成特定值<br>
+          3. CPU 每条指令执行前检查该寄存器<br>
+          4. 到了调度点自动触发抢占<br><br>
+          <b style="color:#93c5fd">✅ 不发信号，更快！不会打断系统调用！更可靠！</b>
+        </div></div>
+      </div>
+    </div>
+    <div class="tip"><strong>面试标准答案：</strong>Go 1.13 之前协作式抢占只有函数调用时检查，死循环卡住 P；Go 1.14 基于信号 SIGURG 异步抢占，任何时候都能抢；Go 1.21 基于寄存器，更优雅更可靠。</div>
+  </div>
+</div>
+
+<!-- 面板 5：系统调用 -->
+<div id="syscall" class="panel">
+  <div class="card">
+    <h2>系统调用处理 &mdash; 短 vs 长</h2>
+    <p class="desc">短系统调用(&lt;20us)不释放 P，长系统调用(&gt;20us)释放 P 给其他 M。点击每个步骤查看详情。</p>
+    <h3 style="margin-top:20px">短系统调用 (&lt;20us)</h3>
+    <div class="syscall-flow">
+      <div class="sc-step"><div class="sc-icon" style="background:#7c2d12;color:#fdba74">1</div><span>G 进入系统调用，P 还绑在 M 上</span></div>
+      <div class="sc-arrow">&#8595;</div>
+      <div class="sc-step"><div class="sc-icon" style="background:#065f46;color:#6ee7b7">2</div><span>系统调用快速返回（&lt;20us）</span></div>
+      <div class="sc-arrow">&#8595;</div>
+      <div class="sc-step"><div class="sc-icon" style="background:#1e40af;color:#93c5fd">3</div><span>P 还在，继续跑 G，开销最小 ✅</span></div>
+    </div>
+    <h3 style="margin-top:24px">长系统调用 (&gt;20us)</h3>
+    <div class="syscall-flow">
+      <div class="sc-step"><div class="sc-icon" style="background:#7c2d12;color:#fdba74">1</div><span>G 进入系统调用</span></div>
+      <div class="sc-arrow">&#8595;</div>
+      <div class="sc-step"><div class="sc-icon" style="background:#92400e;color:#fcd34d">2</div><span>sysmon 发现 &gt; 20us，把 P 从 M 身上"偷"走</span></div>
+      <div class="sc-arrow">&#8595;</div>
+      <div class="sc-step"><div class="sc-icon" style="background:#1e40af;color:#93c5fd">3</div><span>P 绑定另一个空闲 M2，M2 继续跑 P 队列里的 G</span></div>
+      <div class="sc-arrow">&#8595;</div>
+      <div class="sc-step"><div class="sc-icon" style="background:#4c1d95;color:#c4b5fd">4</div><span>原 M 系统调用返回，发现 P 被抢走</span></div>
+      <div class="sc-arrow">&#8595;</div>
+      <div class="sc-step"><div class="sc-icon" style="background:#334155;color:#94a3b8">5</div><span>拿空闲 P 继续跑，或把 G 放全局队列，M 休眠</span></div>
+    </div>
+    <div class="tip"><strong>设计精巧：</strong>短系统调用不释放 P（避免上下文切换），长系统调用释放 P（不让 P 闲着），20us 是平衡阈值。</div>
+  </div>
+</div>
+
+<script>
+/* ====== Tab 切换 ====== */
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var panelId = this.getAttribute('data-panel');
+    document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById(panelId).classList.add('active');
+    this.classList.add('active');
+  });
+});
+
+/* ====== 角色卡展开 ====== */
+document.querySelectorAll('.role-card').forEach(function(card) {
+  card.addEventListener('click', function() { this.classList.toggle('expanded'); });
+});
+
+/* ====== GMP 结构动画 ====== */
+var gmpTimer = null;
+var gmpState = {
+  globalQ: ['G7','G8','G9'],
+  rows: [
+    { m: 'M0', p: 'P0', gs: ['G1','G2','G3'], running: 'G1' },
+    { m: 'M1', p: 'P1', gs: ['G4','G5'], running: 'G4' },
+    { m: 'M2', p: 'P2', gs: ['G6'], running: null }
+  ]
+};
+
+function makeGItem(name, isRunning) {
+  var d = document.createElement('div');
+  d.className = 'g-item ' + (isRunning ? 'running' : 'runnable');
+  d.textContent = name;
+  return d;
+}
+
+function renderGMP() {
+  var gq = document.getElementById('globalQ');
+  gq.textContent = '';
+  gmpState.globalQ.forEach(function(g) { gq.appendChild(makeGItem(g, false)); });
+  var rows = document.getElementById('mRows');
+  rows.textContent = '';
+  gmpState.rows.forEach(function(r) {
+    var row = document.createElement('div');
+    row.className = 'm-row';
+    var mb = document.createElement('div');
+    mb.className = 'm-box';
+    mb.textContent = r.m;
+    var ms = document.createElement('small');
+    ms.textContent = 'M';
+    mb.appendChild(ms);
+    row.appendChild(mb);
+    var pb = document.createElement('div');
+    pb.className = 'p-box';
+    pb.textContent = r.p;
+    var ps = document.createElement('small');
+    ps.textContent = 'P';
+    pb.appendChild(ps);
+    row.appendChild(pb);
+    var q = document.createElement('div');
+    q.className = 'g-queue';
+    r.gs.forEach(function(g) { q.appendChild(makeGItem(g, g === r.running)); });
+    row.appendChild(q);
+    rows.appendChild(row);
+  });
+}
+
+document.getElementById('startGmpBtn').addEventListener('click', function() {
+  if (gmpTimer) return;
+  resetGMPAnimation();
+  var tick = 0;
+  gmpTimer = setInterval(function() {
+    tick++;
+    gmpState.rows.forEach(function(r) {
+      if (r.gs.length > 0) {
+        var runIdx = r.gs.indexOf(r.running);
+        if (runIdx >= 0 && runIdx < r.gs.length - 1) {
+          r.running = r.gs[runIdx + 1];
+        } else {
+          r.running = r.gs[0];
+        }
+      }
+    });
+    if (tick % 3 === 0 && gmpState.globalQ.length > 0) {
+      var targetP = Math.floor(Math.random() * 3);
+      var g = gmpState.globalQ.shift();
+      gmpState.rows[targetP].gs.push(g);
+    }
+    renderGMP();
+    if (tick > 20) { clearInterval(gmpTimer); gmpTimer = null; }
+  }, 800);
+});
+
+document.getElementById('resetGmpBtn').addEventListener('click', resetGMPAnimation);
+
+function resetGMPAnimation() {
+  if (gmpTimer) { clearInterval(gmpTimer); gmpTimer = null; }
+  gmpState.globalQ = ['G7','G8','G9'];
+  gmpState.rows[0] = { m: 'M0', p: 'P0', gs: ['G1','G2','G3'], running: 'G1' };
+  gmpState.rows[1] = { m: 'M1', p: 'P1', gs: ['G4','G5'], running: 'G4' };
+  gmpState.rows[2] = { m: 'M2', p: 'P2', gs: ['G6'], running: null };
+  renderGMP();
+}
+
+renderGMP();
+
+/* ====== findrunnable 7步 ====== */
+var stepsData = [
+  { n:1, cls:'step-1', title:'自己 P 的本地队列', sub:'无锁，最快！99% 的情况在这里找到 G', detail:'P 的本地队列是环形队列，最多 256 个 G。runqget() 直接从队列头部取 G，完全不需要加锁。这是引入 P 的核心价值，Go 1.1 之前所有 G 都在全局队列，每次取 G 都要抢一把全局锁。' },
+  { n:2, cls:'step-2', title:'全局队列', sub:'每调度 61 次必须来一次，防止全局队列饿死，需要加锁', detail:'每调度 61 次，必须从全局队列拿一个 G，否则全局队列的 G 可能永远等不到执行。从全局队列拿 G 需要 sched.lock，所以频率不能太高，61 次是经验值。' },
+  { n:3, cls:'step-3', title:'从其他 P 偷（工作窃取）', sub:'随机选 P，偷一半，负载均衡，最多试 4 轮', detail:'随机选一个 P，调用 runqsteal() 偷它本地队列一半的 G。为什么偷一半？负载均衡，减少偷的次数。为什么随机不是轮询？避免所有 P 都去偷同一个 P，锁竞争更均匀。' },
+  { n:4, cls:'step-4', title:'netpoll 非阻塞查', sub:'有没有 IO 就绪的 G？比如 socket 可读了', detail:'调用 netpoll(false)，false 表示不阻塞，只是查一下有没有网络 IO 就绪的 goroutine。比如一个 goroutine 在等 socket 读取，数据来了，它就可以恢复执行。' },
+  { n:5, cls:'step-5', title:'全局队列再查一次', sub:'确保没漏，拿锁再查', detail:'前面第 2 步可能因为没到 61 次而跳过了全局队列，这里确保再查一次，不漏掉任何可运行的 G。' },
+  { n:6, cls:'step-6', title:'netpoll 阻塞查', sub:'真的没 G 了，阻塞等 IO', detail:'调用 netpoll(true)，true 表示阻塞等待，直到有网络 IO 就绪才返回。此时 M 会真正阻塞在这里。' },
+  { n:7, cls:'step-7', title:'M 休眠 stopm()', sub:'所有地方都找不到 G，M 停下来，等新 G 来了再唤醒', detail:'调用 stopm()，M 进入休眠，P 与 M 解绑。当有新的 G 创建或全局队列有新 G 时，会唤醒空闲的 M 重新工作。' }
+];
+
+var currentStep = 0;
+var stepTimer = null;
+
+function buildSteps() {
+  var container = document.getElementById('stepsContainer');
+  stepsData.forEach(function(s) {
+    var item = document.createElement('div');
+    item.className = 'step-item ' + s.cls;
+    item.setAttribute('data-step', s.n);
+    var num = document.createElement('div');
+    num.className = 'step-num';
+    num.textContent = s.n;
+    var content = document.createElement('div');
+    content.className = 'step-content';
+    var title = document.createElement('div');
+    title.className = 'step-title';
+    title.textContent = s.title;
+    var sub = document.createElement('div');
+    sub.className = 'step-sub';
+    sub.textContent = s.sub;
+    var detail = document.createElement('div');
+    detail.className = 'step-detail';
+    detail.style.display = 'none';
+    detail.style.marginTop = '8px';
+    detail.style.fontSize = '12px';
+    detail.style.color = '#94a3b8';
+    detail.style.lineHeight = '1.8';
+    detail.textContent = s.detail;
+    content.appendChild(title);
+    content.appendChild(sub);
+    content.appendChild(detail);
+    item.appendChild(num);
+    item.appendChild(content);
+    item.addEventListener('click', function() {
+      var d = this.querySelector('.step-detail');
+      d.style.display = d.style.display === 'none' ? 'block' : 'none';
+    });
+    container.appendChild(item);
+  });
+}
+buildSteps();
+
+document.getElementById('stepPlayBtn').addEventListener('click', function() {
+  resetFindRunnable();
+  currentStep = 0;
+  advanceStep();
+});
+
+document.getElementById('stepResetBtn').addEventListener('click', resetFindRunnable);
+
+function advanceStep() {
+  currentStep++;
+  if (currentStep > 7) { resetFindRunnable(); return; }
+  document.querySelectorAll('.step-item').forEach(function(el) {
+    el.classList.remove('active');
+    el.querySelector('.step-detail').style.display = 'none';
+  });
+  var target = document.querySelector('.step-item[data-step="' + currentStep + '"]');
+  if (target) {
+    target.classList.add('active');
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  stepTimer = setTimeout(advanceStep, 2000);
+}
+
+function resetFindRunnable() {
+  if (stepTimer) { clearTimeout(stepTimer); stepTimer = null; }
+  currentStep = 0;
+  document.querySelectorAll('.step-item').forEach(function(el) {
+    el.classList.remove('active');
+    el.querySelector('.step-detail').style.display = 'none';
+  });
+}
+
+/* ====== 工作窃取动画 ====== */
+var stealP0 = ['G1','G2','G3','G4','G5','G6','G7','G8'];
+var stealP1 = [];
+
+function makeSG(name) {
+  var d = document.createElement('div');
+  d.className = 'sg';
+  d.textContent = name;
+  return d;
+}
+
+function renderSteal() {
+  var p0gs = document.getElementById('stealP0Gs');
+  p0gs.textContent = '';
+  stealP0.forEach(function(g) { p0gs.appendChild(makeSG(g)); });
+  var p1gs = document.getElementById('stealP1Gs');
+  p1gs.textContent = '';
+  stealP1.forEach(function(g) { p1gs.appendChild(makeSG(g)); });
+}
+
+document.getElementById('stealBtn').addEventListener('click', function() {
+  resetSteal();
+  setTimeout(function() {
+    document.getElementById('stealArrow').classList.add('show');
+    var info = document.getElementById('stealInfo');
+    info.classList.add('show');
+    info.textContent = 'P1 发现队列为空，随机选中 P0，准备偷一半 G...';
+  }, 300);
+  setTimeout(function() {
+    var half = Math.floor(stealP0.length / 2);
+    var stolen = stealP0.splice(half);
+    stealP1 = stolen;
+    renderSteal();
+    var info = document.getElementById('stealInfo');
+    info.textContent = '偷取完成！P1 从 P0 偷了 ' + stolen.length + ' 个 G，两边各 ' + stealP0.length + ' 个，负载均衡 ✅';
+  }, 1500);
+});
+
+document.getElementById('stealResetBtn').addEventListener('click', resetSteal);
+
+function resetSteal() {
+  stealP0 = ['G1','G2','G3','G4','G5','G6','G7','G8'];
+  stealP1 = [];
+  renderSteal();
+  document.getElementById('stealArrow').classList.remove('show');
+  var info = document.getElementById('stealInfo');
+  info.classList.remove('show');
+}
+
+renderSteal();
+
+/* ====== 时间线展开 ====== */
+document.querySelectorAll('.tl-item').forEach(function(item) {
+  item.addEventListener('click', function() { this.classList.toggle('expanded'); });
+});
+
+/* ====== 系统调用步骤 ====== */
+document.querySelectorAll('.sc-step').forEach(function(step) {
+  step.addEventListener('click', function() { this.classList.toggle('active'); });
+});
+</script>
+</body>
+</html>

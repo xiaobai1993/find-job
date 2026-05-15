@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GC 三色标记 - 交互式可视化</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Noto Sans SC',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.top-bar{background:#1e293b;border-bottom:1px solid #334155;padding:12px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.top-bar h1{font-size:18px;color:#38bdf8;white-space:nowrap}
+.tab-group{display:flex;gap:4px;margin-left:24px;flex-wrap:wrap}
+.tab-btn{padding:6px 16px;border:1px solid #475569;border-radius:6px;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s;white-space:nowrap}
+.tab-btn:hover{border-color:#38bdf8;color:#38bdf8}
+.tab-btn.active{background:#38bdf8;color:#0f172a;border-color:#38bdf8;font-weight:600}
+.panel{display:none;padding:24px;max-width:1200px;margin:0 auto}
+.panel.active{display:block}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
+.card h2{font-size:18px;margin-bottom:16px;color:#f1f5f9}
+.card h3{font-size:15px;color:#38bdf8;margin-bottom:12px}
+.desc{color:#94a3b8;font-size:13px;line-height:1.8;margin-bottom:16px}
+.btn-group{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
+.btn{padding:8px 20px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s}
+.btn-primary{background:#2563eb;color:white}
+.btn-primary:hover{background:#1d4ed8}
+.btn-success{background:#059669;color:white}
+.btn-success:hover{background:#047857}
+.btn-warning{background:#d97706;color:white}
+.btn-warning:hover{background:#b45309}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.tip{background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);border-radius:8px;padding:12px 16px;font-size:12px;line-height:1.7;color:#93c5fd;margin-top:12px}
+.tip strong{color:#38bdf8}
+
+/* ====== 三色标记画布 ====== */
+.gc-canvas{width:100%;min-height:400px;position:relative;background:#0f172a;border-radius:8px;border:1px solid #334155;padding:20px}
+.gc-obj{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;position:absolute;transition:all .6s ease;border:3px solid;cursor:default}
+.gc-obj.white{background:#1e293b;border-color:#64748b;color:#94a3b8}
+.gc-obj.gray{background:#1e40af;border-color:#3b82f6;color:#93c5fd;box-shadow:0 0 12px rgba(59,130,246,.4)}
+.gc-obj.black{background:#065f46;border-color:#10b981;color:#6ee7b7;box-shadow:0 0 12px rgba(16,185,129,.3)}
+.gc-obj.dead{opacity:.2;text-decoration:line-through;border-style:dashed}
+.gc-edge{position:absolute;pointer-events:none}
+.gc-step-info{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:#1e293b;border:1px solid #475569;border-radius:8px;padding:10px 20px;font-size:13px;color:#e2e8f0;white-space:nowrap;max-width:90%;text-align:center}
+.gc-legend{display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap}
+.gc-legend-item{display:flex;align-items:center;gap:6px;font-size:12px}
+.gc-legend-dot{width:16px;height:16px;border-radius:50%;border:2px solid}
+.gc-legend-dot.l-white{background:#1e293b;border-color:#64748b}
+.gc-legend-dot.l-gray{background:#1e40af;border-color:#3b82f6}
+.gc-legend-dot.l-black{background:#065f46;border-color:#10b981}
+
+/* ====== 写屏障对比 ====== */
+.wb-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:700px){.wb-grid{grid-template-columns:1fr}}
+.wb-card{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:20px;transition:all .3s}
+.wb-card:hover{border-color:#38bdf8}
+.wb-card h4{font-size:14px;margin-bottom:10px}
+.wb-card.old h4{color:#fca5a5}
+.wb-card.new h4{color:#6ee7b7}
+.wb-rules{list-style:none;padding:0}
+.wb-rules li{padding:6px 0;font-size:12px;line-height:1.7;color:#cbd5e1;border-bottom:1px solid #1e293b}
+.wb-rules li:last-child{border-bottom:none}
+.wb-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-right:4px}
+.wb-tag.stw{background:#7f1d1d;color:#fca5a5}
+.wb-tag.ok{background:#065f46;color:#6ee7b7}
+.wb-tag.key{background:#92400e;color:#fcd34d}
+
+/* ====== GC 四阶段 ====== */
+.phase-flow{display:flex;flex-direction:column;gap:2px}
+.phase-step{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:8px;border:1px solid #334155;background:#1e293b;transition:all .3s;cursor:pointer;font-size:13px}
+.phase-step:hover{border-color:#38bdf8}
+.phase-step.active{border-color:#38bdf8;background:#1e3a5f}
+.phase-step .phase-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+.phase-step .phase-label{flex:1}
+.phase-step .phase-stw{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.phase-stw.yes{background:#7f1d1d;color:#fca5a5}
+.phase-stw.no{background:#065f46;color:#6ee7b7}
+.phase-arrow{text-align:center;color:#475569;font-size:18px}
+.phase-detail{max-height:0;overflow:hidden;transition:max-height .4s ease}
+.phase-step.expanded .phase-detail{max-height:300px}
+.phase-detail-inner{margin-top:8px;padding:12px;background:#0f172a;border-radius:6px;font-size:12px;line-height:1.8;color:#cbd5e1;border:1px solid #334155}
+
+/* ====== 演进时间线 ====== */
+.timeline{position:relative;padding-left:30px}
+.timeline::before{content:'';position:absolute;left:14px;top:0;bottom:0;width:2px;background:#334155}
+.tl-item{position:relative;margin-bottom:20px;cursor:pointer}
+.tl-dot{position:absolute;left:-23px;top:4px;width:14px;height:14px;border-radius:50%;border:2px solid}
+.tl-title{font-weight:600;font-size:14px;margin-bottom:2px}
+.tl-sub{font-size:12px;color:#94a3b8}
+.tl-detail{max-height:0;overflow:hidden;transition:max-height .4s ease}
+.tl-item.expanded .tl-detail{max-height:300px}
+.tl-detail-inner{margin-top:8px;padding:12px;background:#0f172a;border-radius:6px;font-size:12px;line-height:1.8;color:#cbd5e1;border:1px solid #334155}
+.tl-item.v1 .tl-dot{background:#7f1d1d;border-color:#ef4444}
+.tl-item.v1 .tl-title{color:#fca5a5}
+.tl-item.v2 .tl-dot{background:#92400e;border-color:#eab308}
+.tl-item.v2 .tl-title{color:#fcd34d}
+.tl-item.v3 .tl-dot{background:#065f46;border-color:#10b981}
+.tl-item.v3 .tl-title{color:#6ee7b7}
+.tl-item.v4 .tl-dot{background:#1e40af;border-color:#3b82f6}
+.tl-item.v4 .tl-title{color:#93c5fd}
+.tl-item.v5 .tl-dot{background:#4c1d95;border-color:#8b5cf6}
+.tl-item.v5 .tl-title{color:#c4b5fd}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>GC 三色标记</h1>
+  <div class="tab-group">
+    <button class="tab-btn active" data-panel="tricolor">三色标记动画</button>
+    <button class="tab-btn" data-panel="writebarrier">写屏障对比</button>
+    <button class="tab-btn" data-panel="gcphases">GC 四阶段</button>
+    <button class="tab-btn" data-panel="evolution">GC 演进历史</button>
+  </div>
+</div>
+
+<!-- 面板 1：三色标记动画 -->
+<div id="tricolor" class="panel active">
+  <div class="card">
+    <h2>三色标记算法 &mdash; 步骤演示</h2>
+    <p class="desc">点击"逐步演示"观看三色标记的完整过程。白色=未扫描(垃圾)，灰色=已发现待处理，黑色=扫描完成(安全)。</p>
+    <div class="gc-legend">
+      <div class="gc-legend-item"><div class="gc-legend-dot l-white"></div>白色 - 未扫描，最后是垃圾</div>
+      <div class="gc-legend-item"><div class="gc-legend-dot l-gray"></div>灰色 - 已发现，引用待处理</div>
+      <div class="gc-legend-item"><div class="gc-legend-dot l-black"></div>黑色 - 扫描完成，安全</div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-success" id="gcPlayBtn">逐步演示</button>
+      <button class="btn btn-primary" id="gcAutoBtn">自动播放</button>
+      <button class="btn btn-warning" id="gcResetBtn">重置</button>
+    </div>
+    <div class="gc-canvas" id="gcCanvas">
+      <div class="gc-step-info" id="gcStepInfo">点击"逐步演示"开始</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>并发标记问题 &mdash; 悬挂指针</h2>
+    <p class="desc">标记过程中用户代码修改引用，可能导致存活对象被误回收。点击"模拟"观看。</p>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="dangleBtn">模拟悬挂指针</button>
+      <button class="btn btn-warning" id="dangleResetBtn">重置</button>
+    </div>
+    <div class="gc-canvas" id="dangleCanvas" style="min-height:280px">
+      <div class="gc-step-info" id="dangleInfo">点击"模拟悬挂指针"开始</div>
+    </div>
+  </div>
+</div>
+
+<!-- 面板 2：写屏障对比 -->
+<div id="writebarrier" class="panel">
+  <div class="card">
+    <h2>三种写屏障对比</h2>
+    <p class="desc">点击每种写屏障卡片展开详细规则。混合写屏障是 Go 1.8+ 的核心创新，不需要重新扫描栈。</p>
+    <div class="wb-grid">
+      <div class="wb-card old" id="wbInsert">
+        <h4>插入写屏障（Go 1.5 ~ 1.7）</h4>
+        <ul class="wb-rules">
+          <li><span class="wb-tag key">规则</span>插入新引用时，把新引用的对象涂灰</li>
+          <li><span class="wb-tag stw">问题</span>栈上不开写屏障（性能太差）</li>
+          <li><span class="wb-tag stw">STW</span>标记结束后必须重新扫描所有栈</li>
+          <li><span class="wb-tag stw">典型STW</span>10 ~ 50 ms</li>
+        </ul>
+      </div>
+      <div class="wb-card old">
+        <h4>删除写屏障</h4>
+        <ul class="wb-rules">
+          <li><span class="wb-tag key">规则</span>删除引用时，把被删引用的对象涂灰</li>
+          <li><span class="wb-tag stw">问题</span>保守，多标记很多对象</li>
+          <li><span class="wb-tag stw">缺点</span>产生大量"浮动垃圾"</li>
+          <li><span class="wb-tag stw">效果</span>内存占用升高，但不会漏标</li>
+        </ul>
+      </div>
+      <div class="wb-card new" style="grid-column:1/-1">
+        <h4>混合写屏障（Go 1.8+，革命性！）</h4>
+        <ul class="wb-rules">
+          <li><span class="wb-tag ok">规则1</span>GC 开始时，把所有 goroutine 的栈全部扫描涂黑</li>
+          <li><span class="wb-tag ok">规则2</span>之后栈上新建的对象，全部是黑色</li>
+          <li><span class="wb-tag ok">规则3</span>插入新引用时，把新引用的对象涂灰</li>
+          <li><span class="wb-tag ok">规则4</span>删除旧引用时，把旧引用的对象涂灰</li>
+          <li><span class="wb-tag ok">核心</span>不需要重新扫描栈！STW 从 10ms+ 降到几百 us</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tip"><strong>面试必背：</strong>栈变黑，插入涂灰，删除也涂灰！最大的好处是不需要重新扫描栈了。</div>
+  </div>
+</div>
+
+<!-- 面板 3：GC 四阶段 -->
+<div id="gcphases" class="panel">
+  <div class="card">
+    <h2>GC 完整四阶段流程（Go 1.8+）</h2>
+    <p class="desc">点击每个阶段展开详细说明。总 STW 仅 0.1 ~ 0.6 ms！</p>
+    <div class="phase-flow">
+      <div class="phase-step" data-phase="1">
+        <div class="phase-icon" style="background:#7f1d1d;color:#fca5a5">1</div>
+        <div class="phase-label">
+          <div style="font-weight:600">STW 1：开启写屏障，扫描栈涂黑</div>
+          <div style="font-size:11px;color:#94a3b8">停止所有 G &rarr; 开启混合写屏障 &rarr; 扫描所有栈涂黑 &rarr; 根对象涂灰入队</div>
+        </div>
+        <span class="phase-stw yes">STW 10~100us</span>
+        <div class="phase-detail"><div class="phase-detail-inner">
+          1. 停止所有 goroutine<br>
+          2. 开启混合写屏障<br>
+          3. 扫描所有 goroutine 的栈，把栈上所有对象<b>全部涂黑</b>（这是混合写屏障的核心！）<br>
+          4. 把根对象（全局变量等）全部涂成灰色，放入灰色队列<br>
+          5. STW 很短，因为只是扫栈，几微秒到几百微秒
+        </div></div>
+      </div>
+      <div class="phase-arrow">&#8595;</div>
+      <div class="phase-step" data-phase="2">
+        <div class="phase-icon" style="background:#065f46;color:#6ee7b7">2</div>
+        <div class="phase-label">
+          <div style="font-weight:600">并发标记</div>
+          <div style="font-size:11px;color:#94a3b8">GC worker 从灰色队列取对象 &rarr; 涂黑 &rarr; 引用涂灰 &rarr; 直到灰色队列为空</div>
+        </div>
+        <span class="phase-stw no">无 STW</span>
+        <div class="phase-detail"><div class="phase-detail-inner">
+          1. 专门的 GC worker goroutine 从灰色队列拿对象<br>
+          2. 把对象涂黑，把它引用的对象涂灰<br>
+          3. 一直循环，直到灰色队列为空<br>
+          4. <b>和用户代码并行跑，完全不影响！</b><br>
+          5. 这是 Go GC 最牛逼的地方：标记阶段 99% 的时间都是并发的
+        </div></div>
+      </div>
+      <div class="phase-arrow">&#8595;</div>
+      <div class="phase-step" data-phase="3">
+        <div class="phase-icon" style="background:#7f1d1d;color:#fca5a5">3</div>
+        <div class="phase-label">
+          <div style="font-weight:600">STW 2：关闭写屏障，收尾</div>
+          <div style="font-size:11px;color:#94a3b8">停止所有 G &rarr; 关闭写屏障 &rarr; 清理工作 &rarr; 处理剩余根对象</div>
+        </div>
+        <span class="phase-stw yes">STW 100~500us</span>
+        <div class="phase-detail"><div class="phase-detail-inner">
+          1. 停止所有 goroutine<br>
+          2. 关闭写屏障<br>
+          3. 做一些清理工作<br>
+          4. 处理剩下的根对象<br>
+          5. 这就是 Go GC 主要的 STW，一般几百微秒，几乎感知不到
+        </div></div>
+      </div>
+      <div class="phase-arrow">&#8595;</div>
+      <div class="phase-step" data-phase="4">
+        <div class="phase-icon" style="background:#065f46;color:#6ee7b7">4</div>
+        <div class="phase-label">
+          <div style="font-weight:600">并发清除</div>
+          <div style="font-size:11px;color:#94a3b8">遍历堆 &rarr; 白色对象回收 &rarr; 放入空闲列表</div>
+        </div>
+        <span class="phase-stw no">无 STW</span>
+        <div class="phase-detail"><div class="phase-detail-inner">
+          1. 遍历整个堆<br>
+          2. 把白色对象回收，放到 mcache 的空闲列表<br>
+          3. 后台慢慢清，用户代码完全不感知<br>
+          4. <b>和用户代码并行跑</b>
+        </div></div>
+      </div>
+    </div>
+    <div class="tip"><strong>总 STW = 0.1 ~ 0.6 ms！</strong>两次 STW 都极短，几乎感知不到。Go 1.8+ 混合写屏障不需要重新扫描栈，是 STW 大幅降低的核心原因。</div>
+  </div>
+</div>
+
+<!-- 面板 4：GC 演进历史 -->
+<div id="evolution" class="panel">
+  <div class="card">
+    <h2>GC 演进历史</h2>
+    <p class="desc">点击每个版本展开详细说明。Go GC 从几秒 STW 演进到几百微秒。</p>
+    <div class="timeline">
+      <div class="tl-item v1">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.0（2012）&mdash; 串行标记清除</div>
+        <div class="tl-sub">STW: 几百ms ~ 几秒 | 单线程 GC，所有 G 都停</div>
+        <div class="tl-detail"><div class="tl-detail-inner">标记和清除都是单线程的，整个程序完全停止。堆越大，STW 越长，几秒的停顿很常见。这是 Go 最早的 GC，性能很差。</div></div>
+      </div>
+      <div class="tl-item v2">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.3（2014）&mdash; 并行标记清除</div>
+        <div class="tl-sub">STW: 几十 ~ 几百 ms | 标记并行，清除并行</div>
+        <div class="tl-detail"><div class="tl-detail-inner">标记和清除都变成了多线程并行，但还是需要 STW。比 Go 1.0 快了很多，但几十到几百毫秒的停顿仍然不可接受。</div></div>
+      </div>
+      <div class="tl-item v3">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.5（2015）&mdash; 三色标记 + 插入写屏障</div>
+        <div class="tl-sub">STW: 10 ~ 50 ms | 并发标记！革命性改进！</div>
+        <div class="tl-detail"><div class="tl-detail-inner">引入三色标记和插入写屏障，实现了真正的并发标记！标记阶段用户代码可以继续跑。但栈上不开写屏障，标记结束后需要 STW 重新扫描所有栈，STW 仍然有 10~50ms。</div></div>
+      </div>
+      <div class="tl-item v4">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.8（2017）&mdash; 混合写屏障</div>
+        <div class="tl-sub">STW: 0.5 ~ 2 ms | 不需要重扫栈！STW 降低 10 倍！</div>
+        <div class="tl-detail"><div class="tl-detail-inner"><b>GC 最大的里程碑！</b>混合写屏障 = 插入写屏障 + 删除写屏障 + 栈一开始就涂黑。不需要重新扫描栈了！STW 从几十毫秒降到几百微秒，降低了 10~50 倍。这是 Go GC 最牛逼的一次升级。</div></div>
+      </div>
+      <div class="tl-item v5">
+        <div class="tl-dot"></div>
+        <div class="tl-title">Go 1.19（2022）&mdash; GOMEMLIMIT + 清扫优化</div>
+        <div class="tl-sub">STW: 0.1 ~ 1 ms | 容器环境神器！</div>
+        <div class="tl-detail"><div class="tl-detail-inner">1. GOMEMLIMIT 软内存限制：超过限制后 GC 频率自动升高，避免容器 OOM<br>2. GC 清扫 CPU 限流：最多用 50% CPU，避免清扫打满 CPU<br>3. 大页支持：标记速度提升 10~20%</div></div>
+      </div>
+    </div>
+    <div class="tip"><strong>面试加分项：</strong>Go 1.8 是 GC 最大的一次提升，STW 降了 10 倍！核心是混合写屏障不需要重新扫描栈。Go 1.19 的 GOMEMLIMIT 是容器环境救星！</div>
+  </div>
+</div>
+
+<script>
+/* ====== Tab 切换 ====== */
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var panelId = this.getAttribute('data-panel');
+    document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById(panelId).classList.add('active');
+    this.classList.add('active');
+  });
+});
+
+/* ====== 三色标记动画 ====== */
+var gcNodes = [
+  { id:'A', x:140, y:60,  refs:['E'], color:'white', isRoot:true },
+  { id:'B', x:300, y:60,  refs:['F'], color:'white', isRoot:true },
+  { id:'C', x:460, y:60,  refs:[],    color:'white', isRoot:false },
+  { id:'D', x:600, y:60,  refs:[],    color:'white', isRoot:false },
+  { id:'E', x:180, y:180, refs:[],    color:'white', isRoot:false },
+  { id:'F', x:340, y:180, refs:[],    color:'white', isRoot:false }
+];
+
+var gcSteps = [
+  { desc:'初始状态：所有对象都是白色', colors:{A:'white',B:'white',C:'white',D:'white',E:'white',F:'white'} },
+  { desc:'第 1 步：把根对象 A、B 涂成灰色，放入灰色队列', colors:{A:'gray',B:'gray',C:'white',D:'white',E:'white',F:'white'} },
+  { desc:'第 2 步：从灰色队列取 A，涂黑，把它引用的 E 涂灰', colors:{A:'black',B:'gray',C:'white',D:'white',E:'gray',F:'white'} },
+  { desc:'第 3 步：从灰色队列取 B，涂黑，把它引用的 F 涂灰', colors:{A:'black',B:'black',C:'white',D:'white',E:'gray',F:'gray'} },
+  { desc:'第 4 步：E、F 没有引用其他对象，涂黑', colors:{A:'black',B:'black',C:'white',D:'white',E:'black',F:'black'} },
+  { desc:'第 5 步：灰色队列为空，标记结束！白色 C、D 是垃圾，回收！', colors:{A:'black',B:'black',C:'dead',D:'dead',E:'black',F:'black'} }
+];
+
+var gcCurrentStep = -1;
+var gcAutoTimer = null;
+var gcObjEls = {};
+
+function renderGCNodes() {
+  var canvas = document.getElementById('gcCanvas');
+  // clear old nodes (keep info)
+  Object.values(gcObjEls).forEach(function(el) { if(el.parentNode) el.parentNode.removeChild(el); });
+  gcObjEls = {};
+
+  gcNodes.forEach(function(node) {
+    var el = document.createElement('div');
+    el.className = 'gc-obj ' + node.color;
+    el.style.left = node.x + 'px';
+    el.style.top = node.y + 'px';
+    el.textContent = node.id;
+    if (node.isRoot) {
+      el.title = '根对象';
+      var tag = document.createElement('div');
+      tag.style.cssText = 'position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:9px;color:#fbbf24;white-space:nowrap';
+      tag.textContent = 'root';
+      el.appendChild(tag);
+    }
+    canvas.appendChild(el);
+    gcObjEls[node.id] = el;
+  });
+
+  // draw edges with SVG
+  var oldSvg = document.getElementById('gcEdges');
+  if (oldSvg) oldSvg.parentNode.removeChild(oldSvg);
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'gcEdges';
+  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+  gcNodes.forEach(function(node) {
+    node.refs.forEach(function(refId) {
+      var target = gcNodes.find(function(n) { return n.id === refId; });
+      if (!target) return;
+      var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', node.x + 30);
+      line.setAttribute('y1', node.y + 30);
+      line.setAttribute('x2', target.x + 30);
+      line.setAttribute('y2', target.y + 30);
+      line.setAttribute('stroke', '#475569');
+      line.setAttribute('stroke-width', '2');
+      line.setAttribute('stroke-dasharray', '4');
+      svg.appendChild(line);
+    });
+  });
+  canvas.appendChild(svg);
+}
+
+function setGCStep(stepIdx) {
+  if (stepIdx < 0 || stepIdx >= gcSteps.length) return;
+  gcCurrentStep = stepIdx;
+  var step = gcSteps[stepIdx];
+  document.getElementById('gcStepInfo').textContent = step.desc;
+  Object.keys(step.colors).forEach(function(id) {
+    var node = gcNodes.find(function(n) { return n.id === id; });
+    if (node) node.color = step.colors[id];
+  });
+  renderGCNodes();
+}
+
+document.getElementById('gcPlayBtn').addEventListener('click', function() {
+  if (gcCurrentStep >= gcSteps.length - 1) {
+    gcCurrentStep = -1;
+  }
+  setGCStep(gcCurrentStep + 1);
+});
+
+document.getElementById('gcAutoBtn').addEventListener('click', function() {
+  resetGC();
+  var i = 0;
+  gcAutoTimer = setInterval(function() {
+    if (i >= gcSteps.length) { clearInterval(gcAutoTimer); gcAutoTimer = null; return; }
+    setGCStep(i);
+    i++;
+  }, 1500);
+});
+
+document.getElementById('gcResetBtn').addEventListener('click', resetGC);
+
+function resetGC() {
+  if (gcAutoTimer) { clearInterval(gcAutoTimer); gcAutoTimer = null; }
+  gcCurrentStep = -1;
+  gcNodes.forEach(function(n) { n.color = 'white'; });
+  renderGCNodes();
+  document.getElementById('gcStepInfo').textContent = '点击"逐步演示"开始';
+}
+
+renderGCNodes();
+
+/* ====== 悬挂指针演示 ====== */
+var dangleNodes = [
+  { id:'A', x:120, y:60,  refs:['E'], color:'black', isRoot:true },
+  { id:'B', x:300, y:60,  refs:[],    color:'gray',  isRoot:true },
+  { id:'E', x:180, y:180, refs:[],    color:'white', isRoot:false }
+];
+
+var dangleSteps = [
+  { desc:'标记到一半：A 已黑，B 灰色，E 白色。B 原来引用 E，但还没扫描到', colors:{A:'black',B:'gray',E:'white'}, refs:{A:['E'],B:[]} },
+  { desc:'用户代码修改：B 删除对 E 的引用，A 新增对 E 的引用。A 已黑不会再扫描！', colors:{A:'black',B:'gray',E:'white'}, refs:{A:['E'],B:[]} },
+  { desc:'结果：E 是白色，GC 认为它是垃圾！但 A 还引用着 E → 悬挂指针！', colors:{A:'black',B:'black',E:'dead'}, refs:{A:['E'],B:[]} }
+];
+
+var dangleStep = -1;
+var dangleObjEls = {};
+
+function renderDangle() {
+  var canvas = document.getElementById('dangleCanvas');
+  Object.values(dangleObjEls).forEach(function(el) { if(el.parentNode) el.parentNode.removeChild(el); });
+  dangleObjEls = {};
+
+  var step = dangleStep >= 0 ? dangleSteps[dangleStep] : null;
+
+  dangleNodes.forEach(function(node) {
+    var el = document.createElement('div');
+    el.className = 'gc-obj ' + (step ? step.colors[node.id] : node.color);
+    el.style.left = node.x + 'px';
+    el.style.top = node.y + 'px';
+    el.textContent = node.id;
+    if (node.isRoot) {
+      var tag = document.createElement('div');
+      tag.style.cssText = 'position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:9px;color:#fbbf24;white-space:nowrap';
+      tag.textContent = 'root';
+      el.appendChild(tag);
+    }
+    canvas.appendChild(el);
+    dangleObjEls[node.id] = el;
+  });
+
+  // edges
+  var oldSvg = document.getElementById('dangleEdges');
+  if (oldSvg) oldSvg.parentNode.removeChild(oldSvg);
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'dangleEdges';
+  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+
+  if (step) {
+    Object.keys(step.refs).forEach(function(fromId) {
+      var fromNode = dangleNodes.find(function(n) { return n.id === fromId; });
+      step.refs[fromId].forEach(function(toId) {
+        var toNode = dangleNodes.find(function(n) { return n.id === toId; });
+        if (!fromNode || !toNode) return;
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', fromNode.x + 30);
+        line.setAttribute('y1', fromNode.y + 30);
+        line.setAttribute('x2', toNode.x + 30);
+        line.setAttribute('y2', toNode.y + 30);
+        line.setAttribute('stroke', dangleStep === 2 ? '#ef4444' : '#475569');
+        line.setAttribute('stroke-width', '2');
+        if (dangleStep < 2) line.setAttribute('stroke-dasharray', '4');
+        svg.appendChild(line);
+      });
+    });
+  }
+  canvas.appendChild(svg);
+}
+
+document.getElementById('dangleBtn').addEventListener('click', function() {
+  dangleStep = (dangleStep + 1) % dangleSteps.length;
+  renderDangle();
+  document.getElementById('dangleInfo').textContent = dangleSteps[dangleStep].desc;
+});
+
+document.getElementById('dangleResetBtn').addEventListener('click', function() {
+  dangleStep = -1;
+  renderDangle();
+  document.getElementById('dangleInfo').textContent = '点击"模拟悬挂指针"开始';
+});
+
+renderDangle();
+
+/* ====== GC 四阶段展开 ====== */
+document.querySelectorAll('.phase-step').forEach(function(step) {
+  step.addEventListener('click', function() { this.classList.toggle('expanded'); });
+});
+
+/* ====== 演进时间线展开 ====== */
+document.querySelectorAll('.tl-item').forEach(function(item) {
+  item.addEventListener('click', function() { this.classList.toggle('expanded'); });
+});
+</script>
+</body>
+</html>
