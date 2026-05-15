@@ -77,11 +77,18 @@ type entry struct {
 
 **关键设计：key 在 read 和 dirty 中共享同一个 `*entry` 指针！**
 
+```mermaid
+graph LR
+    A[read.m["user1"]] --> C[*entry]
+    B[dirty["user1"]] --> C[*entry]
+    C --> D[p → &User{Name: "Alice"}]
+
+    style A fill:#e1f0ff,stroke:#007aff,stroke-width:2px
+    style B fill:#fff3e0,stroke:#ff9500,stroke-width:2px
+    style C fill:#d1fae5,stroke:#10b981,stroke-width:2px
 ```
-read.m["user1"] ──────┐
-                       ├──→ entry { p → &User{Name: "Alice"} }  ← 同一个对象！
-dirty["user1"] ───────┘
-```
+
+这意味着修改已有 key 的 value，只需要原子修改 entry.p，不需要加锁！
 
 这意味着修改已有 key 的 value，只需要原子修改 entry.p，不需要加锁！
 
@@ -91,17 +98,17 @@ dirty["user1"] ───────┘
 
 entry.p 指针有三种可能的值：
 
-```
-entry.p 的状态：
+```mermaid
+graph LR
+    subgraph entry.p 的三种状态
+        A["🟢 有效指针<br/>（正常值）<br/><br/>✓ 可读可写<br/>✓ CAS 原子更新<br/>✓ 可直接 Store"]
+        B["🟡 nil<br/>（已软删除）<br/><br/>✓ 读返回 false<br/>✓ 可被 Store 重新激活<br/>✓ 可直接 CAS"]
+        C["🔴 expunged<br/>（已清洗）<br/><br/>✓ 读返回 false<br/>✗ 不能直接 Store<br/>✓ 需要先加锁<br/>✓ 不在 dirty 中"]
+    end
 
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  有效指针     │     │    nil       │     │  expunged    │
-│  (正常值)     │     │  (已删除)    │     │  (已清洗)    │
-│              │     │              │     │              │
-│  可读可写     │     │  读返回 false │     │  读返回 false │
-│  原子更新     │     │  可被 Store   │     │  不能直接 Store│
-│              │     │  重新激活     │     │  需要先加锁   │
-└──────────────┘     └──────────────┘     └──────────────┘
+    style A fill:#d1fae5,stroke:#10b981,stroke-width:2px
+    style B fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
+    style C fill:#fee2e2,stroke:#ef4444,stroke-width:2px
 ```
 
 | 状态 | entry.p 值 | 含义 | 能否直接 Store |
@@ -112,23 +119,16 @@ entry.p 的状态：
 
 **状态转换图：**
 
-```
-                    Store (CAS)
-    有效 ──────────────────────────→ 有效 (新值)
-     │                                  ↑
-     │ Delete (CAS 置 nil)              │ Store (CAS 重新激活)
-     ↓                                  │
-    nil ────────────────────────────────┘
-     │
-     │ dirtyLocked() 遍历时
-     │ tryExpungeLocked(): nil → expunged
-     ↓
-   expunged
-     │
-     │ unexpungeLocked(): expunged → nil
-     │ 然后 Store 到 dirty 中
-     ↓
-    nil → 有效 (通过 CAS)
+```mermaid
+stateDiagram-v2
+    [*] --> 有效
+
+    有效 --> 有效 : Store (CAS 更新值)
+    有效 --> nil : Delete (CAS 置 nil)
+    nil --> 有效 : Store (CAS 重新激活)
+    nil --> expunged : dirtyLocked() 遍历<br/>tryExpungeLocked()
+    expunged --> nil : unexpungeLocked()<br/>先恢复再加到 dirty
+    expunged --> 有效 : 先恢复 nil 再 CAS Store
 ```
 
 **为什么需要 expunged？**
@@ -175,21 +175,37 @@ func (m *Map) Load(key any) (value any, ok bool) {
 
 **流程图：**
 
-```
-Load(key)
-  │
-  ├── read.m[key] 存在？
-  │     ├── 是 → e.load() 原子读值 → 返回  ✅ 无锁！
-  │     └── 否 → read.amended？
-  │               ├── 否 → 返回 (nil, false)  ✅ 无锁！
-  │               └── 是 → 加锁
-  │                       ├── 双重检查 read（可能被提升了）
-  │                       ├── 读 dirty[key]
-  │                       ├── missLocked() 计数
-  │                       └── 解锁 → 返回
-  │
-  └── miss 累积到 len(dirty)？
-        └── 是 → dirty 提升为 read！
+```mermaid
+flowchart TD
+    A[Start: Load(key)] --> B{key 在 read.m 中?}
+
+    B -->|是| C[e.load() 原子读值]
+    C --> D[返回 (value, true)]
+    style C fill:#d1fae5,stroke:#10b981,stroke-width:2px
+    style D fill:#d1fae5,stroke:#10b981,stroke-width:2px
+
+    B -->|否| E{read.amended == true?}
+    E -->|否| F[返回 (nil, false)]
+    style F fill:#d1fae5,stroke:#10b981,stroke-width:2px
+
+    E -->|是| G[🔒 加锁 mu.Lock()]
+    G --> H[双重检查 read<br/>（加锁期间可能已提升）]
+    H --> I{key 现在在 read.m 中?}
+    I -->|是| J[读 read.m[key]]
+    I -->|否| K[读 dirty[key]]
+    K --> L[missLocked() 计数+1]
+    L --> M{misses >= len(dirty)?}
+    M -->|是| N[⬆️ dirty 提升为 read]
+    M -->|否| O[🔓 解锁]
+    J --> O
+    N --> O
+    O --> P[返回结果]
+
+    style G fill:#fee2e2,stroke:#ef4444,stroke-width:2px
+    style N fill:#fff3e0,stroke:#ff9500,stroke-width:2px
+
+    note right of D ✅ 无锁!
+    note right of F ✅ 无锁!
 ```
 
 ---
@@ -231,25 +247,43 @@ func (m *Map) Store(key, value any) {
 
 **流程图：**
 
-```
-Store(key, value)
-  │
-  ├── key 在 read 中？
-  │     ├── 是 → tryStore (CAS)
-  │     │         ├── CAS 成功 → 返回  ✅ 无锁！
-  │     │         └── entry 是 expunged → 失败，走慢路径
-  │     └── 否 → 加锁
-  │
-  └── 慢路径（加锁后）
-        ├── 双重检查 read
-        ├── key 在 read 中？
-        │     ├── 是 → unexpunge → 加回 dirty → 更新值
-        │     └── 否 → key 在 dirty 中？
-        │               ├── 是 → 直接更新值
-        │               └── 否 → 全新 key
-        │                       ├── dirty 为 nil？→ dirtyLocked() 初始化
-        │                       └── dirty[key] = newEntry(value)
-        └── 解锁
+```mermaid
+flowchart TD
+    A[Start: Store(key, value)] --> B{key 在 read 中?}
+
+    B -->|是| C[tryStore CAS 更新值]
+    C --> D{CAS 成功?}
+    D -->|是| E[返回]
+    style E fill:#d1fae5,stroke:#10b981,stroke-width:2px
+    note right of E ✅ 无锁!
+
+    B -->|否| F[🔒 加锁]
+    D -->|失败<br/>(entry 是 expunged)| F
+
+    F --> G[双重检查 read]
+    G --> H{key 在 read 中?}
+
+    H -->|是| I{entry 是 expunged?}
+    I -->|是| J[unexpunge<br/>标记为 nil<br/>加回 dirty]
+    J --> K[原子更新 entry.p]
+    I -->|否| K
+
+    H -->|否| L{key 在 dirty 中?}
+    L -->|是| M[直接更新 entry.p]
+    L -->|否| N[全新 key]
+    N --> O{dirty 为 nil?}
+    O -->|是| P[dirtyLocked() 重建 dirty<br/>遍历 read 拷贝有效 entry]
+    O -->|否| Q
+    P --> Q[amended = true]
+    Q --> R[dirty[key] = newEntry(value)]
+
+    K --> S[🔓 解锁]
+    M --> S
+    R --> S
+    S --> T[返回]
+
+    style F fill:#fee2e2,stroke:#ef4444,stroke-width:2px
+    style P fill:#fff3e0,stroke:#ff9500,stroke-width:2px
 ```
 
 **关键优化：已有 key 的更新完全无锁！**
@@ -381,16 +415,22 @@ func (m *Map) missLocked() {
 
 **提升流程图：**
 
-```
-misses 累积
-  │
-  ├── misses < len(dirty) → 不提升，继续
-  │
-  └── misses >= len(dirty) → 提升！
-        │
-        ├── read = dirty（dirty 变成新的 read）
-        ├── dirty = nil（清空 dirty）
-        └── misses = 0（重置计数器）
+```mermaid
+flowchart TD
+    A[每次 Load 未命中] --> B[misses++]
+    B --> C{misses >= len(dirty)?}
+
+    C -->|否| D[不提升, 继续]
+    style D fill:#e1f0ff,stroke:#007aff,stroke-width:2px
+
+    C -->|是| E[⬆️ 触发提升!]
+    style E fill:#fff3e0,stroke:#ff9500,stroke-width:2px
+
+    E --> F[read = dirty<br/>dirty 整体变为新 read]
+    F --> G[dirty = nil<br/>清空]
+    G --> H[misses = 0<br/>重置计数器]
+    H --> I[提升完成]
+    style I fill:#d1fae5,stroke:#10b981,stroke-width:2px
 ```
 
 ---
@@ -427,47 +467,59 @@ func (m *Map) dirtyLocked() {
 
 ### 6. 完整生命周期
 
-```
-初始状态：
-  read = {m: {}, amended: false}
-  dirty = nil
-  misses = 0
+```mermaid
+timeline
+    title sync.Map 完整生命周期
 
-─── Store("a", 1) ───
-  dirty 为 nil → dirtyLocked() 重建
-  read = {m: {}, amended: true}     ← amended 变为 true
-  dirty = {"a": entry(1)}
+    section 初始状态
+        开始 : read = {}
+              : amended = false
+              : dirty = nil
+              : misses = 0
 
-─── Store("b", 2) ───
-  dirty["b"] = entry(2)
-  dirty = {"a": entry(1), "b": entry(2)}
+    section Store("a", 1)
+        第1次写 : dirty 为 nil
+              : dirtyLocked() 重建
+              : amended = true
+              : dirty = {"a": entry(1)}
 
-─── Load("c") ───
-  read 中没有 "c"，amended = true → 加锁读 dirty → 也没有
-  misses = 1
+    section Store("b", 2)
+        第2次写 : dirty["b"] = entry(2)
+              : dirty = {"a": entry(1), "b": entry(2)}
 
-─── Load("c") ───
-  同上，misses = 2
+    section Load("c") 连续两次
+        第1次 miss : read 无 c, amended=true
+                   : 加锁读 dirty 也没有
+                   : misses = 1
 
-─── misses >= len(dirty) = 2 ───
-  触发提升！
-  read = {m: {"a": entry(1), "b": entry(2)}, amended: false}
-  dirty = nil
-  misses = 0
+        第2次 miss : 同上
+                   : misses = 2
 
-─── Store("a", 100) ───
-  "a" 在 read 中 → CAS 原子更新 entry.p → 1→100  ✅ 无锁！
+    section ⬆️ 触发提升 misses == len(dirty)
+        提升完成 : read = {"a", "b"}
+                : amended = false
+                : dirty = nil
+                : misses = 0
 
-─── Delete("a") ───
-  "a" 在 read 中 → CAS 置 nil → 软删除  ✅ 无锁！
+    section Store("a", 100) 更新已有 key
+        更新操作 : "a" 在 read 中
+                : CAS 原子更新 entry.p
+                : 1 → 100 ✅ 无锁!
 
-─── Store("c", 3) ───
-  "c" 不在 read 中 → dirty 为 nil → dirtyLocked() 重建
-  （"a" 是 nil → 标记为 expunged，不拷贝到 dirty）
-  dirty = {"b": entry(2)}  ← "a" 被清洗掉了
-  read.amended = true
-  dirty["c"] = entry(3)
-  dirty = {"b": entry(2), "c": entry(3)}
+    section Delete("a")
+        删除操作 : "a" 在 read 中
+                : CAS 置 nil
+                : 软删除 ✅ 无锁!
+                : key "a" 仍在 map 中
+
+    section Store("c", 3) 写新 key
+        重建 dirty : dirty 为 nil
+                   : dirtyLocked() 重建
+                   : 遍历 read 拷贝有效 entry
+                   : "a" 是 nil → 标记 expunged
+                   : dirty = {"b": entry(2)}
+                   : amended = true
+                   : dirty["c"] = entry(3)
 ```
 
 ---
@@ -580,23 +632,30 @@ m.CompareAndSwap(key, expected, newValue)  // ✅ 原子操作，无竞态
 
 ### 2. 选型决策树
 
-```
-需要并发安全的 map？
-│
-├── 读多写少（读:写 > 10:1）且 key 集合稳定？
-│     └── 是 → sync.Map ✅
-│
-├── key 频繁增删？
-│     └── 是 → map + RWMutex ✅
-│
-├── 读写比例差不多？
-│     └── map + RWMutex ✅
-│
-├── 写多读少？
-│     └── map + Mutex ✅
-│
-└── 需要强一致性遍历？
-      └── map + Mutex ✅（sync.Map.Range 不保证快照一致性）
+```mermaid
+flowchart TD
+    A[需要并发安全的 map?] --> B{读多写少?<br/>读:写 > 10:1<br/>key 集合稳定?}
+
+    B -->|是| C[使用 sync.Map ✅]
+    style C fill:#d1fae5,stroke:#10b981,stroke-width:2px
+
+    B -->|否| D{key 频繁增删?}
+    D -->|是| E[使用 map + RWMutex ✅]
+    style E fill:#e1f0ff,stroke:#007aff,stroke-width:2px
+
+    D -->|否| F{读写比例差不多?}
+    F -->|是| G[使用 map + RWMutex ✅]
+    style G fill:#e1f0ff,stroke:#007aff,stroke-width:2px
+
+    F -->|否| H{写多读少?}
+    H -->|是| I[使用 map + Mutex ✅]
+    style I fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
+
+    H -->|否| J{需要强一致性遍历?}
+    J -->|是| K[使用 map + Mutex ✅<br/>sync.Map.Range<br/>不保证快照一致性]
+    style K fill:#fee2e2,stroke:#ef4444,stroke-width:2px
+
+    J -->|否| C
 ```
 
 ### 3. sync.Map 适合的场景

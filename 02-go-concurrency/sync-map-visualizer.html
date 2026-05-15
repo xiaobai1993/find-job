@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sync.Map 动态可视化演示</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f7;
+        }
+
+        h1 {
+            text-align: center;
+            color: #1d1d1f;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #6e6e73;
+            margin-bottom: 30px;
+        }
+
+        /* 核心区域布局 */
+        .map-container {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .map-section {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .read-title {
+            color: #007aff;
+        }
+
+        .dirty-title {
+            color: #ff9500;
+        }
+
+        .section-badge {
+            font-size: 12px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: normal;
+        }
+
+        .read-badge {
+            background: #e1f0ff;
+            color: #007aff;
+        }
+
+        .dirty-badge {
+            background: #fff3e0;
+            color: #ff9500;
+        }
+
+        /* 条目样式 */
+        .entries {
+            min-height: 200px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-content: flex-start;
+        }
+
+        .entry {
+            width: 100px;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: default;
+            position: relative;
+        }
+
+        .entry-valid {
+            background: #d1fae5;
+            border: 2px solid #10b981;
+            color: #065f46;
+        }
+
+        .entry-nil {
+            background: #fef3c7;
+            border: 2px solid #f59e0b;
+            color: #92400e;
+        }
+
+        .entry-expunged {
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            color: #991b1b;
+        }
+
+        .entry-key {
+            font-weight: 600;
+            font-size: 14px;
+            word-break: break-all;
+        }
+
+        .entry-value {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .entry-status {
+            font-size: 10px;
+            margin-top: 2px;
+            opacity: 0.8;
+        }
+
+        /* 空状态 */
+        .empty-state {
+            width: 100%;
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+
+        /* 计数器区域 */
+        .counters {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-bottom: 30px;
+        }
+
+        .counter {
+            background: white;
+            padding: 15px 30px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .counter-label {
+            font-size: 14px;
+            color: #6e6e73;
+            margin-bottom: 5px;
+        }
+
+        .counter-value {
+            font-size: 32px;
+            font-weight: 700;
+        }
+
+        .misses-counter .counter-value {
+            color: #ff3b30;
+        }
+
+        .amended-counter .counter-value {
+            color: #ff9500;
+        }
+
+        /* 操作按钮 */
+        .controls {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .control-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        .control-row:last-child {
+            margin-bottom: 0;
+        }
+
+        input {
+            padding: 10px 15px;
+            border: 1px solid #d1d1d6;
+            border-radius: 8px;
+            font-size: 14px;
+            width: 120px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-load {
+            background: #007aff;
+            color: white;
+        }
+
+        .btn-store {
+            background: #34c759;
+            color: white;
+        }
+
+        .btn-delete {
+            background: #ff3b30;
+            color: white;
+        }
+
+        .btn-reset {
+            background: #8e8e93;
+            color: white;
+        }
+
+        .btn-demo {
+            background: #af52de;
+            color: white;
+        }
+
+        /* 日志区域 */
+        .log-container {
+            background: #1d1d1f;
+            border-radius: 12px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .log-title {
+            color: #8e8e93;
+            font-size: 14px;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .log-entry {
+            color: #f5f5f7;
+            font-family: "SF Mono", Menlo, monospace;
+            font-size: 13px;
+            padding: 5px 0;
+            border-bottom: 1px solid #2c2c2e;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .log-read {
+            color: #5ac8fa;
+        }
+
+        .log-write {
+            color: #34c759;
+        }
+
+        .log-delete {
+            color: #ff3b30;
+        }
+
+        .log-promote {
+            color: #ff9500;
+            font-weight: 600;
+        }
+
+        .log-rebuild {
+            color: #ffcc00;
+            font-weight: 600;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* 动画效果 */
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 0 rgba(0,122,255,0); }
+            50% { box-shadow: 0 0 20px rgba(0,122,255,0.5); }
+        }
+
+        @keyframes moveToRead {
+            0% { transform: translateX(100px); opacity: 0.5; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+
+        .entry-highlight {
+            animation: pulse 0.5s ease, glow 0.5s ease;
+        }
+
+        .entry-promote {
+            animation: moveToRead 0.6s ease;
+        }
+
+        .entry-added {
+            animation: fadeIn 0.3s ease;
+        }
+
+        /* 图例 */
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #6e6e73;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+
+        /* 提升动画遮罩 */
+        .promote-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,149,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            font-weight: 700;
+            color: #ff9500;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            z-index: 100;
+        }
+
+        .promote-overlay.active {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔄 sync.Map 动态可视化演示</h1>
+    <p class="subtitle">理解 Go 1.9 ~ 1.23 双 Map 设计的工作原理</p>
+
+    <!-- 图例 -->
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-color" style="background: #d1fae5; border: 2px solid #10b981;"></div>
+            <span>有效 (valid)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #fef3c7; border: 2px solid #f59e0b;"></div>
+            <span>已删除 (nil) - 软删除</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #fee2e2; border: 2px solid #ef4444;"></div>
+            <span>已清洗 (expunged)</span>
+        </div>
+    </div>
+
+    <!-- 计数器 -->
+    <div class="counters">
+        <div class="counter misses-counter">
+            <div class="counter-label">misses (未命中次数)</div>
+            <div class="counter-value" id="misses">0</div>
+        </div>
+        <div class="counter amended-counter">
+            <div class="counter-label">amended (dirty 有新 key)</div>
+            <div class="counter-value" id="amended">false</div>
+        </div>
+    </div>
+
+    <!-- 核心 Map 区域 -->
+    <div class="map-container">
+        <div class="map-section">
+            <div class="section-title read-title">
+                📖 read (前柜台)
+                <span class="section-badge read-badge">无锁原子访问</span>
+            </div>
+            <div class="entries" id="read-entries">
+                <div class="empty-state">前柜台是空的</div>
+            </div>
+        </div>
+
+        <div class="map-section">
+            <div class="section-title dirty-title">
+                📦 dirty (后仓库)
+                <span class="section-badge dirty-badge">需要加锁</span>
+            </div>
+            <div class="entries" id="dirty-entries">
+                <div class="empty-state">后仓库是空的</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 操作控制 -->
+    <div class="controls">
+        <div class="control-row">
+            <input type="text" id="key-input" placeholder="key" value="cola">
+            <input type="text" id="value-input" placeholder="value" value="3">
+            <button class="btn-load" onclick="doLoad()">Load 读取</button>
+            <button class="btn-store" onclick="doStore()">Store 写入</button>
+            <button class="btn-delete" onclick="doDelete()">Delete 删除</button>
+            <button class="btn-reset" onclick="doReset()">重置</button>
+            <button class="btn-demo" onclick="doFullDemo()">🎬 自动演示完整流程</button>
+        </div>
+    </div>
+
+    <!-- 日志区域 -->
+    <div class="log-container">
+        <div class="log-title">📝 操作日志</div>
+        <div id="log"></div>
+    </div>
+
+    <!-- 提升动画遮罩 -->
+    <div class="promote-overlay" id="promote-overlay">
+        ⬆️ dirty 提升为 read！
+    </div>
+
+    <script>
+        // 模拟 sync.Map 的内部状态
+        let state = {
+            read: {},
+            dirty: null,
+            misses: 0,
+            amended: false
+        };
+
+        // entry 状态
+        const ENTRY_VALID = 'valid';
+        const ENTRY_NIL = 'nil';
+        const ENTRY_EXPUNGED = 'expunged';
+
+        function log(message, type = '') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+        }
+
+        function getEntryClass(status) {
+            switch(status) {
+                case ENTRY_VALID: return 'entry-valid';
+                case ENTRY_NIL: return 'entry-nil';
+                case ENTRY_EXPUNGED: return 'entry-expunged';
+                default: return 'entry-valid';
+            }
+        }
+
+        function getEntryStatusText(status) {
+            switch(status) {
+                case ENTRY_VALID: return '有效';
+                case ENTRY_NIL: return '已删除(nil)';
+                case ENTRY_EXPUNGED: return '已清洗(expunged)';
+                default: return '';
+            }
+        }
+
+        function renderEntries(containerId, entries) {
+            const container = document.getElementById(containerId);
+
+            if (entries === null || Object.keys(entries).length === 0) {
+                container.innerHTML = '<div class="empty-state">' +
+                    (containerId === 'dirty-entries' && entries === null ? '仓库是 nil' : '是空的') +
+                    '</div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            for (const [key, entry] of Object.entries(entries)) {
+                const div = document.createElement('div');
+                div.className = 'entry ' + getEntryClass(entry.status) + ' entry-added';
+                div.id = containerId + '-' + key;
+                div.innerHTML = '<div class="entry-key">' + key + '</div><div class="entry-value">= ' + entry.value + '</div><div class="entry-status">' + getEntryStatusText(entry.status) + '</div>';
+                container.appendChild(div);
+            }
+        }
+
+        function render() {
+            renderEntries('read-entries', state.read);
+            renderEntries('dirty-entries', state.dirty);
+
+            document.getElementById('misses').textContent = state.misses;
+            document.getElementById('amended').textContent = state.amended;
+        }
+
+        function highlightEntry(containerId, key) {
+            const el = document.getElementById(containerId + '-' + key);
+            if (el) {
+                el.classList.add('entry-highlight');
+                setTimeout(function() { el.classList.remove('entry-highlight'); }, 500);
+            }
+        }
+
+        function sleep(ms) {
+            return new Promise(function(resolve) { setTimeout(resolve, ms); });
+        }
+
+        // =============================================
+        // 核心操作实现
+        // =============================================
+
+        function doLoad() {
+            const key = document.getElementById('key-input').value;
+            if (!key) return alert('请输入 key');
+
+            log('Load("' + key + '") - 先尝试从 read 读取', 'log-read');
+
+            // 1. 先从 read 找
+            if (state.read[key]) {
+                const entry = state.read[key];
+                if (entry.status === ENTRY_VALID) {
+                    log('  ✅ read 命中！"' + key + '" = ' + entry.value, 'log-read');
+                    highlightEntry('read-entries', key);
+                } else if (entry.status === ENTRY_NIL) {
+                    log('  ⚠️  read 命中但已被删除："' + key + '" = nil', 'log-read');
+                    highlightEntry('read-entries', key);
+                } else if (entry.status === ENTRY_EXPUNGED) {
+                    log('  ⚠️  read 命中但已被清洗："' + key + '" = expunged', 'log-read');
+                    highlightEntry('read-entries', key);
+                }
+                render();
+                return;
+            }
+
+            log('  ❌ read 中没有 "' + key + '"', 'log-read');
+
+            // 2. 如果 amended，去 dirty 找
+            if (state.amended && state.dirty) {
+                log('  🔒 amended=true，加锁去 dirty 找...', 'log-read');
+
+                if (state.dirty[key]) {
+                    log('  ✅ dirty 命中！"' + key + '" = ' + state.dirty[key].value, 'log-read');
+                    highlightEntry('dirty-entries', key);
+                } else {
+                    log('  ❌ dirty 中也没有 "' + key + '"', 'log-read');
+                }
+
+                // misses +1
+                state.misses++;
+                log('  📊 misses = ' + state.misses, 'log-read');
+
+                // 检查是否触发提升
+                const dirtyLen = state.dirty ? Object.keys(state.dirty).length : 0;
+                if (state.misses >= dirtyLen && dirtyLen > 0) {
+                    promoteDirty();
+                }
+            }
+
+            render();
+        }
+
+        function doStore() {
+            const key = document.getElementById('key-input').value;
+            const value = document.getElementById('value-input').value;
+            if (!key) return alert('请输入 key');
+
+            log('Store("' + key + '", ' + value + ')', 'log-write');
+
+            // 1. 先看 read 有没有，如果有且有效，直接 CAS 更新
+            if (state.read[key] && state.read[key].status === ENTRY_VALID) {
+                state.read[key].value = value;
+                // 如果 dirty 也有，同步更新（共享指针的体现）
+                if (state.dirty && state.dirty[key]) {
+                    state.dirty[key].value = value;
+                }
+                log('  ✅ "' + key + '" 在 read 中，CAS 原子更新，无锁！', 'log-write');
+                highlightEntry('read-entries', key);
+                render();
+                return;
+            }
+
+            // 2. 如果在 read 但是 expunged，需要先加锁
+            if (state.read[key] && state.read[key].status === ENTRY_EXPUNGED) {
+                log('  ⚠️  "' + key + '" 是 expunged 状态，需要加锁恢复', 'log-write');
+            }
+
+            log('  🔒 加锁，操作 dirty', 'log-write');
+
+            // 3. dirty 为 nil，需要重建
+            if (state.dirty === null) {
+                rebuildDirty();
+            }
+
+            // 4. 写入 dirty
+            if (!state.dirty) state.dirty = {};
+
+            if (state.dirty[key]) {
+                state.dirty[key].value = value;
+                state.dirty[key].status = ENTRY_VALID;
+                // 同步到 read（如果 read 有，是 nil 状态）
+                if (state.read[key]) {
+                    state.read[key].value = value;
+                    state.read[key].status = ENTRY_VALID;
+                }
+                log('  ✅ 更新 dirty 中已有的 "' + key + '"', 'log-write');
+            } else {
+                state.dirty[key] = { value: value, status: ENTRY_VALID };
+                log('  ✅ 新 key "' + key + '" 写入 dirty', 'log-write');
+            }
+
+            state.amended = true;
+            highlightEntry('dirty-entries', key);
+            render();
+        }
+
+        function doDelete() {
+            const key = document.getElementById('key-input').value;
+            if (!key) return alert('请输入 key');
+
+            log('Delete("' + key + '")', 'log-delete');
+
+            // 1. 如果在 read 中，直接 CAS 置 nil（软删除）
+            if (state.read[key] && state.read[key].status === ENTRY_VALID) {
+                state.read[key].status = ENTRY_NIL;
+                state.read[key].value = 'nil';
+                // 如果 dirty 也有，同步置 nil
+                if (state.dirty && state.dirty[key]) {
+                    state.dirty[key].status = ENTRY_NIL;
+                    state.dirty[key].value = 'nil';
+                }
+                log('  ✅ "' + key + '" 在 read 中，CAS 软删除（置为 nil），无锁！', 'log-delete');
+                highlightEntry('read-entries', key);
+                render();
+                return;
+            }
+
+            // 2. 不在 read，加锁从 dirty 删除
+            if (state.amended && state.dirty) {
+                log('  🔒 amended=true，加锁从 dirty 删除', 'log-delete');
+                if (state.dirty[key]) {
+                    delete state.dirty[key];
+                    state.misses++;
+                    log('  ✅ 从 dirty 删除 "' + key + '"', 'log-delete');
+
+                    // 检查提升
+                    const dirtyLen = Object.keys(state.dirty).length;
+                    if (state.misses >= dirtyLen && dirtyLen > 0) {
+                        promoteDirty();
+                    }
+                } else {
+                    log('  ❌ dirty 中也没有 "' + key + '"', 'log-delete');
+                }
+            } else {
+                log('  ❌ "' + key + '" 不存在', 'log-delete');
+            }
+
+            render();
+        }
+
+        function doReset() {
+            state = {
+                read: {},
+                dirty: null,
+                misses: 0,
+                amended: false
+            };
+            document.getElementById('log').innerHTML = '';
+            log('🔄 重置 sync.Map 状态');
+            render();
+        }
+
+        // 重建 dirty
+        function rebuildDirty() {
+            log('  🔨 dirty 为 nil，开始重建 dirty...', 'log-rebuild');
+            log('  遍历 read 所有 entry，拷贝有效 entry 到 dirty', 'log-rebuild');
+
+            state.dirty = {};
+
+            for (const [key, entry] of Object.entries(state.read)) {
+                if (entry.status === ENTRY_VALID) {
+                    // 拷贝指针（这里简化为同一个对象引用）
+                    state.dirty[key] = entry;
+                    log('    拷贝 "' + key + '" 到 dirty', 'log-rebuild');
+                } else if (entry.status === ENTRY_NIL) {
+                    // nil 状态标记为 expunged，不拷贝到 dirty
+                    entry.status = ENTRY_EXPUNGED;
+                    entry.value = 'expunged';
+                    log('    "' + key + '" 是 nil，标记为 expunged，不拷贝到 dirty', 'log-rebuild');
+                }
+            }
+
+            state.amended = true;
+            log('  ✅ dirty 重建完成，len(dirty) = ' + Object.keys(state.dirty).length, 'log-rebuild');
+        }
+
+        // dirty 提升为 read
+        function promoteDirty() {
+            const overlay = document.getElementById('promote-overlay');
+            overlay.classList.add('active');
+
+            log('', 'log-promote');
+            log('⬆️ ⬆️ ⬆️ 触发提升条件！ misses(' + state.misses + ') >= len(dirty)(' + Object.keys(state.dirty).length + ')', 'log-promote');
+            log('   将 dirty 整体提升为新的 read', 'log-promote');
+
+            setTimeout(function() {
+                // 提升
+                state.read = { ...state.dirty };
+                state.dirty = null;
+                state.misses = 0;
+                state.amended = false;
+
+                log('   ✅ 提升完成！', 'log-promote');
+                log('      read 现在有 ' + Object.keys(state.read).length + ' 个 entry', 'log-promote');
+                log('      dirty = nil', 'log-promote');
+                log('      misses = 0', 'log-promote');
+                log('', 'log-promote');
+
+                render();
+                overlay.classList.remove('active');
+
+                // 给所有 read 条目加动画
+                for (const key of Object.keys(state.read)) {
+                    const el = document.getElementById('read-entries-' + key);
+                    if (el) {
+                        el.classList.add('entry-promote');
+                        setTimeout(function() { el.classList.remove('entry-promote'); }, 600);
+                    }
+                }
+            }, 600);
+        }
+
+        // =============================================
+        // 自动演示完整流程
+        // =============================================
+
+        async function doFullDemo() {
+            doReset();
+            await sleep(500);
+
+            log('========================================');
+            log('🎬 开始完整流程演示');
+            log('========================================');
+
+            // 1. Store 可乐
+            document.getElementById('key-input').value = 'cola';
+            document.getElementById('value-input').value = '3';
+            await sleep(500);
+            doStore();
+
+            // 2. Store 薯片
+            await sleep(800);
+            document.getElementById('key-input').value = 'chips';
+            document.getElementById('value-input').value = '5';
+            doStore();
+
+            // 3. Load 可乐 - 第一次 miss
+            await sleep(800);
+            document.getElementById('key-input').value = 'cola';
+            doLoad();
+
+            // 4. Load 可乐 - 第二次 miss，触发提升
+            await sleep(800);
+            log('💡 注意：misses 即将达到 len(dirty)，会触发提升！');
+            await sleep(500);
+            doLoad();
+
+            await sleep(1000);
+
+            // 5. Load 可乐 - 现在在 read 里了
+            await sleep(500);
+            log('');
+            log('✨ 现在再 Load("cola") 就直接命中 read 了！');
+            await sleep(500);
+            doLoad();
+
+            // 6. 涨价 - 更新已有 key
+            await sleep(800);
+            log('');
+            log('✨ 更新已有 key，直接 CAS 原子操作，无锁！');
+            await sleep(500);
+            document.getElementById('key-input').value = 'cola';
+            document.getElementById('value-input').value = '4';
+            doStore();
+
+            // 7. 删除可乐
+            await sleep(800);
+            log('');
+            log('✨ Delete 也是直接在 read 上操作，无锁！');
+            await sleep(500);
+            doDelete();
+
+            // 8. Store 面包 - 触发 dirty 重建
+            await sleep(800);
+            log('');
+            log('✨ Store 新 key "bread"，dirty 是 nil，触发重建！');
+            log('   重建时 "cola" 是 nil，会被标记为 expunged，不拷贝到 dirty');
+            await sleep(500);
+            document.getElementById('key-input').value = 'bread';
+            document.getElementById('value-input').value = '6';
+            doStore();
+
+            await sleep(1000);
+            log('');
+            log('========================================');
+            log('✅ 演示完成！你可以手动操作继续试验');
+            log('========================================');
+        }
+
+        // 初始渲染
+        render();
+        log('👋 欢迎来到 sync.Map 可视化演示！点击按钮或直接运行自动演示');
+    </script>
+</body>
+</html>
