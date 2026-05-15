@@ -79,9 +79,9 @@ type entry struct {
 
 ```mermaid
 graph LR
-    A[read.m["user1"]] --> C[*entry]
-    B[dirty["user1"]] --> C[*entry]
-    C --> D[p → &User{Name: "Alice"}]
+    A["read.m['user1']"] --> C["*entry"]
+    B["dirty['user1']"] --> C
+    C --> D["p → &User{Name: 'Alice'}"]
 
     style A fill:#e1f0ff,stroke:#007aff,stroke-width:2px
     style B fill:#fff3e0,stroke:#ff9500,stroke-width:2px
@@ -126,8 +126,8 @@ stateDiagram-v2
     有效 --> 有效 : Store (CAS 更新值)
     有效 --> nil : Delete (CAS 置 nil)
     nil --> 有效 : Store (CAS 重新激活)
-    nil --> expunged : dirtyLocked() 遍历<br/>tryExpungeLocked()
-    expunged --> nil : unexpungeLocked()<br/>先恢复再加到 dirty
+    nil --> expunged : dirtyLocked() 遍历 tryExpungeLocked()
+    expunged --> nil : unexpungeLocked() 先恢复再加到 dirty
     expunged --> 有效 : 先恢复 nil 再 CAS Store
 ```
 
@@ -177,35 +177,32 @@ func (m *Map) Load(key any) (value any, ok bool) {
 
 ```mermaid
 flowchart TD
-    A[Start: Load(key)] --> B{key 在 read.m 中?}
+    A["Start: Load(key)"] --> B{"key 在 read.m 中?"}
 
-    B -->|是| C[e.load() 原子读值]
-    C --> D[返回 (value, true)]
+    B -->|是| C["e.load() 原子读值"]
+    C --> D["返回 (value, true)"]
     style C fill:#d1fae5,stroke:#10b981,stroke-width:2px
     style D fill:#d1fae5,stroke:#10b981,stroke-width:2px
 
-    B -->|否| E{read.amended == true?}
-    E -->|否| F[返回 (nil, false)]
+    B -->|否| E{"read.amended == true?"}
+    E -->|否| F["返回 (nil, false)"]
     style F fill:#d1fae5,stroke:#10b981,stroke-width:2px
 
-    E -->|是| G[🔒 加锁 mu.Lock()]
-    G --> H[双重检查 read<br/>（加锁期间可能已提升）]
-    H --> I{key 现在在 read.m 中?}
-    I -->|是| J[读 read.m[key]]
-    I -->|否| K[读 dirty[key]]
-    K --> L[missLocked() 计数+1]
-    L --> M{misses >= len(dirty)?}
-    M -->|是| N[⬆️ dirty 提升为 read]
-    M -->|否| O[🔓 解锁]
+    E -->|是| G["🔒 加锁 mu.Lock()"]
+    G --> H["双重检查 read 加锁期间可能已提升"]
+    H --> I{"key 现在在 read.m 中?"}
+    I -->|是| J["读 read.m[key]"]
+    I -->|否| K["读 dirty[key]"]
+    K --> L["missLocked() 计数+1"]
+    L --> M{"misses >= len(dirty)?"}
+    M -->|是| N["⬆️ dirty 提升为 read"]
+    M -->|否| O["🔓 解锁"]
     J --> O
     N --> O
-    O --> P[返回结果]
+    O --> P["返回结果"]
 
     style G fill:#fee2e2,stroke:#ef4444,stroke-width:2px
     style N fill:#fff3e0,stroke:#ff9500,stroke-width:2px
-
-    note right of D ✅ 无锁!
-    note right of F ✅ 无锁!
 ```
 
 ---
@@ -249,42 +246,43 @@ func (m *Map) Store(key, value any) {
 
 ```mermaid
 flowchart TD
-    A[Start: Store(key, value)] --> B{key 在 read 中?}
+    A["Start: Store(key, value)"] --> B{"key 在 read 中?"}
 
-    B -->|是| C[tryStore CAS 更新值]
-    C --> D{CAS 成功?}
-    D -->|是| E[返回]
+    B -->|是| C["tryStore CAS 更新值"]
+    C --> D{"CAS 成功?"}
+    D -->|是| E["返回"]
     style E fill:#d1fae5,stroke:#10b981,stroke-width:2px
-    note right of E ✅ 无锁!
 
-    B -->|否| F[🔒 加锁]
-    D -->|失败<br/>(entry 是 expunged)| F
+    B -->|否| F["🔒 加锁"]
+    D -->|失败 entry 是 expunged| F
 
-    F --> G[双重检查 read]
-    G --> H{key 在 read 中?}
+    F --> G["双重检查 read"]
+    G --> H{"key 在 read 中?"}
 
-    H -->|是| I{entry 是 expunged?}
-    I -->|是| J[unexpunge<br/>标记为 nil<br/>加回 dirty]
-    J --> K[原子更新 entry.p]
+    H -->|是| I{"entry 是 expunged?"}
+    I -->|是| J["unexpunge 标记为 nil 加回 dirty"]
+    J --> K["原子更新 entry.p"]
     I -->|否| K
 
-    H -->|否| L{key 在 dirty 中?}
-    L -->|是| M[直接更新 entry.p]
-    L -->|否| N[全新 key]
-    N --> O{dirty 为 nil?}
-    O -->|是| P[dirtyLocked() 重建 dirty<br/>遍历 read 拷贝有效 entry]
-    O -->|否| Q
-    P --> Q[amended = true]
-    Q --> R[dirty[key] = newEntry(value)]
+    H -->|否| L{"key 在 dirty 中?"}
+    L -->|是| M["直接更新 entry.p"]
+    L -->|否| N["全新 key"]
+    N --> O{"dirty 为 nil?"}
+    O -->|是| P["dirtyLocked() 重建 dirty 遍历 read 拷贝有效 entry"]
+    O -->|否| Q["amended = true"]
+    P --> Q
+    Q --> R["dirty[key] = newEntry(value)"]
 
-    K --> S[🔓 解锁]
+    K --> S["🔓 解锁"]
     M --> S
     R --> S
-    S --> T[返回]
+    S --> T["返回"]
 
     style F fill:#fee2e2,stroke:#ef4444,stroke-width:2px
     style P fill:#fff3e0,stroke:#ff9500,stroke-width:2px
 ```
+
+> **提示：** 路径 E 是无锁的！当 key 在 read 中且 entry 不是 expunged 状态时，CAS 更新可以直接成功。
 
 **关键优化：已有 key 的更新完全无锁！**
 
@@ -417,19 +415,19 @@ func (m *Map) missLocked() {
 
 ```mermaid
 flowchart TD
-    A[每次 Load 未命中] --> B[misses++]
-    B --> C{misses >= len(dirty)?}
+    A["每次 Load 未命中"] --> B["misses++"]
+    B --> C{"misses >= len(dirty)?"}
 
-    C -->|否| D[不提升, 继续]
+    C -->|否| D["不提升, 继续"]
     style D fill:#e1f0ff,stroke:#007aff,stroke-width:2px
 
-    C -->|是| E[⬆️ 触发提升!]
+    C -->|是| E["⬆️ 触发提升!"]
     style E fill:#fff3e0,stroke:#ff9500,stroke-width:2px
 
-    E --> F[read = dirty<br/>dirty 整体变为新 read]
-    F --> G[dirty = nil<br/>清空]
-    G --> H[misses = 0<br/>重置计数器]
-    H --> I[提升完成]
+    E --> F["read = dirty dirty 整体变为新 read"]
+    F --> G["dirty = nil 清空"]
+    G --> H["misses = 0 重置计数器"]
+    H --> I["提升完成"]
     style I fill:#d1fae5,stroke:#10b981,stroke-width:2px
 ```
 
