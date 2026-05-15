@@ -10,6 +10,106 @@ import (
 )
 
 // ============================================
+// 演示 0：栈 vs 堆分配场景
+// ============================================
+
+// 一定在栈上的
+func stackDemo() {
+	fmt.Println("=== 演示 0：栈 vs 堆分配场景 ===")
+
+	// ✅ 栈：局部变量
+	x := 42
+	fmt.Printf("   局部变量 x = %d（栈上）\n", x)
+
+	// ✅ 栈：局部结构体（值类型，不逃逸）
+	type Point struct{ X, Y int }
+	p := Point{X: 1, Y: 2}
+	fmt.Printf("   局部结构体 p = %+v（栈上）\n", p)
+
+	// ✅ 栈：小数组
+	arr := [4]int{1, 2, 3, 4}
+	fmt.Printf("   小数组 arr = %v（栈上）\n", arr)
+
+	// ✅ 栈：new 但不逃逸
+	q := new(int)
+	*q = 100
+	fmt.Printf("   new(int) 不逃逸: q = %d（栈上！）\n", *q)
+
+	// ✅ 栈：&取址但不逃逸
+	u := User{Name: "local", Age: 20}
+	age := u.Age // 通过值访问，不逃逸
+	_ = &u       // 取址但没逃出函数，编译器可能优化
+	fmt.Printf("   &u 不逃逸: age = %d（栈上）\n", age)
+}
+
+// 一定在堆上的
+func heapDemo() {
+	fmt.Println("\n   --- 一定在堆上的 ---")
+
+	// ❌ 堆：返回指针
+	u := newUserPtr()
+	fmt.Printf("   返回指针: %+v（堆上）\n", u)
+
+	// ❌ 堆：闭包捕获
+	c := counter()
+	fmt.Printf("   闭包捕获: counter() = %d（堆上）\n", c())
+
+	// ❌ 堆：interface{}
+	var i interface{} = 42
+	fmt.Printf("   interface{}: %v（堆上）\n", i)
+
+	// ❌ 堆：make 创建的 map
+	m := make(map[string]int)
+	m["key"] = 1
+	fmt.Printf("   make(map): %v（堆上）\n", m)
+
+	// ❌ 堆：make 创建的 channel
+	ch := make(chan int, 1)
+	fmt.Printf("   make(chan): %v（堆上）\n", ch)
+
+	// ❌ 堆：大对象
+	big := make([]byte, 100*1024) // 100KB
+	_ = big
+	fmt.Println("   make([]byte, 100KB)（堆上，超过 64KB）")
+}
+
+// 同一变量不同写法
+func sameTypeDiffAlloc() {
+	fmt.Println("\n   --- 同一类型，不同写法 ---")
+
+	type Config struct {
+		MaxConn int
+		Timeout int
+	}
+
+	// ✅ 栈：值类型局部使用
+	func() {
+		c := Config{MaxConn: 100, Timeout: 30}
+		fmt.Printf("   值类型局部: %+v → 栈上 ✅\n", c)
+	}()
+
+	// ❌ 堆：返回指针
+	func() {
+		c := Config{MaxConn: 100, Timeout: 30}
+		fmt.Printf("   返回指针: %+v → 堆上 ❌\n", &c)
+	}()
+
+	// ✅ 栈：new 但不逃逸
+	func() {
+		c := new(Config)
+		c.MaxConn = 100
+		fmt.Printf("   new不逃逸: MaxConn=%d → 栈上 ✅\n", c.MaxConn)
+	}()
+
+	// ❌ 堆：赋值给 interface
+	func() {
+		c := Config{MaxConn: 100, Timeout: 30}
+		var i interface{} = c
+		fmt.Printf("   interface{}: %v → 堆上 ❌\n", i)
+	}()
+}
+
+// ============================================
 // 演示 1：返回指针 vs 返回值
 // ============================================
 
@@ -291,6 +391,10 @@ func printSummary() {
 // ============================================
 
 func main() {
+	stackDemo()
+	heapDemo()
+	sameTypeDiffAlloc()
+
 	demo1ReturnPointer()
 	demo2Closure()
 	demo3Interface()

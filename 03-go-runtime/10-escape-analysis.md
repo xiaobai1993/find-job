@@ -2,6 +2,380 @@
 
 ---
 
+## 零、Go 栈 vs 堆：什么分配在哪里？
+
+### 1. 栈和堆的本质区别
+
+| | 栈（Stack） | 堆（Heap） |
+|---|---|---|
+| **谁管理** | 编译器自动管理 | GC（垃圾回收器）管理 |
+| **分配方式** | 移动栈指针，几乎零开销 | malloc 申请，需要找空闲内存块 |
+| **回收方式** | 函数返回自动回收（移动栈指针） | GC 标记清除，需要 STW |
+| **速度** | 极快（1~2 条 CPU 指令） | 慢（malloc + GC 扫描 + STW，差 10~100 倍） |
+| **缓存友好** | ✅ 连续内存，L1 缓存命中率高 | ❌ 分散分配，缓存命中率低 |
+| **线程安全** | ✅ 每个 goroutine 独立栈 | ⚠️ 多 goroutine 共享，需要加锁/并发控制 |
+| **大小** | goroutine 初始 2KB，最大 1GB | 受系统内存限制 |
+| **碎片** | ❌ 无碎片（连续弹栈压栈） | ⚠️ 有碎片（频繁分配释放） |
+
+---
+
+### 2. 一定在栈上的（编译器保证）
+
+#### 2.1 函数内的局部变量（值类型，不逃逸）
+
+```go
+func add(a, b int) int {
+    result := a + b    // ✅ 栈上，函数返回自动回收
+    return result
+}
+```
+
+#### 2.2 函数内的局部结构体（值类型，不逃逸）
+
+```go
+func calc() int {
+    p := Point{X: 1, Y: 2}  // ✅ 栈上，16 字节
+    return p.X + p.Y
+}
+```
+
+#### 2.3 编译期能确定大小的小数组/slice
+
+```go
+func localArray() int {
+    arr := [4]int{1, 2, 3, 4}  // ✅ 栈上，32 字节
+    return arr[0]
+}
+
+func localSlice() int {
+    s := make([]int, 4)  // ✅ 栈上，底层数组也在栈上（小且不逃逸）
+    s[0] = 42
+    return s[0]
+}
+```
+
+#### 2.4 for 循环内的临时变量
+
+```go
+func sum(nums []int) int {
+    total := 0          // ✅ 栈上
+    for _, n := range nums {
+        total += n      // ✅ n 也是栈上
+    }
+    return total
+}
+```
+
+#### 2.5 值类型参数和返回值
+
+```go
+func double(x int) int {  // x 在栈上
+    return x * 2           // 返回值在调用方的栈上
+}
+```
+
+#### 2.6 方法接收者为值类型
+
+```go
+type Rect struct{ W, H float64 }
+
+func (r Rect) Area() float64 {  // 值接收者，r 在栈上
+    return r.W * r.H
+}
+```
+
+---
+
+### 3. 一定在堆上的（编译器保证）
+
+#### 3.1 全局变量
+
+```go
+var globalConfig = &Config{MaxConn: 100}  // ❌ 堆上，程序整个生命周期都存活
+var globalCache = make(map[string]string) // ❌ 堆上
+```
+
+#### 3.2 通过 new 创建的对象
+
+```go
+func create() *int {
+    p := new(int)  // ❌ 堆上（new 总是返回指针，这里逃逸了）
+    *p = 42
+    return p
+}
+```
+
+**注意：** `new` 不一定都在堆上！如果编译器分析后确定不逃逸，`new` 的对象也可能在栈上：
+
+```go
+func localNew() int {
+    p := new(int)  // ✅ 可能栈上！因为 p 没有逃出函数
+    *p = 42
+    return *p      // 返回值，不是指针
+}
+```
+
+#### 3.3 通过 make 创建且逃逸的引用类型
+
+```go
+func createSlice() []int {
+    return make([]int, 1000)  // ❌ 堆上，返回了 slice
+}
+
+func createMap() map[string]int {
+    return make(map[string]int)  // ❌ 堆上，返回了 map
+}
+
+func createChan() chan int {
+    return make(chan int, 10)  // ❌ 堆上，返回了 channel
+}
+```
+
+#### 3.4 闭包捕获的变量
+
+```go
+func counter() func() int {
+    count := 0  // ❌ 堆上，闭包捕获
+    return func() int {
+        count++
+        return count
+    }
+}
+```
+
+#### 3.5 大对象（> 64KB）
+
+```go
+func bigAlloc() {
+    _ = make([]byte, 100*1024)  // ❌ 堆上，超过 64KB
+}
+```
+
+#### 3.6 运行时才能确定大小的对象
+
+```go
+func dynamicAlloc(n int) []byte {
+    return make([]byte, n)  // ❌ 堆上，n 是运行时才知道的
+}
+```
+
+---
+
+### 4. 可能栈上也可能堆上（取决于逃逸分析）
+
+这是最复杂的部分，同一个写法在不同场景下分配位置不同：
+
+#### 4.1 make([]T, n) — 大小决定
+
+```go
+func small() int {
+    s := make([]int, 10)    // ✅ 栈上，小且局部使用
+    return s[0]
+}
+
+func big() {
+    _ = make([]int, 10000)  // ❌ 堆上，太大
+}
+
+func returned() []int {
+    s := make([]int, 10)    // ❌ 堆上，返回了引用
+    return s
+}
+```
+
+#### 4.2 new(T) — 是否逃逸决定
+
+```go
+func localNew() int {
+    p := new(int)   // ✅ 栈上，不逃逸
+    *p = 42
+    return *p
+}
+
+func escapeNew() *int {
+    p := new(int)   // ❌ 堆上，返回指针
+    *p = 42
+    return p
+}
+```
+
+#### 4.3 &T{} — 是否逃逸决定
+
+```go
+func localVar() int {
+    u := &User{Name: "alice"}  // ✅ 栈上，不逃逸
+    return u.Age
+}
+
+func escapeVar() *User {
+    u := &User{Name: "alice"}  // ❌ 堆上，返回指针
+    return u
+}
+```
+
+#### 4.4 slice 元素是指针还是值
+
+```go
+func valueSlice() int {
+    s := []int{1, 2, 3}      // ✅ 可能栈上，值类型
+    return s[0]
+}
+
+func ptrSlice() {
+    s := []*User{             // ❌ 堆上，每个元素都是指针
+        {Name: "alice"},
+        {Name: "bob"},
+    }
+    _ = s
+}
+```
+
+---
+
+### 5. Go 各类型默认分配位置
+
+| 类型 | 默认分配 | 说明 |
+|------|---------|------|
+| `int`, `float64`, `bool` 等基本类型 | **栈** | 值类型，函数内局部使用时在栈上 |
+| `string` | **视情况** | string 结构在栈上（指针+长度），底层数组在堆上 |
+| `array`（数组）| **栈** | 值类型，大小编译期确定 |
+| `struct`（小，不逃逸）| **栈** | 值类型，函数内局部使用 |
+| `struct`（大或逃逸）| **堆** | 逃逸或超过 64KB |
+| `slice` | **视情况** | slice 结构在栈上（指针+长度+容量），底层数组视逃逸情况 |
+| `map` | **堆** | 引用类型，`make` 创建的 map 总在堆上 |
+| `channel` | **堆** | 引用类型，`make` 创建的 channel 总在堆上 |
+| `interface{}` | **堆** | 赋值给 interface 的值逃逸到堆 |
+| `func`（闭包）| **堆** | 闭包捕获的变量在堆上 |
+| `pointer`（局部不逃逸）| **栈** | 指向栈上对象 |
+| `pointer`（逃逸）| **堆** | 指向堆上对象 |
+
+---
+
+### 6. 值类型 vs 引用类型（面试必区分！）
+
+| | 值类型 | 引用类型 |
+|---|---|---|
+| **种类** | int, float, bool, string, array, struct | slice, map, channel, pointer, func, interface |
+| **赋值行为** | 拷贝整个值 | 拷贝指针（共享底层数据） |
+| **默认分配** | 栈（不逃逸时） | 堆（make 创建） |
+| **函数传参** | 值拷贝，不影响原值 | 指针拷贝，修改会影响原值 |
+| **零值** | 各类型零值（0, "", false） | nil |
+
+**注意：string 是值类型，但底层数据在堆上！**
+
+```go
+s1 := "hello"       // s1 结构在栈上，底层数据在只读段
+s2 := s1            // 值拷贝，s2 和 s1 共享底层数据（COW）
+s3 := s1 + " world" // 新字符串，底层数据在堆上
+```
+
+---
+
+### 7. goroutine 栈的特殊之处
+
+Go 的栈和 C 的栈有很大区别：
+
+| 特性 | C 栈 | Go goroutine 栈 |
+|------|------|-----------------|
+| 大小 | 固定（通常 1~8MB） | 动态增长（2KB → 最大 1GB） |
+| 增长方式 | 不可增长，溢出就崩溃 | 自动扩容，每次 2 倍 |
+| 位置 | 操作系统分配 | Go runtime 分配（可移动！） |
+| 线程模型 | 1 线程 = 1 栈 | 1 goroutine = 1 栈，多个 goroutine 复用同一线程栈 |
+
+**栈扩容过程：**
+```
+goroutine 调用函数
+    ↓
+检查栈空间够不够（stackguard0）
+    ↓
+不够 → runtime.morestack()
+    ↓
+分配新栈（2 倍大小）
+    ↓
+拷贝旧栈数据到新栈
+    ↓
+调整所有指针指向新栈
+    ↓
+继续执行
+```
+
+**这就是为什么 Go 不怕深递归（栈不够会自动扩），而 C 会 stack overflow！**
+
+---
+
+### 8. 一个完整的例子：同一个变量，不同写法的分配位置
+
+```go
+type Config struct {
+    MaxConn int
+    Timeout int
+}
+
+// ✅ 栈上：值类型，局部使用
+func stackAlloc() int {
+    c := Config{MaxConn: 100, Timeout: 30}
+    return c.MaxConn
+}
+
+// ❌ 堆上：返回指针
+func heapAlloc() *Config {
+    c := Config{MaxConn: 100, Timeout: 30}
+    return &c
+}
+
+// ✅ 栈上：new 但不逃逸
+func stackNew() int {
+    c := new(Config)
+    c.MaxConn = 100
+    return c.MaxConn  // 返回值，不是指针
+}
+
+// ❌ 堆上：赋值给 interface
+func heapInterface() {
+    c := Config{MaxConn: 100, Timeout: 30}
+    var i interface{} = c  // 逃逸到堆
+    _ = i
+}
+
+// ❌ 堆上：闭包捕获
+func heapClosure() func() int {
+    c := Config{MaxConn: 100, Timeout: 30}
+    return func() int {
+        return c.MaxConn  // 闭包捕获 c，逃逸到堆
+    }
+}
+
+// ✅ 栈上：值接收者方法
+func (c Config) GetMaxConn() int {  // c 在栈上
+    return c.MaxConn
+}
+```
+
+---
+
+### 9. 栈和堆分配场景速查表
+
+| 写法 | 分配位置 | 条件 |
+|------|---------|------|
+| `x := 42` | ✅ 栈 | 局部变量，不逃逸 |
+| `x := "hello"` | ✅ 栈（结构）+ 堆（数据） | string 底层数据在堆 |
+| `arr := [4]int{1,2,3,4}` | ✅ 栈 | 小数组，不逃逸 |
+| `s := []int{1,2,3}` | 视情况 | 不逃逸且小→栈；逃逸或大→堆 |
+| `m := make(map[string]int)` | ❌ 堆 | map 总在堆上 |
+| `ch := make(chan int)` | ❌ 堆 | channel 总在堆上 |
+| `p := new(int)` | 视情况 | 不逃逸→栈；逃逸→堆 |
+| `p := &Config{...}` | 视情况 | 不逃逸→栈；逃逸→堆 |
+| `c := Config{...}` | ✅ 栈 | 值类型，不逃逸 |
+| `return &x` | ❌ 堆 | 返回局部变量指针 |
+| `return x` | ✅ 栈 | 返回值拷贝 |
+| `ch <- &x` | ❌ 堆 | 发送到 channel |
+| `fmt.Println(x)` | ❌ 堆 | interface{} 参数 |
+| `var global = ...` | ❌ 堆 | 全局变量 |
+| `make([]byte, 100KB)` | ❌ 堆 | 超过 64KB |
+| 闭包 `func() { x++ }` | ❌ 堆 | 闭包捕获 x |
+
+---
+
 ## 一、什么是逃逸分析？
 
 ### 一句话总结
