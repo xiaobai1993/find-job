@@ -202,6 +202,201 @@ autoRenewal: true  // 开启自动续期
 
 ---
 
+## 四、深度对比：Lock() vs LockAndReturnValue()
+
+这两个函数看起来很像，但本质完全不一样！90% 的人都以为只是多了个返回值，其实大错特错。
+
+### 对比表
+
+| 维度 | `Lock()` | `LockAndReturnValue()` |
+|-----|---------|-----------------------|
+| **底层实现** | ✅ 直接调用官方 redsync 库 | ❌ **完全自己重写了一遍 Redlock 算法** |
+| **代码质量** | 官方久经考验 | 业务自己写的，有已知 BUG |
+| **失败回滚** | 官方自动回滚 | ❌ **不回滚！**（有 FIXME 注释） |
+| **额外功能** | 只返回 error | ✅ 失败时返回当前真正持有锁的 value |
+
+---
+
+### 逐行源码对比
+
+#### `Lock()` - 官方实现
+
+```go
+func (m *mutex) Lock(ctx context.Context) error {
+    // 👇 90% 的逻辑都在 redsync 官方库里
+    if err := m.mutex.LockContext(ctx); err != nil {
+        // 只是做了个错误类型转换，仅此而已
+        var errTaken *redsync.ErrTaken
+        if errors.As(err, &errTaken) {
+            err = redsync.ErrFailed
+        }
+        return fmt.Errorf("redsync LockContext %w", err)
+    }
+
+    // 成功了就开看门狗
+    if m.autoRenewal {
+        if atomic.CompareAndSwapInt32(&m.lockFlag, 0, 1) {
+            safego.Go(ctx, func(context.Context) { m.watch() })
+        }
+    }
+    return nil
+}
+```
+
+**非常简洁！绝大多数场景你都应该用这个。**
+
+---
+
+#### `LockAndReturnValue()` - 自实现（有 BUG）
+
+```go
+// FIXME: 当获得锁没有超过半数时，应该把已经加好的锁释放掉
+func (m *mutex) LockAndReturnValue(ctx context.Context) (string, error) {
+    ch := make(chan result)
+
+    // 1. 并行给所有 Redis 节点发加锁请求
+    for _, pool := range m.pools {
+        go func(pool redis.Pool) {
+            // 👇 自己写的 setNXAndReturnValue，不是 redsync 官方的！
+            r.Value, r.Err = m.setNXAndReturnValue(ctx, pool)
+            ch <- r
+        }(pool)
+    }
+
+    // 2. 统计成功数
+    for range m.pools {
+        r := <-ch
+        if r.Err == nil {
+            n++
+        } else {
+            vc[r.Value] += 1  // 统计各个 value 的票数
+        }
+    }
+
+    // 3. 超过半数 = 加锁成功
+    if n >= len(m.pools)/2+1 {
+        // 开看门狗
+        return m.mutex.Value(), nil
+    }
+
+    // ❌ BUG 在这里！上面已经加成功的 n 个锁没有释放！
+    // 永久留在 Redis 上，直到自动过期！
+
+    // 4. 返回真正持有锁的人的 value（超过半数节点都认可的那个 value）
+    for v, c := range vc {
+        if c >= len(m.pools)/2+1 {
+            return v, redsync.ErrFailed
+        }
+    }
+
+    return "", redsync.ErrFailed
+}
+```
+
+---
+
+### 那段看起来复杂的代码拆解
+
+`Lock()` 内部其实也有一段类似的代码，看起来很绕，拆解一下就懂了：
+
+```go
+n, err := func() (int, error) {
+    // 👇 第1层：创建带超时的子 ctx
+    // 超时时间 = 锁过期时间 * 超时因子（默认 0.05，也就是过期时间的 5%）
+    // 比如锁过期 30 秒，加锁超时就是 1.5 秒
+    ctx, cancel := context.WithTimeout(ctx,
+        time.Duration(int64(float64(m.expiry)*m.timeoutFactor)))
+    defer cancel()  // 函数退出时自动取消 ctx
+
+    // 👇 第2层：并行给所有 Redis 节点发加锁请求
+    // actOnPoolsAsync = 给每个 pool 开一个 goroutine 执行函数
+    // 返回成功的节点数 n
+    return m.actOnPoolsAsync(func(pool redis.Pool) (bool, error) {
+        return m.acquire(ctx, pool, value)
+    })
+}()  // 👈 注意这个括号！定义完立刻调用
+```
+
+**为什么要写这么绕？**
+
+这是 Go 里的 **IIFE（立即执行函数表达式）** 模式：
+
+```go
+// ❌ 如果直接写，cancel() 就不会被正确调用
+ctx, cancel := context.WithTimeout(ctx, timeout)
+n, err := m.actOnPoolsAsync(...)
+// cancel() 写在这里也行，但如果 actOnPoolsAsync panic 了就不会执行
+
+// ✅ 用 IIFE，defer 保证一定执行
+// 这是 Go 里做局部资源管理的标准技巧
+```
+
+> 💡 **面试加分：** 这是 Go 里做局部资源管理的标准写法，利用函数作用域 + defer 保证资源一定被释放。
+
+---
+
+### 核心价值：为什么要写这么一个有 BUG 的函数？
+
+**这个函数的核心价值是：加锁失败时，能告诉你谁现在拿着锁！**
+
+普通的 `Lock()` 失败了就只返回一个 error，你不知道：
+- 是网络超时了？
+- 还是真的有人拿着锁？
+- 拿着锁的人是谁？value 是什么？
+
+`LockAndReturnValue()` 失败时会返回当前真正持有锁的 value（超过半数节点都认可的那个 value）。
+
+**典型使用场景：**
+```go
+value, err := lock.LockAndReturnValue(ctx)
+if err == redsync.ErrFailed {
+    if value != "" {
+        // 我知道了！现在是 value 这个人拿着锁
+        // 我可以去通知他释放，或者做其他业务逻辑
+    } else {
+        // 没有人持有锁，是网络问题导致加锁失败
+    }
+}
+```
+
+---
+
+### 🛠️ BUG 修复方案
+
+**问题：** 加锁没有超过半数时，已经加成功的那 n 个锁不会被释放，永久留在 Redis 上直到过期。
+
+**修复代码：**
+```go
+// 大多数节点加锁成功则认为成功
+if n >= len(m.pools)/2+1 {
+    if atomic.CompareAndSwapInt32(&m.lockFlag, 0, 1) {
+        m.stopWatch = make(chan struct{})
+        safego.Go(ctx, func(context.Context) { m.watch() })
+    }
+    return m.mutex.Value(), nil
+}
+
+// ==================== 👇 新增：失败回滚 ====================
+// 没有达到多数派，把已经加上的锁全部释放掉
+if n > 0 {
+    // 并行释放所有已经加上的锁
+    _, _ = m.actOnPoolsAsync(func(pool redis.Pool) (bool, error) {
+        // 尝试释放，忽略释放失败（反正锁也会自动过期）
+        _, err := m.release(ctx, pool, value)
+        return true, err
+    })
+}
+// ==================== 👆 新增结束 ====================
+```
+
+**修复说明：**
+1. 只要 `n > 0`，说明至少有一个节点加锁成功了
+2. 并行给所有节点发释放请求，把加上的锁删掉
+3. 忽略释放失败，因为锁本身有过期时间，最坏情况等几秒就自动释放了
+4. 回滚不需要等所有节点都释放成功，只要尽力就行
+
+---
+
 ### ❌ 问题 2：误删了别人的锁
 
 **场景：**
@@ -375,3 +570,6 @@ mutex.Lock(ctx)  // 死锁！自己把自己挡住了
 4. ✅ **四个经典坑及解决方案** - 过期、误删、主从切换、时钟漂移
 5. ✅ **批量锁的回滚机制** - 失败了要把已经加上的锁释放掉
 6. ✅ **最终一致性设计** - 解锁失败也没关系，最终会自动过期
+7. ✅ **Lock() vs LockAndReturnValue() 的本质区别** - 一个用官方实现，一个自己重写
+8. ✅ **LockAndReturnValue() 的已知 BUG** - 加锁失败没有回滚，以及如何修复
+9. ✅ **IIFE 立即执行函数模式** - Go 里做局部资源管理的标准技巧
