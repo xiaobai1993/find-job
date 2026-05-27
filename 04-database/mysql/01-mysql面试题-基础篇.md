@@ -114,9 +114,46 @@ SELECT amount FROM payment_sub_slip WHERE account_type = 'WECHAT';
 **答：**
 
 **并发问题：**
-1. **脏读**：A 事务读到了 B 事务还没提交的修改
-2. **不可重复读**：A 事务里同一行数据读两次结果不一样（中间被 B 提交改了）
-3. **幻读**：A 事务里同一个范围查询两次，行数不一样（中间 B 插入了新行提交了）
+
+**1. 脏读（Dirty Read）**
+
+读到了另一个事务还没提交的修改。
+
+```
+事务 B：UPDATE balance = 100 WHERE id=1  ← 未提交
+事务 A：SELECT balance WHERE id=1        ← 读到 100（脏数据）
+事务 B：ROLLBACK                         ← 回滚，100 从未真实存在
+结果：事务 A 拿到了一个不存在的值
+```
+
+叫"脏"是因为读到的数据随时可能消失，不可信。
+**只有 READ UNCOMMITTED 隔离级别下才会发生。**
+
+**2. 不可重复读（Non-Repeatable Read）**
+
+同一事务内，对同一行读两次结果不一样（中间被其他事务提交修改了）。
+
+```
+事务 A：SELECT balance WHERE id=1  → 100
+事务 B：UPDATE balance = 200，COMMIT
+事务 A：SELECT balance WHERE id=1  → 200  ← 同一事务两次读值不同
+```
+
+**READ COMMITTED 及以下会发生。**
+
+**3. 幻读（Phantom Read）**
+
+同一事务内，对同一范围查询两次，行数不一样（中间被其他事务插入/删除了行）。
+
+```
+事务 A：SELECT * WHERE amount > 100  → 5 行
+事务 B：INSERT 一条 amount=200，COMMIT
+事务 A：SELECT * WHERE amount > 100  → 6 行  ← 多出来的行像幻觉
+```
+
+**REPEATABLE READ 及以下理论上会发生（MySQL InnoDB 用 Next-Key Lock 解决了）。**
+
+---
 
 **四大隔离级别：**
 
@@ -127,7 +164,7 @@ SELECT amount FROM payment_sub_slip WHERE account_type = 'WECHAT';
 | **可重复读 Repeatable Read** | ❌ 不会 | ❌ 不会 | ❌ 基本不会(InnoDB MVCC+间隙锁) | MySQL 默认 |
 | **串行化 Serializable** | ❌ 不会 | ❌ 不会 | ❌ 不会 | - |
 
-> **面试加分项**：MySQL 默认的 RR 隔离级别其实已经解决了幻读问题，因为有 Next-Key Lock（行锁 + 间隙锁）。
+> **面试加分项**：MySQL 默认是 RR，实际上已经解决了幻读问题——快照读靠 MVCC，当前读靠 Next-Key Lock（行锁 + 间隙锁）。
 
 ---
 

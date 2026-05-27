@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>InnoDB 后台线程 & ACID 实现原理</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Menlo','Monaco','Courier New',monospace;background:#0d1117;color:#c9d1d9;padding:28px 24px}
+h1{text-align:center;font-size:20px;color:#58a6ff;margin-bottom:4px}
+.subtitle{text-align:center;color:#8b949e;font-size:12px;margin-bottom:32px}
+
+/* tabs */
+.tabs{display:flex;gap:8px;justify-content:center;margin-bottom:28px}
+.tab{padding:8px 28px;border-radius:6px;border:1px solid #30363d;background:#161b22;
+  color:#8b949e;font-size:13px;cursor:pointer;font-family:inherit;transition:.2s}
+.tab:hover{border-color:#58a6ff;color:#58a6ff}
+.tab.active{background:#1f3a5f;border-color:#58a6ff;color:#79c0ff}
+
+.page{display:none}.page.active{display:block}
+
+/* section */
+.section{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:24px;margin-bottom:22px}
+.sec-title{font-size:14px;font-weight:bold;color:#f0883e;border-left:3px solid #f0883e;padding-left:10px;margin-bottom:18px}
+
+/* ── THREAD PAGE ── */
+.thread-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:700px){.thread-grid{grid-template-columns:1fr}}
+
+.thread-card{border-radius:8px;border:1.5px solid #30363d;overflow:hidden;cursor:pointer;transition:.2s}
+.thread-card:hover{border-color:#58a6ff;box-shadow:0 0 12px rgba(88,166,255,.15)}
+.thread-card.active{border-color:#58a6ff;box-shadow:0 0 16px rgba(88,166,255,.2)}
+
+.card-head{padding:12px 16px;display:flex;align-items:center;gap:10px}
+.card-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.card-name{font-size:13px;font-weight:bold}
+.card-sub{font-size:11px;color:#8b949e;margin-top:2px}
+.card-body{padding:14px 16px;border-top:1px solid #21262d;font-size:12px;line-height:1.9;color:#c9d1d9;display:none}
+.card-body.open{display:block}
+
+.c-master .card-head{background:#1a1f2e}.c-master .card-icon{background:#1f3a5f;color:#58a6ff}
+.c-io     .card-head{background:#1a2318}.c-io     .card-icon{background:#1a3326;color:#3fb950}
+.c-purge  .card-head{background:#2b1a2b}.c-purge  .card-icon{background:#2d1f4e;color:#bc8cff}
+.c-clean  .card-head{background:#2b2218}.c-clean  .card-icon{background:#3d2b1a;color:#ffa657}
+
+/* io sub threads */
+.io-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.io-item{background:#0d1117;border-radius:6px;border:1px solid #21262d;padding:8px 10px}
+.io-item .io-name{font-size:11px;color:#3fb950;font-weight:bold}
+.io-item .io-desc{font-size:11px;color:#8b949e;margin-top:2px}
+.io-item .io-param{font-size:10px;color:#58a6ff;margin-top:4px}
+
+/* timeline */
+.timeline{position:relative;margin:0 8px}
+.timeline::before{content:'';position:absolute;left:20px;top:0;bottom:0;width:2px;background:#21262d}
+.tl-item{position:relative;padding:0 0 16px 52px}
+.tl-dot{position:absolute;left:12px;top:4px;width:18px;height:18px;border-radius:50%;
+  border:2px solid #30363d;background:#161b22;display:flex;align-items:center;justify-content:center;font-size:9px}
+.tl-label{font-size:12px;font-weight:bold;margin-bottom:4px}
+.tl-text{font-size:12px;color:#8b949e;line-height:1.7}
+.dot-blue{border-color:#58a6ff;color:#58a6ff;background:#1f3a5f}
+.dot-green{border-color:#3fb950;color:#3fb950;background:#1a3326}
+.dot-purple{border-color:#bc8cff;color:#bc8cff;background:#2d1f4e}
+.dot-orange{border-color:#ffa657;color:#ffa657;background:#3d2b1a}
+
+/* arch diagram */
+.arch{background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:16px;margin-top:16px;font-size:12px}
+.arch-row{display:flex;align-items:center;justify-content:center;gap:8px;margin:4px 0}
+.arch-box{padding:6px 14px;border-radius:6px;border:1px solid;text-align:center;white-space:nowrap;font-size:11px}
+.ab-blue  {background:#1f3a5f;border-color:#2d4f7c;color:#79c0ff}
+.ab-green {background:#1a3326;border-color:#2ea043;color:#3fb950}
+.ab-purple{background:#2d1f4e;border-color:#8957e5;color:#bc8cff}
+.ab-orange{background:#3d2b1a;border-color:#d29922;color:#ffa657}
+.ab-gray  {background:#161b22;border-color:#30363d;color:#8b949e}
+.ab-red   {background:#3a1a1a;border-color:#f85149;color:#ff7b72}
+.arch-arr{color:#30363d;font-size:16px}
+.arch-center{text-align:center;color:#8b949e;font-size:11px;margin:6px 0}
+
+/* ── ACID PAGE ── */
+.acid-tabs{display:flex;gap:6px;margin-bottom:16px}
+.acid-tab{padding:6px 18px;border-radius:6px;border:1px solid #30363d;background:#0d1117;
+  font-size:12px;cursor:pointer;font-family:inherit;transition:.2s;color:#8b949e}
+.acid-tab:hover{border-color:#58a6ff;color:#58a6ff}
+.acid-tab.active{border-color:var(--tc);background:var(--bg);color:var(--tc)}
+.acid-panel{display:none}.acid-panel.active{display:block}
+
+.mechanism-card{background:#0d1117;border-radius:8px;border:1px solid #21262d;padding:16px;margin-bottom:12px}
+.mech-title{font-size:12px;font-weight:bold;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px}
+
+code{background:#21262d;padding:1px 5px;border-radius:3px;font-size:11px;color:#79c0ff}
+
+/* flow */
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0;font-size:12px}
+.flow-box{padding:5px 12px;border-radius:5px;border:1px solid #30363d;background:#161b22;white-space:nowrap}
+.fb-blue  {background:#1f3a5f;border-color:#2d4f7c;color:#79c0ff}
+.fb-green {background:#1a3326;border-color:#2ea043;color:#3fb950}
+.fb-orange{background:#3d2b1a;border-color:#d29922;color:#ffa657}
+.fb-red   {background:#3a1a1a;border-color:#f85149;color:#ff7b72}
+.fb-purple{background:#2d1f4e;border-color:#8957e5;color:#bc8cff}
+.fb-gray  {background:#161b22;border-color:#30363d;color:#8b949e}
+.flow-arr{color:#30363d;font-size:14px}
+
+/* undo chain */
+.chain{display:flex;align-items:center;gap:0;overflow-x:auto;padding:4px 0}
+.chain-node{padding:8px 12px;border-radius:6px;border:1px solid;font-size:11px;white-space:nowrap;text-align:center}
+.cn-cur   {background:#1f3a5f;border-color:#58a6ff;color:#79c0ff}
+.cn-v1    {background:#1a3326;border-color:#2ea043;color:#3fb950}
+.cn-v2    {background:#3d2b1a;border-color:#d29922;color:#ffa657}
+.cn-v3    {background:#2d1f4e;border-color:#8957e5;color:#bc8cff}
+.cn-orig  {background:#21262d;border-color:#30363d;color:#8b949e}
+.chain-arr{color:#30363d;font-size:18px;margin:0 2px;flex-shrink:0}
+
+/* mvcc table */
+.mvcc-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+.mvcc-table th{background:#21262d;color:#8b949e;padding:7px 10px;text-align:left;border-bottom:1px solid #30363d}
+.mvcc-table td{padding:7px 10px;border-bottom:1px solid #21262d;line-height:1.6}
+.mvcc-table tr:last-child td{border:none}
+
+/* compare table */
+table.cmp{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+table.cmp th{background:#21262d;color:#8b949e;padding:8px 12px;text-align:left;border-bottom:1px solid #30363d;font-weight:normal}
+table.cmp td{padding:8px 12px;border-bottom:1px solid #21262d;line-height:1.6}
+table.cmp tr:last-child td{border:none}
+
+.good{color:#3fb950}.bad{color:#ff7b72}.warn{color:#ffa657}.info{color:#79c0ff}
+
+.tip{background:#1c2128;border-left:3px solid #3fb950;border-radius:0 6px 6px 0;
+  padding:10px 14px;font-size:12px;line-height:1.8;margin-top:12px}
+.tip strong{color:#3fb950}
+
+hr{border:none;border-top:1px solid #21262d;margin:20px 0}
+
+.param-row{display:flex;align-items:baseline;gap:8px;padding:4px 0;font-size:12px}
+.param-key{color:#ffa657;min-width:160px;flex-shrink:0}
+.param-val{color:#79c0ff}
+.param-desc{color:#8b949e;font-size:11px}
+</style>
+</head>
+<body>
+
+<h1>InnoDB 后台线程 &amp; ACID 实现原理</h1>
+<p class="subtitle">MySQL InnoDB 引擎内部机制详解</p>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchPage('threads')">🔧 后台线程</button>
+  <button class="tab" onclick="switchPage('acid')">⚡ ACID 实现</button>
+</div>
+
+<!-- ══════════════════ THREADS PAGE ══════════════════ -->
+<div id="page-threads" class="page active">
+
+  <div class="section">
+    <div class="sec-title">InnoDB 四大后台线程（点击展开详情）</div>
+    <div class="thread-grid">
+
+      <!-- Master Thread -->
+      <div class="thread-card c-master active" onclick="toggleCard(this)">
+        <div class="card-head">
+          <div class="card-icon">🎛</div>
+          <div><div class="card-name" style="color:#79c0ff">Master Thread</div>
+          <div class="card-sub">调度员 · 最核心的后台线程</div></div>
+        </div>
+        <div class="card-body open">
+          <div class="timeline">
+            <div class="tl-item">
+              <div class="tl-dot dot-blue">1s</div>
+              <div class="tl-label" style="color:#58a6ff">每 1 秒循环</div>
+              <div class="tl-text">
+                ① 刷新 redo log buffer 到磁盘（即使事务未提交）<br>
+                ② 合并 Insert Buffer（根据 IO 繁忙程度决定）<br>
+                ③ 刷脏页到磁盘（根据脏页比例决定数量）<br>
+                ④ 空闲时切换到 background loop
+              </div>
+            </div>
+            <div class="tl-item">
+              <div class="tl-dot dot-blue">10s</div>
+              <div class="tl-label" style="color:#58a6ff">每 10 秒循环</div>
+              <div class="tl-text">
+                ① 刷新 100 个脏页到磁盘<br>
+                ② 合并 Insert Buffer<br>
+                ③ 强制刷新 redo log buffer<br>
+                ④ full purge，清理无用 undo 页
+              </div>
+            </div>
+            <div class="tl-item">
+              <div class="tl-dot dot-blue">bg</div>
+              <div class="tl-label" style="color:#58a6ff">background loop（空闲/关闭时）</div>
+              <div class="tl-text">
+                ① 删除无用 undo 页<br>
+                ② 合并 Insert Buffer<br>
+                ③ 跳回主循环
+              </div>
+            </div>
+          </div>
+          <div class="tip"><strong>历史演进：</strong>5.5 前所有工作全在 Master Thread，后逐步拆出 Purge Thread（5.5）和 Page Cleaner（5.6），Master Thread 持续瘦身。</div>
+        </div>
+      </div>
+
+      <!-- IO Thread -->
+      <div class="thread-card c-io" onclick="toggleCard(this)">
+        <div class="card-head">
+          <div class="card-icon">📦</div>
+          <div><div class="card-name" style="color:#3fb950">IO Thread</div>
+          <div class="card-sub">搬运工 · 处理 AIO 异步 IO 回调</div></div>
+        </div>
+        <div class="card-body">
+          <div style="font-size:12px;color:#8b949e;margin-bottom:10px">
+            InnoDB 大量使用 AIO（异步 IO）提高磁盘吞吐。IO Thread 负责 AIO 请求完成后的回调处理，分 4 种子线程：
+          </div>
+          <div class="io-list">
+            <div class="io-item">
+              <div class="io-name">read thread × 4</div>
+              <div class="io-desc">处理数据页读请求</div>
+              <div class="io-param">innodb_read_io_threads</div>
+            </div>
+            <div class="io-item">
+              <div class="io-name">write thread × 4</div>
+              <div class="io-desc">处理数据页写请求</div>
+              <div class="io-param">innodb_write_io_threads</div>
+            </div>
+            <div class="io-item">
+              <div class="io-name">insert buffer thread × 1</div>
+              <div class="io-desc">Insert Buffer 写 IO</div>
+              <div class="io-param">—</div>
+            </div>
+            <div class="io-item">
+              <div class="io-name">log thread × 1</div>
+              <div class="io-desc">redo log 写 IO</div>
+              <div class="io-param">—</div>
+            </div>
+          </div>
+          <div class="tip" style="margin-top:10px"><strong>读写分离：</strong>读请求和写请求由独立线程池处理，高并发 IO 时互不阻塞，是 InnoDB 高吞吐的基础。</div>
+        </div>
+      </div>
+
+      <!-- Purge Thread -->
+      <div class="thread-card c-purge" onclick="toggleCard(this)">
+        <div class="card-head">
+          <div class="card-icon">🧹</div>
+          <div><div class="card-name" style="color:#bc8cff">Purge Thread</div>
+          <div class="card-sub">清洁工 · 回收无用 undo log</div></div>
+        </div>
+        <div class="card-body">
+          <div style="font-size:12px;color:#8b949e;margin-bottom:10px">
+            事务提交后，其写的 undo log 不能立刻删除——可能还有其他事务的 Read View 在引用历史版本。Purge Thread 判断何时可以安全回收：
+          </div>
+          <div class="flow" style="flex-direction:column;align-items:flex-start;gap:4px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="flow-box fb-purple">事务提交</div>
+              <span class="flow-arr">→</span>
+              <div class="flow-box fb-gray">undo log 保留</div>
+              <span class="flow-arr">→</span>
+              <div class="flow-box fb-gray">等待所有 Read View 不再引用</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <div class="flow-box fb-gray">无活跃事务引用</div>
+              <span class="flow-arr">→</span>
+              <div class="flow-box fb-purple">Purge Thread 回收页面</div>
+            </div>
+          </div>
+          <div style="margin-top:12px">
+            <div class="param-row">
+              <span class="param-key">innodb_purge_threads</span>
+              <span class="param-val">= 4（默认，MySQL 8.0）</span>
+            </div>
+          </div>
+          <div class="tip" style="border-color:#ff7b72;margin-top:10px">
+            <strong style="color:#ff7b72">长事务的危害：</strong>若某事务一直持有老 Read View，Purge Thread 无法推进，undo log 持续堆积，磁盘暴涨。这是长事务最大的隐患之一。
+          </div>
+        </div>
+      </div>
+
+      <!-- Page Cleaner -->
+      <div class="thread-card c-clean" onclick="toggleCard(this)">
+        <div class="card-head">
+          <div class="card-icon">💾</div>
+          <div><div class="card-name" style="color:#ffa657">Page Cleaner Thread</div>
+          <div class="card-sub">落盘工 · 刷脏页到磁盘（5.6+）</div></div>
+        </div>
+        <div class="card-body">
+          <div style="font-size:12px;color:#8b949e;margin-bottom:10px">
+            MySQL 5.6 从 Master Thread 独立拆出，专门负责将 Buffer Pool 中的脏页刷新到磁盘，避免阻塞主线程。
+          </div>
+          <div style="font-size:12px;margin-bottom:10px">触发刷脏的时机：</div>
+          <div class="timeline">
+            <div class="tl-item">
+              <div class="tl-dot dot-orange">①</div>
+              <div class="tl-label" style="color:#ffa657">脏页比例过高</div>
+              <div class="tl-text">超过 <code>innodb_max_dirty_pages_pct</code>（默认 90%）时主动刷脏</div>
+            </div>
+            <div class="tl-item">
+              <div class="tl-dot dot-orange">②</div>
+              <div class="tl-label" style="color:#ffa657">redo log 空间不足</div>
+              <div class="tl-text">redo log 是环形结构，快写满时必须先把对应脏页落盘，才能覆盖老的 log</div>
+            </div>
+            <div class="tl-item">
+              <div class="tl-dot dot-orange">③</div>
+              <div class="tl-label" style="color:#ffa657">正常关闭</div>
+              <div class="tl-text">数据库 shutdown 时强制刷所有脏页</div>
+            </div>
+          </div>
+          <div style="margin-top:10px">
+            <div class="param-row">
+              <span class="param-key">innodb_page_cleaners</span>
+              <span class="param-val">= 4（默认）</span>
+              <span class="param-desc">建议与 Buffer Pool 实例数一致</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end grid -->
+
+    <!-- 协作架构图 -->
+    <div class="arch">
+      <div style="text-align:center;color:#8b949e;font-size:12px;margin-bottom:12px">四大线程协作关系</div>
+      <div class="arch-row">
+        <div class="arch-box ab-gray">用户请求</div>
+      </div>
+      <div class="arch-row"><span class="arch-arr">↓</span></div>
+      <div class="arch-row">
+        <div class="arch-box ab-gray" style="width:340px;text-align:center">Buffer Pool<br><span style="font-size:10px;color:#6e7681">数据页缓存 / 脏页 / Insert Buffer / undo log</span></div>
+      </div>
+      <div class="arch-row" style="gap:24px">
+        <span class="arch-arr">↙</span>
+        <span class="arch-arr">↓</span>
+        <span class="arch-arr">↘</span>
+      </div>
+      <div class="arch-row" style="gap:16px">
+        <div class="arch-box ab-green" style="font-size:11px">IO Thread<br>AIO 读写回调</div>
+        <div class="arch-box ab-orange" style="font-size:11px">Page Cleaner<br>刷脏页到磁盘</div>
+        <div class="arch-box ab-purple" style="font-size:11px">Purge Thread<br>回收 undo log</div>
+      </div>
+      <div class="arch-center">↑ Master Thread 定时调度 · 监控整体状态 ↑</div>
+      <div class="arch-row">
+        <div class="arch-box ab-blue">Master Thread</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 版本演进 -->
+  <div class="section">
+    <div class="sec-title">版本演进：Master Thread 的职责瘦身</div>
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-dot dot-blue" style="font-size:8px">5.4</div>
+        <div class="tl-label" style="color:#8b949e">5.5 以前</div>
+        <div class="tl-text">脏页刷新、undo 回收、IO 回调全在 Master Thread，单线程成为性能瓶颈</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot dot-purple" style="font-size:8px">5.5</div>
+        <div class="tl-label" style="color:#bc8cff">MySQL 5.5</div>
+        <div class="tl-text">Purge Thread 独立，undo 回收不再阻塞主线程</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot dot-orange" style="font-size:8px">5.6</div>
+        <div class="tl-label" style="color:#ffa657">MySQL 5.6</div>
+        <div class="tl-text">Page Cleaner Thread 独立，脏页刷新不再阻塞主线程</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot dot-green" style="font-size:8px">5.7</div>
+        <div class="tl-label" style="color:#3fb950">MySQL 5.7+</div>
+        <div class="tl-text">Purge Thread 和 Page Cleaner 均支持多线程并行，写入吞吐大幅提升</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end threads page -->
+
+
+<!-- ══════════════════ ACID PAGE ══════════════════ -->
+<div id="page-acid" class="page">
+
+  <div class="section">
+    <div class="sec-title">ACID 总览</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+      <div style="background:#1f3a5f;border:1px solid #2d4f7c;border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:22px;font-weight:bold;color:#58a6ff">A</div>
+        <div style="font-size:12px;color:#79c0ff;margin:4px 0">原子性</div>
+        <div style="font-size:11px;color:#8b949e">undo log</div>
+      </div>
+      <div style="background:#1a2318;border:1px solid #2ea043;border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:22px;font-weight:bold;color:#3fb950">C</div>
+        <div style="font-size:12px;color:#3fb950;margin:4px 0">一致性</div>
+        <div style="font-size:11px;color:#8b949e">A + I + D + 约束</div>
+      </div>
+      <div style="background:#2b1a1a;border:1px solid #f85149;border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:22px;font-weight:bold;color:#ff7b72">I</div>
+        <div style="font-size:12px;color:#ff7b72;margin:4px 0">隔离性</div>
+        <div style="font-size:11px;color:#8b949e">MVCC + Lock</div>
+      </div>
+      <div style="background:#3d2b1a;border:1px solid #d29922;border-radius:8px;padding:14px;text-align:center">
+        <div style="font-size:22px;font-weight:bold;color:#ffa657">D</div>
+        <div style="font-size:12px;color:#ffa657;margin:4px 0">持久性</div>
+        <div style="font-size:11px;color:#8b949e">redo log + doublewrite</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACID tabs -->
+  <div class="acid-tabs">
+    <button class="acid-tab active" style="--tc:#ffa657;--bg:#3d2b1a" onclick="switchAcid('D')">D 持久性</button>
+    <button class="acid-tab" style="--tc:#79c0ff;--bg:#1f3a5f" onclick="switchAcid('A')">A 原子性</button>
+    <button class="acid-tab" style="--tc:#ff7b72;--bg:#2b1a1a" onclick="switchAcid('I')">I 隔离性</button>
+    <button class="acid-tab" style="--tc:#3fb950;--bg:#1a2318" onclick="switchAcid('C')">C 一致性</button>
+  </div>
+
+  <!-- D Panel -->
+  <div id="acid-D" class="acid-panel active">
+    <div class="section">
+      <div class="sec-title" style="color:#ffa657;border-color:#ffa657">D 持久性 — redo log（WAL）</div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#3d2b1a;color:#ffa657">核心思路</span>
+          WAL：Write-Ahead Logging
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:12px">直接写数据页是随机 IO，代价高。InnoDB 改成先写 redo log（顺序 IO），再异步刷数据页：</div>
+        <div class="flow">
+          <div class="flow-box fb-orange">① 修改数据</div>
+          <span class="flow-arr">→</span>
+          <div class="flow-box fb-orange">先写 redo log（顺序IO）</div>
+          <span class="flow-arr">→</span>
+          <div class="flow-box fb-gray">修改 Buffer Pool 脏页</div>
+          <span class="flow-arr">→</span>
+          <div class="flow-box fb-gray">COMMIT 返回成功</div>
+        </div>
+        <div class="flow" style="margin-top:4px">
+          <div class="flow-box fb-gray">脏页由 Page Cleaner 异步落盘</div>
+          <span class="flow-arr">·</span>
+          <div class="flow-box fb-orange">崩溃后用 redo log 重放恢复</div>
+        </div>
+        <div style="margin-top:14px;font-size:12px;color:#8b949e">redo log 是<strong style="color:#ffa657">物理日志</strong>，记录：第 X 页偏移 Y 处，值从 A 变为 B</div>
+      </div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#3d2b1a;color:#ffa657">关键参数</span>
+          innodb_flush_log_at_trx_commit
+        </div>
+        <table class="cmp">
+          <tr><th>值</th><th>行为</th><th>安全性</th><th>性能</th></tr>
+          <tr><td><code>1</code>（默认）</td><td>每次 COMMIT 强制 fsync 到磁盘</td><td class="good">最安全</td><td class="bad">略低</td></tr>
+          <tr><td><code>2</code></td><td>COMMIT 写 OS buffer，每秒 fsync</td><td class="warn">宕机丢 1 秒</td><td class="warn">中</td></tr>
+          <tr><td><code>0</code></td><td>每秒写 buffer + fsync 一次</td><td class="bad">宕机丢 1 秒</td><td class="good">最高</td></tr>
+        </table>
+      </div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#3d2b1a;color:#ffa657">防止部分写</span>
+          doublewrite buffer
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:10px">InnoDB 页 16KB，OS 每次 IO 4KB，写到一半宕机会产生坏页。redo log 修复不了坏页（需要先有完整页才能 apply）。</div>
+        <div class="flow" style="flex-direction:column;align-items:flex-start;gap:6px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="flow-box fb-orange">脏页</div>
+            <span class="flow-arr">→</span>
+            <div class="flow-box fb-orange">先写 doublewrite buffer（连续磁盘区域，顺序IO）</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#30363d;font-size:14px;margin-left:70px">→</span>
+            <div class="flow-box fb-gray">再写到真正的磁盘位置</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#ff7b72;font-size:14px;margin-left:70px">崩溃</span>
+            <span class="flow-arr">→</span>
+            <div class="flow-box fb-gray">从 doublewrite buffer 恢复完整页</div>
+            <span class="flow-arr">→</span>
+            <div class="flow-box fb-orange">再 apply redo log</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A Panel -->
+  <div id="acid-A" class="acid-panel">
+    <div class="section">
+      <div class="sec-title" style="color:#79c0ff;border-color:#79c0ff">A 原子性 — undo log</div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#1f3a5f;color:#79c0ff">核心机制</span>
+          修改数据前先记录"如何撤销"
+        </div>
+        <table class="cmp">
+          <tr><th>操作</th><th>undo log 记录的内容</th></tr>
+          <tr><td><code>INSERT id=5</code></td><td>DELETE id=5</td></tr>
+          <tr><td><code>DELETE id=5</code></td><td>INSERT id=5（原来所有字段值）</td></tr>
+          <tr><td><code>UPDATE amount 100→200</code></td><td>UPDATE amount 200→100</td></tr>
+        </table>
+        <div style="font-size:12px;color:#8b949e;margin-top:10px">需要回滚时，按 undo log 链从后往前依次执行逆操作，所有修改被撤销。</div>
+      </div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#1f3a5f;color:#79c0ff">版本链</span>
+          undo log 同时支撑 MVCC
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:10px">
+          每行有隐藏字段 <code>DB_ROLL_PTR</code>，指向最近的 undo log。多个版本串成链，MVCC 沿链找历史版本：
+        </div>
+        <div class="chain">
+          <div class="chain-node cn-cur">当前版本<br><span style="font-size:10px">amount=200<br>trx_id=100</span></div>
+          <span class="chain-arr">→</span>
+          <div class="chain-node cn-v1">版本 V2<br><span style="font-size:10px">amount=150<br>trx_id=80</span></div>
+          <span class="chain-arr">→</span>
+          <div class="chain-node cn-v2">版本 V1<br><span style="font-size:10px">amount=100<br>trx_id=50</span></div>
+          <span class="chain-arr">→</span>
+          <div class="chain-node cn-orig">原始版本<br><span style="font-size:10px">amount=50<br>trx_id=10</span></div>
+        </div>
+        <div style="font-size:11px;color:#8b949e;margin-top:8px">MVCC 快照读沿版本链找到对当前事务可见的版本，无需加锁</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- I Panel -->
+  <div id="acid-I" class="acid-panel">
+    <div class="section">
+      <div class="sec-title" style="color:#ff7b72;border-color:#ff7b72">I 隔离性 — MVCC + Lock</div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#2b1a1a;color:#ff7b72">快照读</span>
+          普通 SELECT → MVCC，不加锁
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:10px">事务做快照读时创建 Read View，包含 4 个字段：</div>
+        <table class="mvcc-table">
+          <tr><th>字段</th><th>含义</th></tr>
+          <tr><td><code>m_ids</code></td><td>当前所有活跃（未提交）事务的 ID 列表</td></tr>
+          <tr><td><code>min_trx_id</code></td><td>m_ids 中最小值</td></tr>
+          <tr><td><code>max_trx_id</code></td><td>下一个将分配的事务 ID</td></tr>
+          <tr><td><code>creator_trx_id</code></td><td>创建此 Read View 的事务 ID</td></tr>
+        </table>
+        <div style="font-size:12px;color:#8b949e;margin-top:10px">可见性判断（行的 DB_TRX_ID）：</div>
+        <div class="flow" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:6px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="flow-box fb-red" style="font-size:11px">trx_id &lt; min_trx_id</div>
+            <span class="flow-arr">→</span>
+            <span style="font-size:12px;color:#3fb950">快照前已提交 → 可见 ✓</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="flow-box fb-red" style="font-size:11px">trx_id &gt;= max_trx_id</div>
+            <span class="flow-arr">→</span>
+            <span style="font-size:12px;color:#ff7b72">快照后才开始 → 不可见 ✗</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="flow-box fb-red" style="font-size:11px">在 m_ids 里</div>
+            <span class="flow-arr">→</span>
+            <span style="font-size:12px;color:#ff7b72">还未提交 → 不可见 ✗，沿版本链找上一个</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="flow-box fb-red" style="font-size:11px">不在 m_ids 里</div>
+            <span class="flow-arr">→</span>
+            <span style="font-size:12px;color:#3fb950">已提交 → 可见 ✓</span>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+        <table class="cmp">
+          <tr><th>隔离级别</th><th>Read View 创建时机</th><th>效果</th></tr>
+          <tr><td>RC</td><td>每条 SELECT 重新创建</td><td class="warn">能看到最新提交 → 不可重复读</td></tr>
+          <tr><td>RR</td><td>整个事务只创建一次，之后复用</td><td class="good">永远看同一快照 → 可重复读</td></tr>
+        </table>
+        </div>
+      </div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#2b1a1a;color:#ff7b72">当前读</span>
+          FOR UPDATE / 写操作 → 加锁
+        </div>
+        <table class="cmp">
+          <tr><th>隔离级别</th><th>加的锁</th><th>能防幻读？</th></tr>
+          <tr><td>RC</td><td>Record Lock（行锁），无间隙锁</td><td class="bad">不能</td></tr>
+          <tr><td>RR</td><td>Next-Key Lock（行锁 + 间隙锁）</td><td class="good">能</td></tr>
+          <tr><td>SERIALIZABLE</td><td>普通 SELECT 也加 S Next-Key Lock</td><td class="good">完全隔离</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- C Panel -->
+  <div id="acid-C" class="acid-panel">
+    <div class="section">
+      <div class="sec-title" style="color:#3fb950;border-color:#3fb950">C 一致性 — 目标，由 A + I + D 共同保证</div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#1a2318;color:#3fb950">定位</span>
+          一致性是目标，AID 是手段
+        </div>
+        <div class="flow" style="flex-direction:column;align-items:flex-start;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="flow-box fb-blue">A 原子性</div>
+            <span style="font-size:12px;color:#8b949e">→ 事务要么全做要么全不做，不出现半截状态</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="flow-box fb-red">I 隔离性</div>
+            <span style="font-size:12px;color:#8b949e">→ 并发事务互不干扰，不读到中间状态</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="flow-box fb-orange">D 持久性</div>
+            <span style="font-size:12px;color:#8b949e">→ 提交的数据不因崩溃丢失</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+            <span style="font-size:18px;color:#3fb950">↓</span>
+          </div>
+          <div class="flow-box fb-green" style="font-size:12px">数据库从一个一致状态 → 转移到另一个一致状态</div>
+        </div>
+      </div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#1a2318;color:#3fb950">约束</span>
+          数据库层面的额外保障
+        </div>
+        <table class="cmp">
+          <tr><th>约束类型</th><th>保证的一致性</th></tr>
+          <tr><td><code>PRIMARY KEY</code></td><td>主键唯一且非空</td></tr>
+          <tr><td><code>UNIQUE</code></td><td>唯一约束，防止重复值</td></tr>
+          <tr><td><code>FOREIGN KEY</code></td><td>引用完整性，防止悬空引用</td></tr>
+          <tr><td><code>NOT NULL</code></td><td>非空约束</td></tr>
+          <tr><td><code>CHECK</code></td><td>值范围约束（MySQL 8.0.16+ 真正生效）</td></tr>
+        </table>
+      </div>
+
+      <div class="mechanism-card">
+        <div class="mech-title">
+          <span class="badge" style="background:#1a2318;color:#3fb950">协作关系</span>
+          undo log 和 redo log 的分工
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:10px">undo log 本身也是对数据页的修改，它的持久性同样靠 redo log 保护：</div>
+        <div class="flow">
+          <div class="flow-box fb-blue">修改 undo 段</div>
+          <span class="flow-arr">→</span>
+          <div class="flow-box fb-orange">产生 redo log</div>
+          <span class="flow-arr">→</span>
+          <div class="flow-box fb-orange">undo log 也得到持久化保护</div>
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-top:12px;margin-bottom:6px">崩溃恢复完整流程：</div>
+        <div class="timeline" style="margin-left:0">
+          <div class="tl-item">
+            <div class="tl-dot dot-orange">①</div>
+            <div class="tl-text">用 <strong style="color:#ffa657">redo log</strong> 重放所有已提交事务的变更（含 undo 段的恢复）</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot dot-blue">②</div>
+            <div class="tl-text">用 <strong style="color:#79c0ff">undo log</strong> 回滚所有崩溃时未提交的事务</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot dot-green">③</div>
+            <div class="tl-text" style="color:#3fb950">数据库恢复到一致状态 ✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end acid page -->
+
+<script>
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active') });
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active') });
+  document.getElementById('page-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function toggleCard(card) {
+  var body = card.querySelector('.card-body');
+  var isOpen = body.classList.contains('open');
+  document.querySelectorAll('.thread-card').forEach(function(c){
+    c.classList.remove('active');
+    c.querySelector('.card-body').classList.remove('open');
+  });
+  if (!isOpen) {
+    card.classList.add('active');
+    body.classList.add('open');
+  }
+}
+
+function switchAcid(letter) {
+  document.querySelectorAll('.acid-panel').forEach(function(p){ p.classList.remove('active') });
+  document.querySelectorAll('.acid-tab').forEach(function(t){ t.classList.remove('active') });
+  document.getElementById('acid-' + letter).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

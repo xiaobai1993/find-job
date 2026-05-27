@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MySQL 页分裂与页合并</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 32px 24px;
+}
+h1 { text-align: center; font-size: 20px; color: #58a6ff; margin-bottom: 6px; }
+.subtitle { text-align: center; color: #8b949e; font-size: 12px; margin-bottom: 36px; }
+
+.section {
+  background: #161b22; border: 1px solid #30363d;
+  border-radius: 10px; padding: 24px; margin-bottom: 24px;
+}
+.section-title {
+  font-size: 14px; font-weight: bold; color: #f0883e;
+  border-left: 3px solid #f0883e; padding-left: 10px; margin-bottom: 16px;
+}
+.step-desc {
+  font-size: 13px; color: #c9d1d9; min-height: 44px;
+  margin-bottom: 16px; padding: 10px 14px; background: #0d1117;
+  border-radius: 6px; border-left: 3px solid #58a6ff; line-height: 1.8;
+}
+.pages-wrap {
+  display: flex; align-items: flex-start; gap: 24px;
+  flex-wrap: wrap; justify-content: center; min-height: 110px;
+}
+.page-block { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.page-label { font-size: 11px; color: #8b949e; }
+.fill-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 10px; margin-left: 5px;
+}
+.fill-full   { background: #1f3a5f; color: #79c0ff; }
+.fill-high   { background: #1a3326; color: #3fb950; }
+.fill-mid    { background: #3d2b1a; color: #ffa657; }
+.fill-low    { background: #3a1a1a; color: #ff7b72; }
+.fill-freed  { background: #21262d; color: #6e7681; }
+
+.page-grid {
+  display: grid; grid-template-columns: repeat(8, 36px);
+  gap: 3px; padding: 10px; background: #0d1117;
+  border: 1.5px solid #30363d; border-radius: 8px;
+}
+.page-grid.pg-full    { border-color: #ff7b72; box-shadow: 0 0 10px rgba(255,123,114,.2); }
+.page-grid.pg-new     { border-color: #3fb950; box-shadow: 0 0 10px rgba(63,185,80,.2); }
+.page-grid.pg-merge   { border-color: #bc8cff; box-shadow: 0 0 10px rgba(188,140,255,.2); }
+.page-grid.pg-freed   { border-color: #30363d; opacity: .28; border-style: dashed; }
+
+.cell {
+  width: 36px; height: 36px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: bold; border: 1px solid transparent;
+}
+.c-normal   { background: #1f3a5f; color: #79c0ff; border-color: #2d4f7c; }
+.c-empty    { background: #161b22; color: #30363d; border-color: #21262d; border-style: dashed; }
+.c-insert   { background: #1a3326; color: #3fb950; border-color: #2ea043; }
+.c-deleted  { background: #3a1a1a; color: #ff7b72; border-color: #f85149; text-decoration: line-through; opacity: .55; }
+.c-merged   { background: #2d1f4e; color: #bc8cff; border-color: #8957e5; }
+.c-hi       { background: #1f3a5f; color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px rgba(88,166,255,.4); }
+
+.arrow-col {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding-top: 50px; gap: 4px;
+  color: #30363d; font-size: 22px;
+}
+.arrow-col small { font-size: 10px; color: #8b949e; white-space: nowrap; }
+
+.controls {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 18px; justify-content: center;
+}
+.btn {
+  padding: 7px 20px; border-radius: 6px; border: 1px solid #30363d;
+  background: #21262d; color: #c9d1d9; font-size: 12px;
+  cursor: pointer; font-family: inherit;
+}
+.btn:hover  { border-color: #58a6ff; color: #58a6ff; }
+.btn:disabled { opacity: .32; cursor: not-allowed; }
+.btn.primary { background: #1f3a5f; border-color: #58a6ff; color: #79c0ff; }
+.step-ind { font-size: 11px; color: #8b949e; min-width: 52px; text-align: center; }
+
+hr { border: none; border-top: 1px solid #21262d; margin: 24px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { background: #21262d; color: #8b949e; padding: 9px 14px; text-align: left; font-weight: normal; border-bottom: 1px solid #30363d; }
+td { padding: 9px 14px; border-bottom: 1px solid #21262d; line-height: 1.7; vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+.good { color: #3fb950; } .bad { color: #ff7b72; } .warn { color: #ffa657; }
+.tip {
+  background: #1c2128; border-left: 3px solid #3fb950;
+  border-radius: 0 6px 6px 0; padding: 12px 16px;
+  font-size: 12px; line-height: 1.9; margin-top: 14px;
+}
+.tip strong { color: #3fb950; }
+.tag {
+  display: inline-block; padding: 1px 7px; border-radius: 3px;
+  font-size: 10px; margin-right: 4px;
+}
+.tag-blue   { background: #1f3a5f; color: #79c0ff; }
+.tag-green  { background: #1a3326; color: #3fb950; }
+.tag-orange { background: #3d2b1a; color: #ffa657; }
+.tag-red    { background: #3a1a1a; color: #ff7b72; }
+.tag-purple { background: #2d1f4e; color: #bc8cff; }
+</style>
+</head>
+<body>
+
+<h1>MySQL 页分裂 &amp; 页合并</h1>
+<p class="subtitle">InnoDB B+ 树叶子页的动态管理机制 · 每页默认 16KB · 最多存 16 条（演示简化）</p>
+
+<!-- Demo 1 -->
+<div class="section">
+  <div class="section-title">页分裂 ① — 顺序插入（AUTO_INCREMENT 主键）</div>
+  <div class="step-desc" id="d1-desc"></div>
+  <div class="pages-wrap" id="d1-pages"></div>
+  <div class="controls">
+    <button class="btn" id="d1-prev" onclick="go(demos[0],-1)">← 上一步</button>
+    <span class="step-ind" id="d1-ind"></span>
+    <button class="btn primary" id="d1-next" onclick="go(demos[0],1)">下一步 →</button>
+  </div>
+</div>
+
+<!-- Demo 2 -->
+<div class="section">
+  <div class="section-title">页分裂 ② — 随机插入（UUID / 无序主键）</div>
+  <div class="step-desc" id="d2-desc"></div>
+  <div class="pages-wrap" id="d2-pages"></div>
+  <div class="controls">
+    <button class="btn" id="d2-prev" onclick="go(demos[1],-1)">← 上一步</button>
+    <span class="step-ind" id="d2-ind"></span>
+    <button class="btn primary" id="d2-next" onclick="go(demos[1],1)">下一步 →</button>
+  </div>
+</div>
+
+<!-- Demo 3 -->
+<div class="section">
+  <div class="section-title">页合并 — 删除记录触发合并（MERGE_THRESHOLD = 50%）</div>
+  <div class="step-desc" id="d3-desc"></div>
+  <div class="pages-wrap" id="d3-pages"></div>
+  <div class="controls">
+    <button class="btn" id="d3-prev" onclick="go(demos[2],-1)">← 上一步</button>
+    <span class="step-ind" id="d3-ind"></span>
+    <button class="btn primary" id="d3-next" onclick="go(demos[2],1)">下一步 →</button>
+  </div>
+</div>
+
+<hr>
+
+<!-- 对比表 -->
+<div class="section">
+  <div class="section-title">自增主键 vs UUID 主键 — 页分裂对比</div>
+  <table>
+    <tr><th></th><th>AUTO_INCREMENT（顺序）</th><th>UUID / 随机主键</th></tr>
+    <tr><td>插入位置</td><td class="good">始终追加到末尾</td><td class="bad">随机位置，可能落在页中间</td></tr>
+    <tr><td>分裂触发频率</td><td class="good">极低，页填满才开新页</td><td class="bad">高，每次随机插入都可能触发</td></tr>
+    <tr><td>分裂后页利用率</td><td class="good">旧页 ~100%，新页从头积累</td><td class="bad">两页各 ~50%，空间浪费翻倍</td></tr>
+    <tr><td>索引碎片</td><td class="good">几乎没有</td><td class="bad">严重，B+ 树高度增加</td></tr>
+    <tr><td>写入性能</td><td class="good">高，顺序 IO</td><td class="bad">低，随机 IO + 频繁分裂</td></tr>
+    <tr><td>Buffer Pool 效率</td><td class="good">高，页紧凑命中率高</td><td class="bad">低，碎片多占用更多缓存槽</td></tr>
+  </table>
+  <div class="tip">
+    <strong>MERGE_THRESHOLD</strong> 可以在建表时调整，默认 50%。<br>
+    <code>CREATE TABLE t (...) COMMENT='MERGE_THRESHOLD=40';</code><br>
+    调低阈值 → 减少合并频率，但页平均利用率会下降。<br><br>
+    <strong>碎片治理：</strong><code>OPTIMIZE TABLE orders;</code> 重建整张表消除页碎片（大表用 pt-online-schema-change 避免锁表）。
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">一句话记忆</div>
+  <table>
+    <tr><td><span class="tag tag-orange">页分裂</span></td><td>页满了装不下 → 一分为二。顺序插入：旧页满、新页空，代价小；随机插入：各拿一半，空间浪费，碎片重</td></tr>
+    <tr><td><span class="tag tag-purple">页合并</span></td><td>删太多页太空（低于 50%）→ 相邻两页合一，释放空页，父节点更新</td></tr>
+    <tr><td><span class="tag tag-green">自增主键</span></td><td>始终顺序插入 → 几乎不分裂 → 紧凑高效 → 推荐默认选择</td></tr>
+    <tr><td><span class="tag tag-red">UUID 主键</span></td><td>随机插入 → 频繁分裂 → 大量半空页 → 写多场景避免使用</td></tr>
+  </table>
+</div>
+
+<script>
+// ─── 渲染工具 ────────────────────────────────
+// cell: { val, cls }  or  number (normal)  or  null (empty)
+function buildPage(wrap, cells, gridCls, labelText, pct) {
+  var block = document.createElement('div');
+  block.className = 'page-block';
+
+  var lbl = document.createElement('div');
+  lbl.className = 'page-label';
+  lbl.textContent = labelText + ' ';
+  var badge = document.createElement('span');
+  var pctClass = pct >= 100 ? 'fill-full' : pct >= 60 ? 'fill-high' : pct >= 35 ? 'fill-mid' : pct === 0 ? 'fill-freed' : 'fill-low';
+  badge.className = 'fill-badge ' + pctClass;
+  badge.textContent = pct === 0 ? '已释放' : pct + '%';
+  lbl.appendChild(badge);
+  block.appendChild(lbl);
+
+  var grid = document.createElement('div');
+  grid.className = 'page-grid' + (gridCls ? ' ' + gridCls : '');
+  cells.forEach(function(c) {
+    var div = document.createElement('div');
+    if (c === null || c === undefined) {
+      div.className = 'cell c-empty';
+      div.textContent = '·';
+    } else if (typeof c === 'object') {
+      div.className = 'cell ' + c.cls;
+      div.textContent = c.v;
+    } else {
+      div.className = 'cell c-normal';
+      div.textContent = c;
+    }
+    grid.appendChild(div);
+  });
+  block.appendChild(grid);
+  wrap.appendChild(block);
+}
+
+function buildArrow(wrap, sym, label) {
+  var col = document.createElement('div');
+  col.className = 'arrow-col';
+  var d = document.createElement('div');
+  d.textContent = sym;
+  col.appendChild(d);
+  if (label) {
+    var s = document.createElement('small');
+    s.textContent = label;
+    col.appendChild(s);
+  }
+  wrap.appendChild(col);
+}
+
+var N = null; // empty cell shorthand
+function n(v)  { return { v: v, cls: 'c-normal' };  }
+function ins(v){ return { v: v, cls: 'c-insert' };  }
+function del(v){ return { v: v, cls: 'c-deleted' }; }
+function mrg(v){ return { v: v, cls: 'c-merged' };  }
+function hi(v) { return { v: v, cls: 'c-hi' };     }
+
+// ─── Demo 定义 ───────────────────────────────
+var demos = [
+  // Demo 1: 顺序插入
+  {
+    prefix: 'd1', cur: 0,
+    steps: [
+      {
+        desc: '初始状态：Page1 已有 12 条记录（id=1~12），还有 4 个空位（75% 满）',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,9,10,11,12,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1', 75);
+        }
+      },
+      {
+        desc: 'Page1 已满：继续插入 id=13,14,15,16 后页满（100%）。此时再插入 id=17，没有空位，触发页分裂',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
+          buildPage(wrap, p1, 'pg-full', 'Page 1（已满）', 100);
+        }
+      },
+      {
+        desc: '分裂发生（顺序插入）：旧页保持满状态不动，InnoDB 直接开一个新 Page2，id=17 写入新页。Page1 利用率仍 100%，几乎无空间浪费',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
+          buildPage(wrap, p1, '', 'Page 1', 100);
+          buildArrow(wrap, '→', '分裂');
+          var p2 = [ins(17),N,N,N,N,N,N,N,N,N,N,N,N,N,N,N];
+          buildPage(wrap, p2, 'pg-new', 'Page 2（新）', 6);
+        }
+      },
+      {
+        desc: '持续插入：后续 id=18,19,20... 继续追加到 Page2，两页通过双向链表串联。Page1 始终保持 100% 满，整体空间利用率极高 ✓',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
+          buildPage(wrap, p1, '', 'Page 1', 100);
+          buildArrow(wrap, '⟷', '链表');
+          var p2 = [17,18,19,20,21,22,N,N,N,N,N,N,N,N,N,N];
+          buildPage(wrap, p2, '', 'Page 2', 38);
+        }
+      }
+    ]
+  },
+
+  // Demo 2: 随机插入
+  {
+    prefix: 'd2', cur: 0,
+    steps: [
+      {
+        desc: 'Page1 已满：16 条随机主键记录（UUID 场景）。现在需要插入 id=52（排在 50 和 55 之间），页已满，触发页分裂',
+        render: function(wrap) {
+          var p1 = [3,7,12,18,25,31,44,50,55,61,70,75,82,90,95,99];
+          buildPage(wrap, p1, 'pg-full', 'Page 1（已满）', 100);
+        }
+      },
+      {
+        desc: '定位插入点：id=52 需要插入 50（蓝色）和 55（蓝色）之间，但这页没有空位，必须分裂',
+        render: function(wrap) {
+          var p1 = [3,7,12,18,25,31,44,hi(50),hi(55),61,70,75,82,90,95,99];
+          buildPage(wrap, p1, 'pg-full', 'Page 1（已满）', 100);
+        }
+      },
+      {
+        desc: '随机插入分裂：从中间对半切开。Page1 保留前 8 条（50% 满），Page2 得到后 8 条 + 新插入的 id=52（56% 满）。两页都只有一半是满的，空间浪费！',
+        render: function(wrap) {
+          var p1 = [3,7,12,18,25,31,44,50,N,N,N,N,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1', 50);
+          buildArrow(wrap, '→', '对半分裂');
+          var p2 = [ins(52),55,61,70,75,82,90,95,99,N,N,N,N,N,N,N];
+          buildPage(wrap, p2, 'pg-new', 'Page 2（新）', 56);
+        }
+      },
+      {
+        desc: '继续随机插入：每次随机插入都可能落在已有页中间，反复触发分裂。最终大量页只有约 50% 满，索引碎片严重，B+ 树高度增加，磁盘 IO 增多',
+        render: function(wrap) {
+          var p1 = [3,7,ins(9),12,18,25,31,44,50,N,N,N,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1', 56);
+          buildArrow(wrap, '⟷', '链表');
+          var p2 = [52,55,ins(58),61,70,75,82,90,95,99,N,N,N,N,N,N];
+          buildPage(wrap, p2, '', 'Page 2', 63);
+        }
+      }
+    ]
+  },
+
+  // Demo 3: 页合并
+  {
+    prefix: 'd3', cur: 0,
+    steps: [
+      {
+        desc: '初始状态：Page1 和 Page2 各有 8 条记录（50% 满），处于合并阈值临界点（MERGE_THRESHOLD = 50%）',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,N,N,N,N,N,N,N,N];
+          var p2 = [10,11,12,13,14,15,16,17,N,N,N,N,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1', 50);
+          buildArrow(wrap, '⟷', '相邻页');
+          buildPage(wrap, p2, '', 'Page 2', 50);
+        }
+      },
+      {
+        desc: '大量删除：Page2 中 id=11,12,14,15,17 被删除（红色划线），Page2 只剩 3 条有效记录',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,N,N,N,N,N,N,N,N];
+          var p2 = [10,del(11),del(12),13,del(14),del(15),16,del(17),N,N,N,N,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1', 50);
+          buildArrow(wrap, '⟷', '');
+          buildPage(wrap, p2, '', 'Page 2（删除中）', 50);
+        }
+      },
+      {
+        desc: '触发合并检查：Page2 仅剩 3 条（19%），低于 MERGE_THRESHOLD（50%）。InnoDB 检查相邻 Page1：8 + 3 = 11 条 < 16，可以合并！',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,N,N,N,N,N,N,N,N];
+          var p2 = [10,13,16,N,N,N,N,N,N,N,N,N,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1', 50);
+          buildArrow(wrap, '⟷', '检测到低于 50%');
+          buildPage(wrap, p2, 'pg-merge', 'Page 2（19% 低于阈值！）', 19);
+        }
+      },
+      {
+        desc: '合并完成：Page2 的记录（紫色）移入 Page1，Page2 被释放回空闲列表。Page1 利用率从 50% 升至 69%，父节点索引同步更新 ✓',
+        render: function(wrap) {
+          var p1 = [1,2,3,4,5,6,7,8,mrg(10),mrg(13),mrg(16),N,N,N,N,N];
+          buildPage(wrap, p1, '', 'Page 1（合并后）', 69);
+          buildArrow(wrap, '✕', 'Page2 释放');
+          var p2freed = [N,N,N,N,N,N,N,N,N,N,N,N,N,N,N,N];
+          buildPage(wrap, p2freed, 'pg-freed', 'Page 2', 0);
+        }
+      }
+    ]
+  }
+];
+
+// ─── 状态机 ─────────────────────────────────
+function render(demo) {
+  var step = demo.steps[demo.cur];
+  var descEl = document.getElementById(demo.prefix + '-desc');
+  descEl.textContent = step.desc;
+
+  var pagesEl = document.getElementById(demo.prefix + '-pages');
+  while (pagesEl.firstChild) { pagesEl.removeChild(pagesEl.firstChild); }
+  step.render(pagesEl);
+
+  document.getElementById(demo.prefix + '-prev').disabled = demo.cur === 0;
+  document.getElementById(demo.prefix + '-next').disabled = demo.cur === demo.steps.length - 1;
+  document.getElementById(demo.prefix + '-ind').textContent = demo.cur + ' / ' + (demo.steps.length - 1);
+}
+
+function go(demo, dir) {
+  demo.cur = Math.max(0, Math.min(demo.steps.length - 1, demo.cur + dir));
+  render(demo);
+}
+
+demos.forEach(function(d) { render(d); });
+</script>
+</body>
+</html>

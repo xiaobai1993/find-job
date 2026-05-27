@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MySQL 联合索引 B+ 树结构</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 32px;
+    min-height: 100vh;
+  }
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    color: #58a6ff;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8b949e;
+    font-size: 13px;
+    margin-bottom: 36px;
+  }
+  .section {
+    margin-bottom: 52px;
+  }
+  .section-title {
+    font-size: 15px;
+    color: #f0883e;
+    border-left: 3px solid #f0883e;
+    padding-left: 10px;
+    margin-bottom: 24px;
+  }
+  .schema-box {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    font-size: 13px;
+    color: #79c0ff;
+    line-height: 1.8;
+  }
+  .schema-box span.kw { color: #ff7b72; }
+  .schema-box span.str { color: #a5d6ff; }
+  .schema-box span.cmt { color: #8b949e; }
+
+  /* ── 树节点 ── */
+  .tree-wrap {
+    overflow-x: auto;
+    padding-bottom: 12px;
+  }
+  .tree {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    min-width: 900px;
+  }
+
+  /* 层 */
+  .level {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 16px;
+    position: relative;
+    width: 100%;
+  }
+  .level-label {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    color: #8b949e;
+    white-space: nowrap;
+  }
+
+  /* 连线区域 */
+  .connectors {
+    position: relative;
+    height: 40px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .connectors svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    overflow: visible;
+  }
+
+  /* 节点盒子 */
+  .node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .node-box {
+    display: flex;
+    border-radius: 6px;
+    border: 1.5px solid #30363d;
+    overflow: hidden;
+    background: #161b22;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .node-box.root  { border-color: #58a6ff; }
+  .node-box.inner { border-color: #3fb950; }
+  .node-box.leaf  { border-color: #bc8cff; }
+
+  .cell {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-right: 1px solid #21262d;
+    white-space: nowrap;
+    text-align: center;
+    min-width: 72px;
+  }
+  .cell:last-child { border-right: none; }
+  .cell.key-main  { color: #79c0ff; font-weight: bold; }
+  .cell.key-sub   { color: #56d364; font-weight: bold; }
+  .cell.key-both  { color: #ffa657; font-weight: bold; }
+  .cell.ptr       { color: #8b949e; font-size: 11px; }
+  .cell.rowid     { color: #bc8cff; font-size: 11px; }
+  .cell.sep       { background: #21262d; color: #6e7681; font-size: 11px; padding: 6px 6px; min-width: 28px; }
+
+  .node-tag {
+    font-size: 10px;
+    color: #8b949e;
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  /* 叶子链 */
+  .leaf-chain {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin-top: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .leaf-arrow {
+    color: #3fb950;
+    font-size: 18px;
+    margin: 0 2px;
+    flex-shrink: 0;
+  }
+
+  /* 排序规则说明 */
+  .rule-box {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-top: 20px;
+    font-size: 13px;
+    line-height: 2;
+  }
+  .rule-box .tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-right: 6px;
+    font-weight: bold;
+  }
+  .tag-blue  { background: #1f3a5f; color: #79c0ff; }
+  .tag-green { background: #1a3326; color: #56d364; }
+  .tag-orange{ background: #3d2b1a; color: #ffa657; }
+  .tag-purple{ background: #2d1f4e; color: #bc8cff; }
+
+  /* 对比表 */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 16px;
+  }
+  th {
+    background: #21262d;
+    color: #8b949e;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: normal;
+    border-bottom: 1px solid #30363d;
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #21262d;
+    vertical-align: top;
+    line-height: 1.7;
+  }
+  tr:last-child td { border-bottom: none; }
+  .hl-blue   { color: #79c0ff; }
+  .hl-green  { color: #56d364; }
+  .hl-orange { color: #ffa657; }
+  .hl-purple { color: #bc8cff; }
+  .hl-red    { color: #ff7b72; }
+
+  .divider {
+    border: none;
+    border-top: 1px solid #21262d;
+    margin: 40px 0;
+  }
+
+  .tip {
+    background: #1c2128;
+    border-left: 3px solid #f0883e;
+    border-radius: 0 6px 6px 0;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #c9d1d9;
+    line-height: 1.8;
+    margin-top: 20px;
+  }
+  .tip strong { color: #f0883e; }
+</style>
+</head>
+<body>
+
+<h1>MySQL 联合索引 B+ 树结构</h1>
+<p class="subtitle">以联合索引 (name, age) 为例，与单列索引对比</p>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- 1. 建表 Schema -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">示例数据表</div>
+  <div class="schema-box">
+    <span class="kw">CREATE TABLE</span> users (<br>
+    &nbsp;&nbsp;id    <span class="str">INT</span> <span class="kw">PRIMARY KEY</span>,<br>
+    &nbsp;&nbsp;name  <span class="str">VARCHAR(20)</span>,<br>
+    &nbsp;&nbsp;age   <span class="str">INT</span>,<br>
+    &nbsp;&nbsp;city  <span class="str">VARCHAR(20)</span>,<br>
+    &nbsp;&nbsp;<span class="kw">INDEX</span> idx_name     (name),          <span class="cmt">-- 单列索引</span><br>
+    &nbsp;&nbsp;<span class="kw">INDEX</span> idx_name_age (name, age)      <span class="cmt">-- 联合索引</span><br>
+    );
+  </div>
+
+  <div class="schema-box">
+    <span class="cmt">-- 示例数据（id / name / age / city）</span><br>
+    (1, '李明', 22, '北京') &nbsp;(2, '李明', 28, '上海') &nbsp;(3, '王芳', 19, '广州')<br>
+    (4, '王芳', 25, '深圳') &nbsp;(5, '张伟', 30, '成都') &nbsp;(6, '张伟', 30, '杭州')<br>
+    (7, '赵雷', 21, '武汉') &nbsp;(8, '赵雷', 35, '西安')
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- 2. 单列索引 idx_name -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">单列索引 idx_name(name) — B+ 树结构</div>
+
+  <div class="tree-wrap">
+    <div class="tree">
+
+      <!-- 根节点 -->
+      <div class="level">
+        <span class="level-label">根节点</span>
+        <div class="node">
+          <div class="node-box root">
+            <div class="cell key-main">王芳</div>
+            <div class="cell sep">|</div>
+            <div class="cell key-main">张伟</div>
+          </div>
+          <div class="node-tag">非叶子节点（仅存索引键，用于导航）</div>
+        </div>
+      </div>
+
+      <!-- 连线 -->
+      <svg height="40" style="width:100%;display:block;overflow:visible">
+        <line x1="38%" y1="0" x2="20%" y2="40" stroke="#30363d" stroke-width="1.2"/>
+        <line x1="50%" y1="0" x2="50%" y2="40" stroke="#30363d" stroke-width="1.2"/>
+        <line x1="62%" y1="0" x2="80%" y2="40" stroke="#30363d" stroke-width="1.2"/>
+      </svg>
+
+      <!-- 叶子节点 -->
+      <div class="level" style="gap:32px">
+        <span class="level-label">叶子节点</span>
+
+        <div class="node">
+          <div class="node-box leaf">
+            <div class="cell key-main">李明</div>
+            <div class="cell rowid">→ id=1</div>
+            <div class="cell sep">·</div>
+            <div class="cell key-main">李明</div>
+            <div class="cell rowid">→ id=2</div>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-box leaf">
+            <div class="cell key-main">王芳</div>
+            <div class="cell rowid">→ id=3</div>
+            <div class="cell sep">·</div>
+            <div class="cell key-main">王芳</div>
+            <div class="cell rowid">→ id=4</div>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-box leaf">
+            <div class="cell key-main">张伟</div>
+            <div class="cell rowid">→ id=5</div>
+            <div class="cell sep">·</div>
+            <div class="cell key-main">张伟</div>
+            <div class="cell rowid">→ id=6</div>
+            <div class="cell sep">·</div>
+            <div class="cell key-main">赵雷</div>
+            <div class="cell rowid">→ id=7</div>
+            <div class="cell sep">·</div>
+            <div class="cell key-main">赵雷</div>
+            <div class="cell rowid">→ id=8</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 叶子双向链表 -->
+      <div class="leaf-chain" style="margin-top:8px;gap:4px">
+        <span style="font-size:11px;color:#8b949e;">叶子页双向链表：</span>
+        <span class="leaf-arrow">←→</span>
+        <div class="node-box leaf" style="padding:2px 10px;font-size:11px;">Page 1</div>
+        <span class="leaf-arrow">⟷</span>
+        <div class="node-box leaf" style="padding:2px 10px;font-size:11px;">Page 2</div>
+        <span class="leaf-arrow">⟷</span>
+        <div class="node-box leaf" style="padding:2px 10px;font-size:11px;">Page 3</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="rule-box">
+    <span class="tag tag-blue">排序规则</span> 只按 <strong class="hl-blue">name</strong> 排序（字典序）<br>
+    <span class="tag tag-purple">叶子存储</span> (name, 主键id) — 需要回表才能拿到 age / city 等字段<br>
+    <span class="tag tag-green">范围查询</span> <code>WHERE name LIKE '李%'</code> 可以直接走索引扫描
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- 3. 联合索引 idx_name_age -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">联合索引 idx_name_age(name, age) — B+ 树结构</div>
+
+  <div class="tree-wrap">
+    <div class="tree">
+
+      <!-- 根节点 -->
+      <div class="level">
+        <span class="level-label">根节点</span>
+        <div class="node">
+          <div class="node-box root">
+            <div class="cell key-both">(王芳,19)</div>
+            <div class="cell sep">|</div>
+            <div class="cell key-both">(张伟,30)</div>
+          </div>
+          <div class="node-tag">非叶子节点：索引键是 <strong style="color:#ffa657">(name, age)</strong> 的组合</div>
+        </div>
+      </div>
+
+      <svg height="40" style="width:100%;display:block;overflow:visible">
+        <line x1="38%" y1="0" x2="20%" y2="40" stroke="#30363d" stroke-width="1.2"/>
+        <line x1="50%" y1="0" x2="50%" y2="40" stroke="#30363d" stroke-width="1.2"/>
+        <line x1="62%" y1="0" x2="80%" y2="40" stroke="#30363d" stroke-width="1.2"/>
+      </svg>
+
+      <!-- 叶子节点 -->
+      <div class="level" style="gap:24px">
+        <span class="level-label">叶子节点</span>
+
+        <!-- 李明 -->
+        <div class="node">
+          <div class="node-box leaf">
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">李明</div>
+              <div style="color:#56d364;font-size:11px;">age=22</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=1</div>
+            </div>
+            <div class="cell sep" style="font-size:18px;color:#3fb950;">·</div>
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">李明</div>
+              <div style="color:#56d364;font-size:11px;">age=28</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=2</div>
+            </div>
+          </div>
+          <div class="node-tag">同 name，按 age 升序</div>
+        </div>
+
+        <!-- 王芳 -->
+        <div class="node">
+          <div class="node-box leaf">
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">王芳</div>
+              <div style="color:#56d364;font-size:11px;">age=19</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=3</div>
+            </div>
+            <div class="cell sep" style="font-size:18px;color:#3fb950;">·</div>
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">王芳</div>
+              <div style="color:#56d364;font-size:11px;">age=25</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=4</div>
+            </div>
+          </div>
+          <div class="node-tag">同 name，按 age 升序</div>
+        </div>
+
+        <!-- 张伟/赵雷 -->
+        <div class="node">
+          <div class="node-box leaf">
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">张伟</div>
+              <div style="color:#56d364;font-size:11px;">age=30</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=5</div>
+            </div>
+            <div class="cell sep" style="font-size:18px;color:#3fb950;">·</div>
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">张伟</div>
+              <div style="color:#56d364;font-size:11px;">age=30</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=6</div>
+            </div>
+            <div class="cell sep" style="font-size:18px;color:#3fb950;">·</div>
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">赵雷</div>
+              <div style="color:#56d364;font-size:11px;">age=21</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=7</div>
+            </div>
+            <div class="cell sep" style="font-size:18px;color:#3fb950;">·</div>
+            <div class="cell">
+              <div style="color:#79c0ff;font-weight:bold;">赵雷</div>
+              <div style="color:#56d364;font-size:11px;">age=35</div>
+              <div style="color:#bc8cff;font-size:10px;">→ id=8</div>
+            </div>
+          </div>
+          <div class="node-tag">name 不同时先比 name；name 相同时比 age</div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <div class="rule-box">
+    <span class="tag tag-blue">排序规则</span>
+    先按 <strong class="hl-blue">name</strong> 字典序排，name 相同时再按 <strong class="hl-green">age</strong> 升序排<br>
+    <span class="tag tag-purple">叶子存储</span>
+    (name, age, 主键id)  —  city 不在索引里，查 city 仍需回表<br>
+    <span class="tag tag-green">覆盖索引</span>
+    <code>SELECT name, age FROM users WHERE name='李明'</code> 不需要回表（索引即结果）<br>
+    <span class="tag tag-orange">最左前缀</span>
+    只有从 name 开始查，才能命中索引；跳过 name 单独查 age 无法走索引
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- 4. 最左前缀规则对照表 -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">最左前缀规则 — 哪些查询能走联合索引？</div>
+  <table>
+    <tr>
+      <th>查询条件</th>
+      <th>能否走 idx_name_age(name, age)</th>
+      <th>原因</th>
+    </tr>
+    <tr>
+      <td><code>WHERE name = '李明'</code></td>
+      <td class="hl-green">✓ 走索引（name 部分）</td>
+      <td>命中最左列，可定位到 name='李明' 的叶子区间</td>
+    </tr>
+    <tr>
+      <td><code>WHERE name = '李明' AND age = 22</code></td>
+      <td class="hl-green">✓ 走索引（name + age）</td>
+      <td>两列都命中，精确定位到单条叶子记录</td>
+    </tr>
+    <tr>
+      <td><code>WHERE name = '李明' AND age > 20</code></td>
+      <td class="hl-green">✓ 走索引（name 精确 + age 范围）</td>
+      <td>name 等值 + age 范围扫描，ICP 可过滤</td>
+    </tr>
+    <tr>
+      <td><code>WHERE name LIKE '李%'</code></td>
+      <td class="hl-green">✓ 走索引（name 前缀）</td>
+      <td>前缀模糊匹配，仍可用 name 做范围扫描</td>
+    </tr>
+    <tr>
+      <td><code>WHERE age = 22</code></td>
+      <td class="hl-red">✗ 不走索引</td>
+      <td>跳过了最左列 name，B+树无法定位起始位置</td>
+    </tr>
+    <tr>
+      <td><code>WHERE name LIKE '%明'</code></td>
+      <td class="hl-red">✗ 不走索引</td>
+      <td>左侧通配符，无法用 B+ 树二分查找</td>
+    </tr>
+    <tr>
+      <td><code>WHERE name = '李明' AND age != 22</code></td>
+      <td class="hl-orange">△ name 部分走索引</td>
+      <td>name 能命中，age 的不等值条件退化为全扫</td>
+    </tr>
+  </table>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- 5. 核心差异总结 -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">单列索引 vs 联合索引 — 核心差异</div>
+  <table>
+    <tr>
+      <th></th>
+      <th>单列索引 idx_name(name)</th>
+      <th>联合索引 idx_name_age(name, age)</th>
+    </tr>
+    <tr>
+      <td>叶子节点存什么</td>
+      <td>(name, id)</td>
+      <td>(name, age, id)</td>
+    </tr>
+    <tr>
+      <td>排序方式</td>
+      <td>仅按 name 排序</td>
+      <td>先按 name，再按 age（字典序嵌套）</td>
+    </tr>
+    <tr>
+      <td><code>SELECT name, age</code> 是否回表</td>
+      <td class="hl-red">需要回表（age 不在索引里）</td>
+      <td class="hl-green">不需要（覆盖索引）</td>
+    </tr>
+    <tr>
+      <td>索引条件下推 (ICP)</td>
+      <td>只能对 name 过滤</td>
+      <td>可在回表前同时过滤 name 和 age</td>
+    </tr>
+    <tr>
+      <td>索引大小</td>
+      <td>小（只存 name）</td>
+      <td>略大（存 name + age）</td>
+    </tr>
+  </table>
+
+  <div class="tip">
+    <strong>核心记忆：</strong>联合索引的 B+ 树和单列索引 <strong>结构完全一样</strong>，
+    区别只在于 <strong>叶子节点的 key 变成了多列的组合</strong>，
+    并且排序是 <strong>按列顺序逐级比较</strong>（先比第一列，相同再比第二列……）。
+    这就是最左前缀规则的根本原因——B+ 树是按第一列排好序的，
+    跳过第一列就无法二分定位。
+  </div>
+</div>
+
+</body>
+</html>
