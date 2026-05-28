@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apache Pulsar 存储结构与实现原理</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'PingFang SC','Microsoft YaHei',sans-serif; background:#0d1117; color:#e6edf3; }
+
+.nav { display:flex; gap:4px; padding:14px 20px; background:#161b22; border-bottom:1px solid #30363d;
+  position:sticky; top:0; z-index:100; flex-wrap:wrap; }
+.nav-btn { padding:7px 14px; border:1px solid #30363d; border-radius:6px; background:transparent;
+  color:#8b949e; cursor:pointer; font-size:13px; transition:all .2s; }
+.nav-btn:hover { border-color:#58a6ff; color:#58a6ff; }
+.nav-btn.active { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+
+.section { display:none; padding:28px 20px; max-width:1100px; margin:0 auto; }
+.section.active { display:block; }
+
+h1 { font-size:20px; margin-bottom:6px; color:#f0f6fc; }
+.sub { color:#8b949e; font-size:13px; margin-bottom:28px; }
+
+/* Arch */
+.arch-wrap { display:flex; flex-direction:column; gap:12px; align-items:center; }
+.arch-layer { width:100%; max-width:780px; border-radius:10px; padding:18px 20px; cursor:pointer;
+  transition:transform .2s, box-shadow .2s; }
+.arch-layer:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.4); }
+.lc { background:linear-gradient(135deg,#1a3a2a,#0d2818); border:1px solid #2ea043; }
+.lb { background:linear-gradient(135deg,#1a2a3a,#0d1a28); border:1px solid #1f6feb; }
+.lk { background:linear-gradient(135deg,#2a1a3a,#1a0d28); border:1px solid #8957e5; }
+.lz { background:linear-gradient(135deg,#3a2a1a,#281a0d); border:1px solid #e3b341; }
+.layer-title { font-size:15px; font-weight:600; margin-bottom:10px; }
+.layer-nodes { display:flex; gap:10px; flex-wrap:wrap; }
+.nbox { padding:7px 12px; border-radius:7px; font-size:12px; background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.12); }
+.layer-detail { margin-top:10px; font-size:13px; color:#8b949e; line-height:1.7;
+  max-height:0; overflow:hidden; transition:max-height .35s ease; }
+.arch-layer.open .layer-detail { max-height:200px; }
+
+.arr-down { width:2px; height:28px; background:linear-gradient(to bottom,#58a6ff,#8957e5);
+  position:relative; margin:2px auto; }
+.arr-down::after { content:''; position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+  border-left:5px solid transparent; border-right:5px solid transparent; border-top:7px solid #8957e5; }
+
+/* Flow */
+.canvas-wrap { background:#161b22; border-radius:10px; border:1px solid #30363d; overflow:hidden; }
+canvas { display:block; width:100%; }
+.controls { display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; align-items:center; }
+.btn { padding:7px 18px; border-radius:6px; border:none; cursor:pointer; font-size:13px;
+  font-weight:500; transition:all .2s; }
+.btn-p { background:#1f6feb; color:#fff; }
+.btn-p:hover { background:#388bfd; }
+.btn-s { background:#21262d; color:#c9d1d9; border:1px solid #30363d; }
+.btn-s:hover { border-color:#58a6ff; color:#58a6ff; }
+.btn-d { background:#da3633; color:#fff; }
+.btn-d:hover { background:#f85149; }
+
+.flow-log { margin-top:14px; background:#0d1117; border:1px solid #30363d; border-radius:8px;
+  padding:10px 14px; font-family:'SF Mono',monospace; font-size:12px; height:110px;
+  overflow-y:auto; color:#8b949e; }
+
+/* Storage */
+.sv { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+@media(max-width:680px){.sv{grid-template-columns:1fr;}}
+.card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:18px; }
+.card h3 { font-size:12px; color:#8b949e; margin-bottom:14px; text-transform:uppercase; letter-spacing:.5px; }
+.badge { padding:2px 7px; border-radius:4px; font-size:10px; font-weight:600; }
+.ba { background:#1a3a2a; color:#3fb950; border:1px solid #2ea043; }
+.bc { background:#21262d; color:#6e7681; border:1px solid #30363d; }
+.br { background:#1a2a3a; color:#58a6ff; border:1px solid #1f6feb; }
+
+.entry-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(58px,1fr)); gap:5px; margin-top:8px; }
+.entry-cell { padding:5px; border-radius:5px; text-align:center; font-size:11px;
+  background:#21262d; border:1px solid #30363d; }
+.entry-cell.flash { animation:ef .5s ease forwards; }
+@keyframes ef { from{background:#1f6feb;border-color:#58a6ff;transform:scale(1.1);} to{background:#21262d;border-color:#30363d;transform:scale(1);} }
+.entry-cell .eid { color:#8b949e; font-size:10px; }
+.entry-cell .esz { color:#3fb950; }
+
+.bookie-row { display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; justify-content:center; }
+.bk-node { background:#161b22; border:1px solid #8957e5; border-radius:9px; padding:12px;
+  min-width:120px; text-align:center; transition:all .3s; }
+.bk-node .bkt { font-size:11px; color:#8957e5; margin-bottom:6px; }
+.bk-node .bkl { font-size:10px; color:#8b949e; padding:3px; background:#0d1117;
+  border-radius:3px; margin-bottom:3px; }
+.bk-node.wr { border-color:#3fb950; animation:bw .5s ease; }
+@keyframes bw { 0%{transform:scale(1.05);box-shadow:0 0 10px rgba(63,185,80,.5);} 100%{transform:scale(1);box-shadow:none;} }
+
+/* Sub */
+.sub-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+@media(max-width:680px){.sub-grid{grid-template-columns:1fr;}}
+.sub-card { background:#161b22; border:2px solid #30363d; border-radius:10px; padding:18px;
+  cursor:pointer; transition:all .2s; }
+.sub-card:hover { transform:translateY(-2px); }
+.sc-ex { border-color:#2ea043; box-shadow:0 0 10px rgba(46,160,67,.18); }
+.sc-sh { border-color:#1f6feb; box-shadow:0 0 10px rgba(31,111,235,.18); }
+.sc-fo { border-color:#e3b341; box-shadow:0 0 10px rgba(227,179,65,.18); }
+.sc-ks { border-color:#8957e5; box-shadow:0 0 10px rgba(137,87,229,.18); }
+.sub-card h3 { font-size:14px; margin-bottom:6px; }
+.tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; margin-bottom:8px; }
+.tg-ex { background:#1a3a2a; color:#3fb950; }
+.tg-sh { background:#1a2a3a; color:#58a6ff; }
+.tg-fo { background:#3a2a1a; color:#e3b341; }
+.tg-ks { background:#2a1a3a; color:#8957e5; }
+.sub-card p { font-size:12px; color:#8b949e; line-height:1.6; }
+
+.sub-demo { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:18px; min-height:240px; }
+
+.demo-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+.dlabel { font-size:12px; color:#8b949e; width:76px; flex-shrink:0; }
+.mq { display:flex; gap:5px; flex-wrap:wrap; }
+.mpill { padding:3px 9px; border-radius:16px; font-size:11px; font-weight:600;
+  background:#21262d; border:1px solid #30363d; color:#8b949e; transition:all .35s; }
+.cbox { display:flex; align-items:center; gap:6px; padding:7px 12px; border-radius:7px;
+  font-size:12px; min-width:96px; transition:all .3s; }
+.con-a { background:rgba(63,185,80,.15); border:1px solid #2ea043; }
+.con-s { background:#21262d; border:1px solid #30363d; color:#6e7681; }
+.con-p { animation:cp .8s ease infinite; }
+@keyframes cp { 0%,100%{box-shadow:0 0 0 0 rgba(63,185,80,.4);} 50%{box-shadow:0 0 0 4px rgba(63,185,80,0);} }
+
+/* Cursor */
+.cursor-bar { display:flex; gap:4px; flex-wrap:wrap; margin-top:8px; }
+.ce { width:26px; height:26px; border-radius:4px; display:flex; align-items:center;
+  justify-content:center; font-size:10px; font-weight:600; transition:all .25s; }
+.ce-p { background:#21262d; color:#6e7681; border:1px solid #30363d; }
+.ce-d { background:#1a2a3a; color:#58a6ff; border:1px solid #1f6feb; }
+.ce-a { background:#1a3a2a; color:#3fb950; border:1px solid #2ea043; }
+.ce-n { background:#3a1a1a; color:#f85149; border:1px solid #da3633; }
+
+/* Info grid */
+.ig { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; margin-top:20px; }
+.ic { background:#161b22; border:1px solid #30363d; border-radius:9px; padding:14px; }
+.ic h4 { font-size:12px; color:#58a6ff; margin-bottom:8px; }
+.ic ul { font-size:12px; color:#8b949e; line-height:1.8; padding-left:14px; }
+.ic li span { color:#e6edf3; }
+
+.hl-box { background:#1a2a3a; border:1px solid #1f6feb; border-radius:7px;
+  padding:12px 14px; font-size:13px; line-height:1.7; margin-top:14px; }
+.hl-box b { color:#58a6ff; }
+.hl-box2 { background:#2a1a3a; border:1px solid #8957e5; }
+.hl-box2 b { color:#8957e5; }
+
+.tree-item { padding:5px 0; display:flex; align-items:center; gap:6px; font-size:12px; }
+.ti { padding-left:20px; border-left:1px solid #30363d; margin-left:6px; }
+.lr { display:flex; align-items:center; gap:8px; padding:7px 10px; background:#21262d;
+  border-radius:5px; margin-bottom:5px; font-size:12px; }
+
+.chip { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px;
+  background:#21262d; border:1px solid #30363d; color:#8b949e; margin:2px; }
+.cg { background:#1a3a2a; border-color:#2ea043; color:#3fb950; }
+.cb { background:#1a2a3a; border-color:#1f6feb; color:#58a6ff; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <button class="nav-btn active" onclick="show('arch',this)">① 整体架构</button>
+  <button class="nav-btn" onclick="show('flow',this)">② 消息流动</button>
+  <button class="nav-btn" onclick="show('storage',this)">③ 存储结构</button>
+  <button class="nav-btn" onclick="show('subscription',this)">④ 订阅模式</button>
+  <button class="nav-btn" onclick="show('cursor',this)">⑤ ACK 与游标</button>
+</nav>
+
+<!-- ① ARCH -->
+<div class="section active" id="s-arch">
+  <h1>Pulsar 整体架构 — 存算分离</h1>
+  <p class="sub">点击每一层展开详细说明</p>
+  <div class="arch-wrap">
+
+    <div class="arch-layer lc" onclick="this.classList.toggle('open')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">📱</span>
+        <div>
+          <div class="layer-title" style="color:#3fb950">Client 层（无状态）</div>
+          <div class="layer-nodes">
+            <div class="nbox">Producer（美餐支付服务）</div>
+            <div class="nbox">Consumer Pod-1</div>
+            <div class="nbox">Consumer Pod-2</div>
+            <div class="nbox">Consumer Pod-3</div>
+          </div>
+        </div>
+      </div>
+      <div class="layer-detail">
+        <b>职责：</b>发送 / 接收消息，应用代码直接交互层。<br>
+        <b>关键点：</b>Client 无状态，只持有到 Broker 的 TCP 连接。K8s 中每个 Pod = 一个 Consumer 实例，共同加入同一个 Subscription 的消费者列表。<br>
+        <span class="chip cg">无状态</span><span class="chip cb">Go SDK</span><span class="chip">多 Pod 共享 Subscription</span>
+      </div>
+    </div>
+
+    <div class="arr-down"></div>
+
+    <div class="arch-layer lb" onclick="this.classList.toggle('open')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">⚡</span>
+        <div>
+          <div class="layer-title" style="color:#58a6ff">Broker 计算层（无状态，随意扩容）</div>
+          <div class="layer-nodes">
+            <div class="nbox" style="border-color:#1f6feb">Broker-1（负责 payment topic）</div>
+            <div class="nbox">Broker-2（负责其他 topic）</div>
+            <div class="nbox">Broker-3（热备）</div>
+          </div>
+        </div>
+      </div>
+      <div class="layer-detail">
+        <b>职责：</b>路由、分发、管理 Subscription 和 Consumer。<br>
+        <b>无状态细节：</b>Broker 不存消息，收到消息立即转发给 BookKeeper 写磁盘，自身只保留分发逻辑。<br>
+        <b>扩容：</b>直接加 Broker 实例，Topic ownership 自动 rebalance，无需迁移数据。<br>
+        <span class="chip cb">无状态</span><span class="chip cb">Topic Ownership</span><span class="chip">Subscription 管理</span><span class="chip">Round-Robin</span>
+      </div>
+    </div>
+
+    <div class="arr-down"></div>
+
+    <div class="arch-layer lk" onclick="this.classList.toggle('open')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">💾</span>
+        <div>
+          <div class="layer-title" style="color:#8957e5">BookKeeper 存储层（有状态，独立扩容）</div>
+          <div class="layer-nodes">
+            <div class="nbox">Bookie-1（存 L1、L4 副本）</div>
+            <div class="nbox">Bookie-2（存 L1、L2 副本）</div>
+            <div class="nbox">Bookie-3（存 L2、L3 副本）</div>
+            <div class="nbox">Bookie-4（存 L3、L4 副本）</div>
+          </div>
+        </div>
+      </div>
+      <div class="layer-detail">
+        <b>职责：</b>实际存储消息，以 Ledger → Entry 结构组织。<br>
+        <b>写入机制：</b>默认写 3 副本（Quorum），至少 2 个确认即返回成功，跨 Bookie 分散，一台挂不影响读写。<br>
+        <b>扩容：</b>加 Bookie 节点，后续新 Ledger 自动写入新节点，旧数据无需迁移。<br>
+        <span class="chip" style="border-color:#8957e5;color:#8957e5">有状态</span><span class="chip">Ledger/Entry</span><span class="chip">3副本Quorum</span><span class="chip cg">加节点不迁数据</span>
+      </div>
+    </div>
+
+    <div class="arr-down"></div>
+
+    <div class="arch-layer lz" onclick="this.classList.toggle('open')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">🗂</span>
+        <div>
+          <div class="layer-title" style="color:#e3b341">ZooKeeper 元数据层</div>
+          <div class="layer-nodes">
+            <div class="nbox">集群配置</div>
+            <div class="nbox">Topic / Ledger 元数据</div>
+            <div class="nbox">Broker 选主</div>
+            <div class="nbox">Subscription 游标</div>
+          </div>
+        </div>
+      </div>
+      <div class="layer-detail">
+        <b>职责：</b>存储集群元数据、Broker 选主、Topic 路由信息、每个 Subscription 的 Cursor（消费进度）。<br>
+        <b>注：</b>新版 Pulsar 支持用 etcd 或 Oxia 替代 ZooKeeper，减少运维依赖。<br>
+        <span class="chip" style="border-color:#e3b341;color:#e3b341">元数据</span><span class="chip">Cursor 持久化</span><span class="chip">集群协调</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ig">
+    <div class="ic"><h4>⚡ 存算分离的核心价值</h4><ul>
+      <li>计算层 Broker <span>无状态</span>，加机器直接扩</li>
+      <li>存储层 Bookie <span>独立扩容</span>，不迁移数据</li>
+      <li>Broker 挂了不丢消息</li>
+      <li>消息堆积再多不影响 Broker 性能</li>
+    </ul></div>
+    <div class="ic"><h4>📊 与 Kafka 核心对比</h4><ul>
+      <li>Kafka：<span>存算一体</span>，扩容要迁分区数据</li>
+      <li>Pulsar：<span>存算分离</span>，独立扩容互不影响</li>
+      <li>Kafka Broker 有状态，挂了有丢失窗口</li>
+      <li>Pulsar Broker 无状态，故障转移秒级恢复</li>
+    </ul></div>
+    <div class="ic"><h4>🏢 多租户支持</h4><ul>
+      <li>Tenant → Namespace → Topic 三层结构</li>
+      <li>美餐支付/订单/对账各用独立 Namespace</li>
+      <li>不同业务<span>物理隔离</span>，互不影响</li>
+      <li>可按 Namespace 设置 TTL、限流、权限</li>
+    </ul></div>
+  </div>
+</div>
+
+<!-- ② FLOW -->
+<div class="section" id="s-flow">
+  <h1>消息完整流转过程</h1>
+  <p class="sub">逐步演示一条支付回调消息从发送到消费的完整链路</p>
+  <div class="canvas-wrap">
+    <canvas id="fc" height="360"></canvas>
+  </div>
+  <div class="controls">
+    <button class="btn btn-p" onclick="doStep()">▶ 下一步</button>
+    <button class="btn btn-s" onclick="doReset()">↺ 重置</button>
+    <span id="slabel" style="font-size:12px;color:#8b949e;margin-left:6px"></span>
+  </div>
+  <div class="flow-log" id="flog"></div>
+  <div class="ig">
+    <div class="ic"><h4>① Producer 发送</h4><ul>
+      <li>调用 <span>producer.Send()</span></li>
+      <li>SDK 序列化后发给 Broker</li>
+      <li>等待 Broker 写入 BookKeeper 后 ack</li>
+      <li>ack 收到才返回成功（同步模式）</li>
+    </ul></div>
+    <div class="ic"><h4>② Broker 路由写入</h4><ul>
+      <li>收到消息，分配 <span>MessageID</span>（Ledger:Entry）</li>
+      <li>转发 BookKeeper，Quorum 写入</li>
+      <li>至少 2/3 个 Bookie 确认后返回 ack</li>
+      <li>同时更新 Subscription 分发队列</li>
+    </ul></div>
+    <div class="ic"><h4>③ Consumer 推送与 ACK</h4><ul>
+      <li>Broker Dispatcher 按订阅模式分发</li>
+      <li>Shared 模式：Round-Robin 给可用 Consumer</li>
+      <li>Consumer 处理完调用 <span>Ack</span></li>
+      <li>未 Ack 超时后重新投递（At-Least-Once）</li>
+    </ul></div>
+  </div>
+</div>
+
+<!-- ③ STORAGE -->
+<div class="section" id="s-storage">
+  <h1>BookKeeper 存储结构</h1>
+  <p class="sub">Topic → Partition → Ledger → Entry 四层结构</p>
+  <div class="sv">
+    <div class="card">
+      <h3>Topic 层次结构</h3>
+      <div style="font-size:12px">
+        <div class="tree-item">
+          <span>📂</span>
+          <span style="color:#e3b341">persistent://meican/payment/<b>tpw-result-notify</b></span>
+        </div>
+        <div class="ti">
+          <div class="tree-item"><span>📁</span><span style="color:#8957e5">Partition-0</span></div>
+          <div class="ti">
+            <div class="tree-item"><span>📄</span><span>Ledger-100 <span class="badge bc">closed</span></span></div>
+            <div class="tree-item"><span>📄</span><span>Ledger-101 <span class="badge bc">closed</span></span></div>
+            <div class="tree-item"><span>📄</span><span style="color:#3fb950">Ledger-102 <span class="badge ba">active</span></span></div>
+          </div>
+          <div class="tree-item"><span>📁</span><span style="color:#8957e5">Partition-1</span></div>
+          <div class="ti">
+            <div class="tree-item"><span>📄</span><span>Ledger-200 <span class="badge bc">closed</span></span></div>
+            <div class="tree-item"><span>📄</span><span style="color:#3fb950">Ledger-201 <span class="badge ba">active</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Ledger-102 副本分布（3 个 Bookie）</h3>
+      <div class="lr">
+        <span style="color:#8b949e">Ledger-102</span>
+        <span class="badge ba">写入中</span>
+        <span class="badge br" style="margin-left:auto">副本×3</span>
+      </div>
+      <div class="bookie-row">
+        <div class="bk-node" id="bk1">
+          <div class="bkt">Bookie-1</div>
+          <div class="bkl">Ledger-102 (主)</div>
+          <div class="bkl">Ledger-100</div>
+          <div class="bkl" style="color:#3fb950">⬤ online</div>
+        </div>
+        <div class="bk-node" id="bk2">
+          <div class="bkt">Bookie-2</div>
+          <div class="bkl">Ledger-102 (副本1)</div>
+          <div class="bkl">Ledger-201</div>
+          <div class="bkl" style="color:#3fb950">⬤ online</div>
+        </div>
+        <div class="bk-node" id="bk3">
+          <div class="bkt">Bookie-3</div>
+          <div class="bkl">Ledger-102 (副本2)</div>
+          <div class="bkl">Ledger-101</div>
+          <div class="bkl" style="color:#3fb950">⬤ online</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-p" onclick="doWrite()" style="font-size:12px;padding:5px 12px">模拟写入一条消息</button>
+        <button class="btn btn-s" onclick="doBookieFail()" style="font-size:12px;padding:5px 12px">Bookie-3 宕机</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Ledger-102 Entry 列表</h3>
+    <p style="font-size:11px;color:#8b949e;margin-bottom:10px">每条 Entry = 一条消息，MessageID = Ledger-ID : Entry-ID</p>
+    <div class="entry-grid" id="eGrid"></div>
+  </div>
+
+  <div class="hl-box" style="margin-top:14px">
+    <b>为什么 Broker 扩容不需要迁移数据？</b><br>
+    消息存在 <b>BookKeeper</b>，不在 Broker 本地磁盘。Broker 只是路由+分发进程，挂了换一个新 Broker 接管 Topic，直接连接 BookKeeper 读已有 Ledger 数据，无需迁移任何东西。这是存算分离的本质。
+  </div>
+  <div class="hl-box hl-box2" style="margin-top:10px">
+    <b>Ledger 什么时候切换？</b><br>
+    ① Broker 重启 / Topic 换主 → 旧 Ledger 关闭，新建 Ledger 继续写入<br>
+    ② Ledger 超过 Size 上限 → 滚动到新 Ledger<br>
+    ③ 旧 Ledger 不可变（immutable），只读，保证数据完整性
+  </div>
+</div>
+
+<!-- ④ SUBSCRIPTION -->
+<div class="section" id="s-subscription">
+  <h1>四种订阅模式对比演示</h1>
+  <p class="sub">点击模式卡片查看消息分发动画，美餐支付用的是 Shared</p>
+  <div class="sub-grid">
+    <div class="sub-card" id="sc-ex" onclick="pickMode('ex')">
+      <h3>Exclusive 独占</h3>
+      <div class="tag tg-ex">严格有序</div>
+      <p>同一时刻只有一个 Consumer 消费，挂了后备自动接管。</p>
+    </div>
+    <div class="sub-card sc-sh" id="sc-sh" onclick="pickMode('sh')">
+      <h3>Shared 共享 ← 美餐实际使用</h3>
+      <div class="tag tg-sh">高并发 / 无序</div>
+      <p>多 Consumer 同时消费，Round-Robin 分发，K8s 多 Pod 横向扩展首选。</p>
+    </div>
+    <div class="sub-card" id="sc-fo" onclick="pickMode('fo')">
+      <h3>Failover 灾备</h3>
+      <div class="tag tg-fo">高可用 / 有序</div>
+      <p>主 Consumer 消费，备热等待。主挂了备立刻接管，顺序且高可用。</p>
+    </div>
+    <div class="sub-card" id="sc-ks" onclick="pickMode('ks')">
+      <h3>Key_Shared 按 Key 分发</h3>
+      <div class="tag tg-ks">顺序 + 并发</div>
+      <p>同 Key 发同一 Consumer，不同 Key 并发，兼顾顺序与水平扩展。</p>
+    </div>
+  </div>
+  <div class="sub-demo" id="sdemo"></div>
+  <div class="ig">
+    <div class="ic"><h4>💡 为什么美餐支付用 Shared 不用 Key_Shared？</h4><ul>
+      <li>业务层已有幂等（<span>状态机+Redis 锁</span>）</li>
+      <li>消费顺序不是强制需求，出错可重试</li>
+      <li>Shared 实现简单，消费者数量灵活扩缩</li>
+      <li>Key_Shared Key 分布不均时有热点问题</li>
+    </ul></div>
+    <div class="ic"><h4>🔑 订阅模式是消费端配置的</h4><ul>
+      <li>生产者完全不感知订阅模式</li>
+      <li>Consumer 首次 Subscribe 时 Broker 创建 Subscription 对象</li>
+      <li><span>相同 AppName</span> = 相同 Subscription Name = 同一消费组</li>
+      <li>K8s 每个 Pod 连接后加入同一 Subscription 的 Consumer 列表</li>
+    </ul></div>
+  </div>
+</div>
+
+<!-- ⑤ CURSOR -->
+<div class="section" id="s-cursor">
+  <h1>ACK 确认机制 与 游标（Cursor）</h1>
+  <p class="sub">Pulsar 是消息级 ACK，比 Kafka 的 offset 提交更灵活</p>
+  <div class="card">
+    <h3>消息状态模拟 — Subscription "payment-service"</h3>
+    <div class="cursor-bar" id="cbar"></div>
+    <div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;font-size:11px">
+      <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#21262d;border:1px solid #30363d;vertical-align:middle"></span> 待投递</span>
+      <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#1a2a3a;border:1px solid #1f6feb;vertical-align:middle"></span> 已投递待ACK</span>
+      <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#1a3a2a;border:1px solid #2ea043;vertical-align:middle"></span> 已ACK</span>
+      <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#3a1a1a;border:1px solid #da3633;vertical-align:middle"></span> NACK/重投</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="cDeliver()" style="font-size:12px;padding:5px 12px">投递下一条</button>
+      <button class="btn btn-s" onclick="cAck()" style="font-size:12px;padding:5px 12px">ACK 最早投递</button>
+      <button class="btn btn-d" onclick="cNack()" style="font-size:12px;padding:5px 12px">NACK（触发重投）</button>
+      <button class="btn btn-s" onclick="cReset()" style="font-size:12px;padding:5px 12px">↺ 重置</button>
+    </div>
+  </div>
+
+  <div class="hl-box" style="margin-top:18px">
+    <b>Pulsar ACK vs Kafka offset 提交</b><br><br>
+    <b>Kafka：</b>提交 offset=10 意味着 0~9 全部消费完，无法单独确认某条消息。消息 5 处理失败，要么整体回退，要么跳过。<br><br>
+    <b>Pulsar：</b>可以单独 ACK 任意一条。消息 5 NACK，只有消息 5 重新投递，其他消息不受影响。超过 maxRedeliverCount 后自动进<b>死信队列</b>。
+  </div>
+  <div class="hl-box hl-box2" style="margin-top:10px">
+    <b>Cursor（游标）是什么？</b><br><br>
+    每个 Subscription 在 ZooKeeper/BookKeeper 里保存一个 <b>Cursor</b>，记录"哪些消息已经被 ACK 了"。<br>
+    Cursor 不是简单的 offset 数字，而是一个 <b>AckSet（位图）</b>，精确记录每条消息是否已 ACK，支持乱序确认。<br>
+    Broker 重启后从 Cursor 恢复，继续从上次位置投递，不重复也不丢失。
+  </div>
+  <div class="ig">
+    <div class="ic"><h4>🔄 美餐支付的 ACK 策略</h4><ul>
+      <li>处理成功 → 调用 <span>mqConsumer.Ack(msg)</span></li>
+      <li>处理失败 → <span>ReconsumeAfter(msg, 10s)</span> 延迟重投</li>
+      <li>重复消息（ErrMsgProcessed）→ 直接 Ack</li>
+      <li>超过重试次数 → 自动进死信队列</li>
+    </ul></div>
+    <div class="ic"><h4>⏱ AckTimeout 的影响</h4><ul>
+      <li>Consumer 收到消息后有 <span>ackTimeout</span> 时间窗口</li>
+      <li>超时未 ACK → Broker 认为失败，重新投递</li>
+      <li>这就是 <span>At-Least-Once</span> 的来源</li>
+      <li>消费端必须做幂等处理</li>
+    </ul></div>
+    <div class="ic"><h4>💀 死信队列（DLQ）</h4><ul>
+      <li>消息 NACK 超过 <span>maxRedeliverCount</span> 次</li>
+      <li>Broker 自动投递到 Dead Letter Topic</li>
+      <li>美餐：死信队列有监控告警</li>
+      <li>人工排查，手动重发</li>
+    </ul></div>
+  </div>
+</div>
+
+<script>
+/* ── Navigation ── */
+function show(id, btn) {
+  document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
+  document.querySelectorAll('.nav-btn').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById('s-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === 'flow') initCanvas();
+  if (id === 'storage') initStorage();
+  if (id === 'subscription') pickMode('sh');
+  if (id === 'cursor') cReset();
+}
+
+/* ── FLOW CANVAS ── */
+var fCtx, fW, fH, fStep = -1;
+
+var NODES = {
+  prod: { x:80, y:180, label:'Producer', sub:'支付服务', col:'#3fb950' },
+  broker: { x:300, y:180, label:'Broker', sub:'无状态', col:'#58a6ff' },
+  bk1: { x:500, y:90, label:'Bookie-1', sub:'副本主', col:'#8957e5' },
+  bk2: { x:500, y:180, label:'Bookie-2', sub:'副本1', col:'#8957e5' },
+  bk3: { x:500, y:270, label:'Bookie-3', sub:'副本2', col:'#8957e5' },
+  cons: { x:700, y:180, label:'Consumer', sub:'Pod-2', col:'#e3b341' },
+};
+
+var STEPS = [
+  { txt:'Producer.Send() 发送支付回调消息', log:'info|Producer.Send() — payload={"txId":99812,"status":"success"}', active:['prod','broker'], arrow:{from:'prod',to:'broker',lbl:'发消息'} },
+  { txt:'Broker 分配 MessageID = 102:4891', log:'info|Broker 路由 → Partition-0，分配 MessageID=102:4891', active:['broker'], arrow:null },
+  { txt:'BookKeeper Quorum 写入（3 副本）', log:'warn|Broker → Quorum write: Bookie-1 ✓  Bookie-2 ✓  Bookie-3 ✓', active:['broker','bk1','bk2','bk3'], arrow:'quorum' },
+  { txt:'Broker 向 Producer 返回写入 ACK', log:'success|Broker → Producer ACK: MessageID=102:4891 持久化成功', active:['broker','prod'], arrow:{from:'broker',to:'prod',lbl:'写入ACK'} },
+  { txt:'Broker 查 Subscription dispatcher', log:'info|Subscription "payment-service"(Shared): 3 consumers，Round-Robin 选 Pod-2', active:['broker'], arrow:null },
+  { txt:'消息推送给 Consumer Pod-2', log:'info|Broker → Consumer(Pod-2): 投递 102:4891，等待 ACK', active:['broker','cons'], arrow:{from:'broker',to:'cons',lbl:'推送消息'} },
+  { txt:'Pod-2 处理业务逻辑 + 写数据库', log:'warn|Pod-2: 检查 Redis 幂等锁 → 执行业务逻辑 → DB 事务提交', active:['cons'], arrow:null },
+  { txt:'Pod-2 发送 ACK，消息生命周期结束', log:'success|Consumer(Pod-2) → Broker ACK: 102:4891，Cursor 更新 ✓', active:['broker','cons'], arrow:{from:'cons',to:'broker',lbl:'ACK ✓'} },
+];
+
+function initCanvas() {
+  var canvas = document.getElementById('fc');
+  if (!canvas) return;
+  fCtx = canvas.getContext('2d');
+  var wrap = canvas.parentElement;
+  fW = wrap.clientWidth || 700;
+  fH = 360;
+  canvas.width = fW;
+  canvas.height = fH;
+  fStep = -1;
+  document.getElementById('slabel').textContent = '';
+  var flog = document.getElementById('flog');
+  while(flog.firstChild) flog.removeChild(flog.firstChild);
+  var d = document.createElement('div');
+  d.style.cssText = 'color:#58a6ff';
+  d.textContent = '[ready] 点击「下一步」开始演示...';
+  flog.appendChild(d);
+  drawCanvas(-1);
+}
+
+function drawCanvas(step) {
+  if (!fCtx) return;
+  var c = fCtx, sc = fW / 800;
+  c.clearRect(0, 0, fW, fH);
+  c.fillStyle = '#161b22';
+  c.fillRect(0, 0, fW, fH);
+  c.save();
+  c.scale(sc, 1);
+
+  var activeSet = step >= 0 ? (STEPS[step] ? STEPS[step].active : []) : [];
+  for (var key in NODES) {
+    var n = NODES[key];
+    var isActive = activeSet.indexOf(key) >= 0;
+    if (isActive) { c.shadowColor = n.col; c.shadowBlur = 14; }
+    c.fillStyle = isActive ? n.col + '28' : '#21262d';
+    c.strokeStyle = isActive ? n.col : '#30363d';
+    c.lineWidth = isActive ? 2 : 1.5;
+    c.beginPath();
+    if (c.roundRect) c.roundRect(n.x - 54, n.y - 26, 108, 52, 7);
+    else { c.rect(n.x - 54, n.y - 26, 108, 52); }
+    c.fill(); c.stroke();
+    c.shadowBlur = 0;
+    c.fillStyle = isActive ? n.col : '#c9d1d9';
+    c.font = (isActive ? 'bold ' : '') + '13px PingFang SC,sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(n.label, n.x, n.y - 8);
+    c.fillStyle = '#6e7681';
+    c.font = '10px PingFang SC,sans-serif';
+    c.fillText(n.sub, n.x, n.y + 10);
+  }
+
+  if (step >= 0 && STEPS[step]) drawStepArrow(c, STEPS[step]);
+  c.restore();
+}
+
+function drawStepArrow(c, stepObj) {
+  c.shadowBlur = 0;
+  if (!stepObj.arrow) return;
+  if (stepObj.arrow === 'quorum') {
+    [NODES.bk1, NODES.bk2, NODES.bk3].forEach(function(target) {
+      drawArrLine(c, NODES.broker, target, '#8957e5', '');
+    });
+    return;
+  }
+  var arr = stepObj.arrow;
+  drawArrLine(c, NODES[arr.from], NODES[arr.to], NODES[arr.from].col, arr.lbl);
+}
+
+function drawArrLine(c, from, to, col, lbl) {
+  var dx = to.x - from.x, dy = to.y - from.y;
+  var ang = Math.atan2(dy, dx);
+  var sx = from.x + Math.cos(ang) * 55, sy = from.y + Math.sin(ang) * 27;
+  var ex = to.x - Math.cos(ang) * 55, ey = to.y - Math.sin(ang) * 27;
+  c.strokeStyle = col; c.lineWidth = 2;
+  c.shadowColor = col; c.shadowBlur = 5;
+  c.beginPath(); c.moveTo(sx, sy); c.lineTo(ex, ey); c.stroke();
+  c.shadowBlur = 0;
+  c.fillStyle = col;
+  c.beginPath();
+  c.moveTo(ex, ey);
+  c.lineTo(ex - 9 * Math.cos(ang - 0.38), ey - 9 * Math.sin(ang - 0.38));
+  c.lineTo(ex - 9 * Math.cos(ang + 0.38), ey - 9 * Math.sin(ang + 0.38));
+  c.closePath(); c.fill();
+  if (lbl) {
+    c.fillStyle = col;
+    c.font = 'bold 11px PingFang SC,sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'bottom';
+    c.fillText(lbl, (sx+ex)/2, (sy+ey)/2 - 5);
+  }
+}
+
+function doStep() {
+  fStep = (fStep + 1) % STEPS.length;
+  var s = STEPS[fStep];
+  var lbl = document.getElementById('slabel');
+  lbl.textContent = '步骤 ' + (fStep+1) + '/' + STEPS.length + '：' + s.txt;
+  var parts = s.log.split('|');
+  var flog = document.getElementById('flog');
+  var d = document.createElement('div');
+  d.style.marginBottom = '3px';
+  var ts = document.createElement('span');
+  ts.style.cssText = 'color:#484f58;margin-right:6px';
+  ts.textContent = '[' + new Date().toLocaleTimeString('zh',{hour12:false}) + ']';
+  var msg = document.createElement('span');
+  var colMap = { info:'#58a6ff', success:'#3fb950', warn:'#e3b341' };
+  msg.style.color = colMap[parts[0]] || '#8b949e';
+  msg.textContent = parts[1];
+  d.appendChild(ts); d.appendChild(msg);
+  flog.appendChild(d);
+  flog.scrollTop = flog.scrollHeight;
+  drawCanvas(fStep);
+}
+
+function doReset() {
+  fStep = -1;
+  document.getElementById('slabel').textContent = '';
+  var flog = document.getElementById('flog');
+  while(flog.firstChild) flog.removeChild(flog.firstChild);
+  var d = document.createElement('div');
+  d.style.color = '#58a6ff';
+  d.textContent = '[ready] 点击「下一步」开始演示...';
+  flog.appendChild(d);
+  drawCanvas(-1);
+}
+
+/* ── STORAGE ── */
+var entryN = 0;
+function initStorage() {
+  entryN = 0;
+  var grid = document.getElementById('eGrid');
+  if (!grid) return;
+  while(grid.firstChild) grid.removeChild(grid.firstChild);
+  for (var i = 0; i < 14; i++) { appendEntry(i, false); entryN++; }
+}
+
+function appendEntry(id, animate) {
+  var grid = document.getElementById('eGrid');
+  var div = document.createElement('div');
+  div.className = 'entry-cell' + (animate ? ' flash' : '');
+  var eid = document.createElement('div');
+  eid.className = 'eid';
+  eid.textContent = 'E-' + id;
+  var esz = document.createElement('div');
+  esz.className = 'esz';
+  esz.textContent = (Math.random()*1.8+0.4).toFixed(1) + 'KB';
+  div.appendChild(eid); div.appendChild(esz);
+  grid.appendChild(div);
+}
+
+function doWrite() {
+  var ids = ['bk1','bk2','bk3'];
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('wr');
+    setTimeout(function(){ el.classList.remove('wr'); }, 600);
+  });
+  appendEntry(entryN++, true);
+}
+
+var bk3Dead = false;
+function doBookieFail() {
+  if (bk3Dead) return;
+  bk3Dead = true;
+  var bk3 = document.getElementById('bk3');
+  if (!bk3) return;
+  bk3.style.borderColor = '#da3633';
+  bk3.style.opacity = '0.5';
+  var last = bk3.querySelector('.bkl:last-child');
+  if (last) { last.style.color = '#f85149'; last.textContent = '⬤ offline'; }
+  setTimeout(function(){
+    var bk1 = document.getElementById('bk1'), bk2 = document.getElementById('bk2');
+    if (bk1) { bk1.classList.add('wr'); setTimeout(function(){ bk1.classList.remove('wr'); }, 600); }
+    if (bk2) { bk2.classList.add('wr'); setTimeout(function(){ bk2.classList.remove('wr'); }, 600); }
+    appendEntry(entryN++, true);
+  }, 700);
+}
+
+/* ── SUBSCRIPTION ── */
+var subTimer = null;
+var curMode = 'sh';
+
+function pickMode(mode) {
+  curMode = mode;
+  var allModes = ['ex','sh','fo','ks'];
+  var selMap = { ex:'sc-ex', sh:'sc-sh', fo:'sc-fo', ks:'sc-ks' };
+  allModes.forEach(function(m){
+    var el = document.getElementById('sc-'+m);
+    if (!el) return;
+    el.className = 'sub-card';
+    if (m === mode) el.className = 'sub-card ' + selMap[m];
+  });
+  if (subTimer) { clearInterval(subTimer); subTimer = null; }
+  renderSubDemo(mode);
+}
+
+var MODE_CFG = {
+  ex: {
+    title: 'Exclusive — 只有一个消费者处于活跃状态',
+    titleCol: '#3fb950',
+    msgs: ['M1','M2','M3','M4','M5','M6'],
+    cons: [
+      { id:'C1 (Pod-1)', label:'主消费者', col:'#3fb950', active:true },
+      { id:'C2 (Pod-2)', label:'备用（等待）', col:'#3fb950', active:false },
+    ],
+    dist: [0,0,0,0,0,0],
+  },
+  sh: {
+    title: 'Shared — Round-Robin 分发（美餐支付模式）',
+    titleCol: '#58a6ff',
+    msgs: ['M1','M2','M3','M4','M5','M6'],
+    cons: [
+      { id:'C1 (Pod-1)', label:'', col:'#3fb950', active:true },
+      { id:'C2 (Pod-2)', label:'', col:'#58a6ff', active:true },
+      { id:'C3 (Pod-3)', label:'', col:'#8957e5', active:true },
+    ],
+    dist: [0,1,2,0,1,2],
+  },
+  fo: {
+    title: 'Failover — 主消费，Pod-1 宕机后 Pod-2 自动接管',
+    titleCol: '#e3b341',
+    msgs: ['M1','M2','M3','M4','M5','M6'],
+    cons: [
+      { id:'C1 (Pod-1)', label:'主', col:'#3fb950', active:true },
+      { id:'C2 (Pod-2)', label:'热备', col:'#e3b341', active:false },
+      { id:'C3 (Pod-3)', label:'热备', col:'#e3b341', active:false },
+    ],
+    dist: [0,0,0,'failover',1,1],
+  },
+  ks: {
+    title: 'Key_Shared — 同 Key 发同一 Consumer（例：按 out_order_no）',
+    titleCol: '#8957e5',
+    msgs: ['K1:M1','K2:M2','K1:M3','K3:M4','K2:M5','K1:M6'],
+    cons: [
+      { id:'C1 (Pod-1)', label:'Key-1', col:'#3fb950', active:true },
+      { id:'C2 (Pod-2)', label:'Key-2', col:'#58a6ff', active:true },
+      { id:'C3 (Pod-3)', label:'Key-3', col:'#8957e5', active:true },
+    ],
+    dist: [0,1,0,2,1,0],
+  },
+};
+
+var CCOLS = ['#3fb950','#58a6ff','#8957e5','#e3b341'];
+
+function renderSubDemo(mode) {
+  var cfg = MODE_CFG[mode];
+  var area = document.getElementById('sdemo');
+  while(area.firstChild) area.removeChild(area.firstChild);
+
+  // Title
+  var ttl = document.createElement('h3');
+  ttl.style.cssText = 'color:' + cfg.titleCol + ';margin-bottom:14px;font-size:14px';
+  ttl.textContent = cfg.title;
+  area.appendChild(ttl);
+
+  // Message queue row
+  var mqRow = document.createElement('div');
+  mqRow.className = 'demo-row';
+  var lbl = document.createElement('div');
+  lbl.className = 'dlabel';
+  lbl.textContent = '消息队列';
+  var mq = document.createElement('div');
+  mq.className = 'mq';
+  var pillEls = [];
+  cfg.msgs.forEach(function(m, i){
+    var p = document.createElement('div');
+    p.className = 'mpill';
+    p.id = 'mp-' + mode + '-' + i;
+    p.textContent = m;
+    mq.appendChild(p);
+    pillEls.push(p);
+  });
+  mqRow.appendChild(lbl); mqRow.appendChild(mq);
+  area.appendChild(mqRow);
+
+  // Consumer rows
+  var consReceived = cfg.cons.map(function(){ return []; });
+  var conEls = [];
+  var conMsgEls = [];
+  cfg.cons.forEach(function(con, ci){
+    var row = document.createElement('div');
+    row.className = 'demo-row';
+    var cl = document.createElement('div');
+    cl.className = 'dlabel';
+    cl.style.color = CCOLS[ci];
+    cl.textContent = '消费者 ' + (ci+1);
+    var cb = document.createElement('div');
+    cb.className = 'cbox ' + (con.active ? 'con-a' : 'con-s');
+    cb.style.borderColor = con.active ? CCOLS[ci] : '#30363d';
+    cb.style.background = con.active ? CCOLS[ci] + '22' : '#21262d';
+    cb.id = 'cb-' + mode + '-' + ci;
+    var dot = document.createElement('span');
+    dot.textContent = con.active ? '🟢' : '⚪';
+    var name = document.createElement('span');
+    name.textContent = ' ' + con.id;
+    var sublabel = document.createElement('span');
+    sublabel.style.cssText = 'font-size:10px;color:#6e7681';
+    sublabel.textContent = con.label ? ' (' + con.label + ')' : '';
+    cb.appendChild(dot); cb.appendChild(name); cb.appendChild(sublabel);
+    conEls.push(cb);
+
+    var cm = document.createElement('div');
+    cm.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-left:8px';
+    conMsgEls.push(cm);
+
+    row.appendChild(cl); row.appendChild(cb); row.appendChild(cm);
+    area.appendChild(row);
+  });
+
+  // Failover hint
+  if (mode === 'fo') {
+    var hint = document.createElement('div');
+    hint.style.cssText = 'margin-top:6px;font-size:11px;color:#e3b341';
+    hint.textContent = '⚡ 模拟：第 4 条消息时 Pod-1 宕机，Pod-2 自动接管';
+    area.appendChild(hint);
+  }
+
+  // Animate
+  var idx = 0;
+  subTimer = setInterval(function(){
+    if (idx >= cfg.msgs.length) { clearInterval(subTimer); return; }
+    var d = cfg.dist[idx];
+    var pill = pillEls[idx];
+
+    if (d === 'failover') {
+      // show failover
+      var c0 = conEls[0];
+      c0.style.opacity = '0.35';
+      c0.style.borderColor = '#da3633';
+      while(c0.firstChild) c0.removeChild(c0.firstChild);
+      var sp = document.createElement('span');
+      sp.textContent = '⚫ C1 (Pod-1)';
+      var sp2 = document.createElement('span');
+      sp2.style.cssText = 'font-size:10px;color:#f85149';
+      sp2.textContent = ' (crashed)';
+      c0.appendChild(sp); c0.appendChild(sp2);
+      var c1 = conEls[1];
+      c1.className = 'cbox con-a';
+      c1.style.borderColor = CCOLS[1];
+      c1.style.background = CCOLS[1] + '22';
+      while(c1.firstChild) c1.removeChild(c1.firstChild);
+      var sp3 = document.createElement('span');
+      sp3.textContent = '🟢 C2 (Pod-2)';
+      var sp4 = document.createElement('span');
+      sp4.style.cssText = 'font-size:10px;color:#e3b341';
+      sp4.textContent = ' (接管)';
+      c1.appendChild(sp3); c1.appendChild(sp4);
+      d = 1; // now goes to Pod-2
+    }
+
+    var col = CCOLS[d];
+    if (pill) {
+      pill.style.background = col + '33';
+      pill.style.borderColor = col;
+      pill.style.color = col;
+    }
+    var cbox = conEls[d];
+    if (cbox) { cbox.classList.add('con-p'); setTimeout(function(){ cbox.classList.remove('con-p'); }, 700); }
+    var cm = conMsgEls[d];
+    if (cm) {
+      var np = document.createElement('div');
+      np.className = 'mpill';
+      np.style.cssText = 'background:' + col + '22;border:1px solid ' + col + ';color:' + col;
+      np.textContent = cfg.msgs[idx];
+      cm.appendChild(np);
+    }
+    idx++;
+  }, 950);
+}
+
+/* ── CURSOR ── */
+var cStates = [];
+function cReset() {
+  cStates = [];
+  for (var i = 0; i < 22; i++) cStates.push('p');
+  renderCursor();
+}
+
+function renderCursor() {
+  var bar = document.getElementById('cbar');
+  if (!bar) return;
+  while(bar.firstChild) bar.removeChild(bar.firstChild);
+  var clsMap = { p:'ce ce-p', d:'ce ce-d', a:'ce ce-a', n:'ce ce-n' };
+  cStates.forEach(function(s, i){
+    var el = document.createElement('div');
+    el.className = clsMap[s] || 'ce ce-p';
+    el.title = 'Entry ' + i + ' - ' + {p:'待投递',d:'已投递',a:'已ACK',n:'NACK'}[s];
+    el.textContent = i;
+    bar.appendChild(el);
+  });
+}
+
+function cDeliver() {
+  var idx = cStates.indexOf('p');
+  if (idx < 0) return;
+  cStates[idx] = 'd';
+  renderCursor();
+}
+
+function cAck() {
+  var idx = cStates.indexOf('d');
+  if (idx < 0) return;
+  cStates[idx] = 'a';
+  renderCursor();
+}
+
+function cNack() {
+  var idx = cStates.indexOf('d');
+  if (idx < 0) return;
+  cStates[idx] = 'n';
+  renderCursor();
+  setTimeout(function(){
+    if (cStates[idx] === 'n') { cStates[idx] = 'd'; renderCursor(); }
+  }, 1500);
+}
+
+/* ── Init ── */
+window.addEventListener('resize', function(){
+  if (document.getElementById('s-flow').classList.contains('active')) initCanvas();
+});
+</script>
+</body>
+</html>

@@ -43,7 +43,150 @@ min_trx_id <= trx_id < max_trx_id:
 
 ---
 
-## 2. RC 隔离级别下优化器不走索引，为什么强调隔离级别是 RC？
+## 2. undo log 是什么时候产生的？
+
+**修改数据之前，先写 undo log，再改数据。** 是前置动作，不是事后记录。
+
+```
+事务执行 DML
+    ↓
+① 写 undo log（记录"怎么撤销"）← 先
+    ↓
+② 修改 Buffer Pool 里的数据页   ← 后
+    ↓
+③ 写 redo log
+    ↓
+④ 事务提交
+    ↓
+⑤ purge 线程异步判断是否还有 Read View 引用，不需要则删除
+```
+
+**必须先写 undo log 的原因：**
+
+如果先改数据再写 undo log，中间崩溃会导致数据已改但没有撤销手段，破坏原子性。
+
+不同操作写的 undo log 内容：
+
+| 操作 | undo log 记录内容 | 回滚时执行 |
+|------|-----------------|-----------|
+| INSERT | 新插入行的主键 | DELETE |
+| DELETE | 整行数据 | INSERT |
+| UPDATE | 被修改字段的旧值 | UPDATE 回旧值 |
+
+undo log 除了用于回滚，还是 MVCC 版本链的存储介质，每行数据有隐藏字段 `DB_ROLL_PTR` 指向上一个版本，形成链表：
+
+```
+[当前版本] → [undo v2] → [undo v1] → [原始版本]
+```
+
+MVCC 读旧版本就是顺着这条链往回找，找到第一个"可见"的版本为止。
+
+---
+
+## 3. RC 下 undo log 提交后立即删除吗？
+
+**不是立即删除，但比 RR 删得快很多。**
+
+原因在于 **Read View 的生命周期**不同：
+
+```
+RR：Read View 活到整个事务结束（可能几分钟、几小时）
+RC：Read View 只活到这条 SQL 结束（通常几毫秒）
+```
+
+purge 线程的判断条件是：
+
+```
+undo log 的 trx_id < 所有活跃 Read View 里最老的 min_trx_id → 可以删
+```
+
+在 RC 下，两条 SQL 之间那段间隔里，几乎没有任何 Read View 还在引用旧版本，purge 线程可以很快清理。
+
+```
+RC 事务A：
+  SQL1 执行中 → Read View 存在 → 可能引用旧 undo
+  SQL1 结束   → Read View 销毁 → 不再引用，几毫秒后 undo 可清理
+  ...
+  SQL2 执行中 → 重建新 Read View → 看到最新状态
+
+RR 事务A（开着不提交）：
+  SQL1 执行中 → Read View 存在
+  SQL1 结束   → Read View 仍然存在！（RR 复用同一个）
+  ...2小时后...
+  SQL2 执行中 → 还是同一个 Read View
+  → 2小时内产生的所有 undo log 都不敢删
+```
+
+所以"RC 下提交了基本就能删"这个直觉大体正确，RC 的 undo 积压问题几乎不会出现。长事务危害主要在 RR 下。
+
+---
+
+## 4. 业务中是否需要 RR？RC 是否足够？
+
+**结论：大多数互联网业务 RC 足够，RR 在特定场景有价值。**
+
+### RC 满足的场景（大多数业务）
+
+简单 CRUD 的假设成立：查一次用一次，不依赖多次查询的一致性。
+
+```
+接口查单：SELECT WHERE id=xxx → 用查到的数据返回响应     → RC 够
+更新操作：UPDATE ... WHERE id=xxx → 检查影响行数          → RC 够
+幂等控制：INSERT 失败唯一索引冲突 / UPDATE WHERE status=old → RC 够
+```
+
+### RR 有价值的场景
+
+**核心：同一事务内多次查询需要看到一致的数据快照。**
+
+**场景一：聚合报表（最典型）**
+
+```sql
+BEGIN;
+SELECT SUM(amount) FROM orders WHERE date='2024-01'; -- 100000，100 笔
+
+-- 此时另一个事务 INSERT 了一条新订单并提交
+
+SELECT COUNT(*) FROM orders WHERE date='2024-01';
+-- RC 下重建 Read View，能看到新插入行 → 返回 101 条
+
+COMMIT;
+-- 结果：总金额基于100笔，总数量101笔，平均值算错！
+```
+
+RR 下两次查询看同一快照，SUM 和 COUNT 对得上。
+
+**场景二：对账 / 数据导出**
+
+导出期间有其他事务写入，RC 下前后批次看到的数据不一致，对账结果出错。RR 保证整个导出过程视图一致。
+
+### RC + 显式加锁是更实用的组合
+
+对确实需要强一致的关键路径，用 `SELECT FOR UPDATE` 显式加锁，比开 RR 粒度更可控：
+
+```sql
+-- 支付扣款：RC 下显式锁 + 检查状态
+BEGIN;
+SELECT balance FROM account WHERE id=1 FOR UPDATE;  -- 加行锁
+UPDATE account SET balance = balance - 100 WHERE id=1 AND balance >= 100;
+COMMIT;
+```
+
+**这也是互联网公司（早期阿里等）把默认隔离级别调成 RC 的原因：**
+
+```
+RR 的额外代价：
+  - undo log 生命周期更长，长事务风险更大
+  - 间隙锁增加死锁概率
+  - 限制 binlog 必须使用 row 格式
+
+RC 的代价：
+  - 幻读和不可重复读需要业务层自己保证（唯一索引 + 状态机 + 显式锁）
+```
+
+---
+
+## 5. RC 隔离级别下优化器不走索引，为什么强调隔离级别是 RC？
 
 关键在于**间隙锁（Gap Lock）只在 RR 下才有**。
 

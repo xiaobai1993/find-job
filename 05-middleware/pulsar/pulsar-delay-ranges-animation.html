@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulsar IndividualDeleteRanges 死亡螺旋 · 动画解析</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#060b16;--s1:#0b1222;--s2:#101a30;--bd:#1b2d4a;
+  --txt:#8ba5c8;--bright:#d4e8ff;
+  --cyan:#2cd4e8;--amber:#ffa836;--green:#24d48a;
+  --red:#ff4040;--purple:#b06dff;
+  --mono:'IBM Plex Mono',monospace;--ui:'Syne',sans-serif;
+}
+body{background:var(--bg);color:var(--txt);font-family:var(--ui);min-height:100vh;overflow-x:hidden;}
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(rgba(27,45,74,.25) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(27,45,74,.25) 1px,transparent 1px);
+  background-size:48px 48px;
+}
+/* ── HEADER ── */
+.hdr{position:relative;z-index:1;padding:28px 36px 20px;border-bottom:1px solid var(--bd);}
+.hdr-tag{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:8px;opacity:.75;}
+.hdr h1{font-size:26px;font-weight:800;color:var(--bright);line-height:1.2;}
+.hdr h1 em{color:var(--red);font-style:normal;}
+.hdr-sub{font-family:var(--mono);font-size:12px;margin-top:6px;opacity:.6;line-height:1.6;}
+.phase-row{display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap;}
+.phase-dots{display:flex;gap:5px;}
+.pdot{width:8px;height:8px;border-radius:50%;background:var(--s2);border:1px solid var(--bd);transition:all .4s;}
+.pdot.done{background:var(--green);border-color:var(--green);}
+.pdot.active{background:var(--amber);border-color:var(--amber);box-shadow:0 0 8px var(--amber);}
+.phase-chip{font-family:var(--mono);font-size:11px;color:var(--amber);padding:3px 10px;background:rgba(255,168,54,.08);border:1px solid rgba(255,168,54,.3);border-radius:4px;}
+.scene-box{position:relative;z-index:1;padding:10px 36px;}
+.scene-txt{font-family:var(--mono);font-size:12px;color:var(--cyan);background:rgba(44,212,232,.05);border:1px solid rgba(44,212,232,.18);border-radius:6px;padding:10px 14px;line-height:1.7;}
+/* ── CONTROLS ── */
+.ctrl{position:relative;z-index:1;padding:12px 36px 6px;display:flex;gap:10px;align-items:center;}
+.btn{padding:7px 18px;border-radius:5px;font-family:var(--mono);font-size:12px;font-weight:600;cursor:pointer;border:1px solid;transition:all .2s;letter-spacing:.04em;}
+.btn-p{background:rgba(255,168,54,.12);color:var(--amber);border-color:var(--amber);}
+.btn-p:hover{background:rgba(255,168,54,.22);}
+.btn-p:disabled{opacity:.4;cursor:default;}
+.btn-s{background:transparent;color:var(--txt);border-color:var(--bd);}
+.btn-s:hover{border-color:var(--txt);color:var(--bright);}
+.ctrl-note{font-family:var(--mono);font-size:10px;opacity:.45;}
+/* ── MAIN GRID ── */
+.main{position:relative;z-index:1;padding:14px 36px;display:grid;grid-template-columns:180px 1fr 180px;gap:14px;max-width:1380px;margin:0 auto;}
+.panel{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:14px;}
+.ptitle{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);margin-bottom:12px;opacity:.65;}
+/* Node icons */
+.node-icon{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 10px;transition:all .5s;}
+.node-prod{background:linear-gradient(135deg,#0b1e35,#061020);border:2px solid var(--cyan);box-shadow:0 0 12px rgba(44,212,232,.18);}
+.node-cons{background:linear-gradient(135deg,#0b1e35,#061020);border:2px solid var(--green);box-shadow:0 0 12px rgba(36,212,138,.18);}
+.node-cons.dead{border-color:var(--red);box-shadow:0 0 20px rgba(255,64,64,.4);animation:pulse-r 1s ease-in-out infinite;}
+@keyframes pulse-r{0%,100%{box-shadow:0 0 16px rgba(255,64,64,.35);}50%{box-shadow:0 0 32px rgba(255,64,64,.7);}}
+.ctr{font-family:var(--mono);text-align:center;}
+.ctr-n{font-size:24px;font-weight:600;color:var(--cyan);transition:color .4s;}
+.ctr-n.green{color:var(--green);}
+.ctr-n.red{color:var(--red);}
+.ctr-lbl{font-size:9px;opacity:.5;margin-top:2px;}
+.mini-log{margin-top:12px;}
+.mini-log-title{font-family:var(--mono);font-size:9px;opacity:.5;margin-bottom:5px;letter-spacing:.08em;}
+.mini-log-entries{display:flex;flex-direction:column;gap:2px;max-height:90px;overflow-y:auto;}
+.mini-entry{font-family:var(--mono);font-size:10px;line-height:1.5;opacity:0;animation:fade-in .3s forwards;}
+@keyframes fade-in{to{opacity:1;}}
+/* ── BROKER PANEL ── */
+.broker-panel{grid-column:2;grid-row:1;}
+.broker-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;}
+.broker-cpu-badge{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid var(--bd);transition:all .4s;}
+.slots-label{font-family:var(--mono);font-size:9px;opacity:.5;margin-bottom:6px;letter-spacing:.08em;}
+.slots-wrap{display:flex;gap:5px;flex-wrap:wrap;min-height:60px;align-content:flex-start;}
+.mslot{width:58px;height:58px;border-radius:6px;border:1px solid var(--bd);background:var(--s2);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--mono);font-size:9px;position:relative;transition:all .35s;}
+.mslot .sid{font-size:8px;opacity:.45;margin-bottom:1px;}
+.mslot .slabel{font-size:11px;font-weight:600;}
+.mslot .sdelay{font-size:8px;margin-top:2px;opacity:.7;}
+.mslot.pending .slabel{color:var(--txt);}
+.mslot.transit{border-color:var(--cyan);background:rgba(44,212,232,.08);animation:tr-pulse .7s ease-in-out infinite;}
+.mslot.transit .slabel{color:var(--cyan);}
+@keyframes tr-pulse{0%,100%{opacity:1;}50%{opacity:.55;}}
+.mslot.acked{border-color:var(--green);background:rgba(36,212,138,.07);}
+.mslot.acked .slabel{color:var(--green);}
+.mslot.stuck{border-color:var(--amber);background:rgba(255,168,54,.1);animation:stuck-ring 1.8s ease-in-out infinite;}
+.mslot.stuck .slabel{color:var(--amber);}
+@keyframes stuck-ring{0%,100%{box-shadow:0 0 0 0 rgba(255,168,54,.3);}50%{box-shadow:0 0 0 6px rgba(255,168,54,0);}}
+.mslot.blocked{border-color:var(--red);background:rgba(255,64,64,.1);animation:blk-ring 1s ease-in-out infinite;}
+.mslot.blocked .slabel{color:var(--red);}
+@keyframes blk-ring{0%,100%{box-shadow:0 0 0 0 rgba(255,64,64,.4);}50%{box-shadow:0 0 0 8px rgba(255,64,64,0);}}
+/* Cursor */
+.cursor-band{display:none;margin:6px 0 2px;}
+.cursor-label-row{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;opacity:.6;margin-bottom:4px;}
+.cursor-arrow{font-size:14px;color:var(--cyan);animation:cur-blink 1.2s ease-in-out infinite;}
+@keyframes cur-blink{0%,100%{opacity:1;}50%{opacity:.4;}}
+.cursor-arrow.blocked{color:var(--red);animation:cur-blink-r .6s ease-in-out infinite;}
+@keyframes cur-blink-r{0%,100%{opacity:1;}50%{opacity:.3;}}
+.cursor-pos-lbl{font-family:var(--mono);font-size:10px;color:var(--cyan);}
+.cursor-pos-lbl.blocked{color:var(--red);}
+.cursor-block-msg{font-family:var(--mono);font-size:10px;color:var(--red);display:none;}
+/* Cursor data */
+.cursor-data{background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:11px;margin-top:8px;}
+.cursor-data-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;}
+.ranges-big{font-size:26px;font-weight:600;color:var(--amber);line-height:1;transition:color .3s;}
+.ranges-big.danger{color:var(--red);}
+.meta-size{font-family:var(--mono);font-size:11px;color:var(--txt);}
+.meta-val{color:var(--amber);font-weight:600;transition:color .3s;}
+.meta-val.danger{color:var(--red);}
+.watermark-lbl{font-family:var(--mono);font-size:10px;margin-top:4px;color:var(--cyan);}
+.ranges-track{height:5px;background:var(--bg);border-radius:3px;overflow:hidden;margin-top:8px;}
+.ranges-fill{height:100%;background:linear-gradient(90deg,var(--amber),var(--red));border-radius:3px;width:0%;transition:width .6s ease;}
+.ranges-scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:8px;opacity:.38;margin-top:3px;}
+/* Death spiral */
+.death-spiral{display:none;background:rgba(255,64,64,.08);border:1px solid rgba(255,64,64,.4);border-radius:5px;padding:9px 12px;margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--red);text-align:center;}
+.death-spiral.on{display:block;animation:ds-pulse 1.2s ease-in-out infinite;}
+@keyframes ds-pulse{0%,100%{border-color:rgba(255,64,64,.3);}50%{border-color:var(--red);box-shadow:0 0 12px rgba(255,64,64,.25);}}
+.reconnect-track{height:3px;background:var(--bg);border-radius:2px;margin-top:7px;overflow:hidden;}
+.reconnect-fill{height:100%;background:var(--red);width:0%;transition:width .08s linear;}
+/* ── METRICS ── */
+.metrics{position:relative;z-index:1;padding:0 36px 20px;display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:14px;max-width:1380px;margin:0 auto;}
+.gauge-panel{padding:14px 14px 10px;}
+.gauge-wrap{display:flex;justify-content:center;position:relative;margin:4px 0;}
+.g-svg{width:110px;height:66px;}
+.g-lbl{font-family:var(--mono);font-size:9px;text-align:center;letter-spacing:.1em;text-transform:uppercase;opacity:.5;margin-top:4px;}
+.g-sub{font-family:var(--mono);font-size:9px;text-align:center;margin-top:3px;min-height:14px;opacity:.55;}
+.log-panel{padding:14px;}
+.log-entries{height:128px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+.le{font-family:var(--mono);font-size:10px;line-height:1.55;padding:1px 4px;border-radius:2px;opacity:0;animation:fade-in .3s forwards;}
+.le.info{color:var(--txt);}
+.le.ok{color:var(--green);}
+.le.warn{color:var(--amber);}
+.le.err{color:var(--red);}
+.le.crit{color:var(--red);background:rgba(255,64,64,.08);font-weight:600;}
+.le-t{opacity:.45;margin-right:6px;}
+.log-entries::-webkit-scrollbar{width:3px;}
+.log-entries::-webkit-scrollbar-track{background:var(--s1);}
+.log-entries::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px;}
+/* ZK flow */
+.zk-flow{display:flex;align-items:center;justify-content:center;gap:4px;font-family:var(--mono);font-size:10px;min-height:16px;margin-top:4px;opacity:0;transition:opacity .3s;}
+.zk-flow.on{opacity:1;}
+.zk-arrow{color:var(--red);animation:zk-blink .25s step-start infinite;}
+@keyframes zk-blink{0%,100%{opacity:1;}50%{opacity:0;}}
+@media(max-width:860px){
+  .main{grid-template-columns:1fr;}
+  .broker-panel{grid-column:1;grid-row:2;}
+  .metrics{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-tag">Apache Pulsar · Pulsar 4.0 踩坑复现 · 延迟消息设计缺陷</div>
+  <h1>IndividualDeleteRanges <em>死亡螺旋</em></h1>
+  <div class="hdr-sub">可变延迟消息 → 乱序 ack → 游标元数据爆炸 → 消费者重连卡死 → 无限循环</div>
+  <div class="phase-row">
+    <span style="font-family:var(--mono);font-size:10px;opacity:.5;">进度：</span>
+    <div class="phase-dots" id="phaseDots">
+      <div class="pdot"></div><div class="pdot"></div><div class="pdot"></div>
+      <div class="pdot"></div><div class="pdot"></div><div class="pdot"></div>
+    </div>
+    <div class="phase-chip" id="phaseChip">待开始</div>
+  </div>
+</div>
+
+<div class="scene-box">
+  <div class="scene-txt" id="sceneDesc">▶ 点击「开始演示」查看动画（约 40 秒自动播放）</div>
+</div>
+
+<div class="ctrl">
+  <button class="btn btn-p" id="playBtn">▶ 开始演示</button>
+  <button class="btn btn-s" id="resetBtn">↺ 重置</button>
+  <span class="ctrl-note">全自动播放 · 6个场景 · 约40秒</span>
+</div>
+
+<div class="main">
+  <!-- PRODUCER -->
+  <div class="panel">
+    <div class="ptitle">Producer 生产者</div>
+    <div class="node-icon node-prod" id="prodIcon">📤</div>
+    <div class="ctr">
+      <div class="ctr-n" id="sentNum">0</div>
+      <div class="ctr-lbl">已发送 / 条</div>
+    </div>
+    <div class="mini-log">
+      <div class="mini-log-title">发送记录</div>
+      <div class="mini-log-entries" id="sendLog"></div>
+    </div>
+  </div>
+
+  <!-- BROKER -->
+  <div class="panel broker-panel">
+    <div class="broker-top">
+      <div>
+        <div class="ptitle" style="margin-bottom:2px;">Pulsar Broker · Topic</div>
+        <div style="font-family:var(--mono);font-size:10px;opacity:.5;">persistent://public/default/delay-test</div>
+      </div>
+      <div class="broker-cpu-badge" id="brokerBadge">CPU <span id="bCpuMini" style="color:var(--green)">30%</span></div>
+    </div>
+    <div class="slots-label">消息存储队列（按发送顺序排列）</div>
+    <div class="slots-wrap" id="slots"></div>
+
+    <div class="cursor-band" id="cursorBand">
+      <div class="cursor-label-row">游标位置（Mark Delete Position）：</div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <div class="cursor-arrow" id="cursorArrow">▲</div>
+        <div class="cursor-pos-lbl" id="cursorPosLbl">pos: 0:0</div>
+        <div class="cursor-block-msg" id="cursorBlockMsg">← 被 msg₁ 阻塞！</div>
+      </div>
+    </div>
+
+    <div class="cursor-data">
+      <div class="cursor-data-top">
+        <div>
+          <div style="font-family:var(--mono);font-size:8px;opacity:.45;margin-bottom:4px;letter-spacing:.08em;">INDIVIDUALLY DELETED MESSAGES</div>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <div class="ranges-big" id="rangesNum">0</div>
+            <div style="font-family:var(--mono);font-size:9px;opacity:.5;">ranges</div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div class="meta-size">游标元数据：<span class="meta-val" id="metaSize">~1 KB</span></div>
+          <div class="watermark-lbl" id="watermarkEl">watermark: 0:0</div>
+        </div>
+      </div>
+      <div class="ranges-track"><div class="ranges-fill" id="rangesFill"></div></div>
+      <div class="ranges-scale"><span>0</span><span>安全线 10,000</span><span>危险 100,000+</span></div>
+    </div>
+
+    <div class="death-spiral" id="deathSpiral">
+      <span id="dsText">⚠ 死循环：消费者第 </span><span id="reconnectCnt">0</span><span> 次重连尝试</span>
+      <div class="reconnect-track"><div class="reconnect-fill" id="reconnFill"></div></div>
+    </div>
+  </div>
+
+  <!-- CONSUMER -->
+  <div class="panel">
+    <div class="ptitle">Consumer 消费者</div>
+    <div class="node-icon node-cons" id="consIcon">📥</div>
+    <div class="ctr">
+      <div class="ctr-n green" id="ackedNum">0</div>
+      <div class="ctr-lbl" id="consLbl">已确认 / 条</div>
+    </div>
+    <div class="mini-log">
+      <div class="mini-log-title">确认日志</div>
+      <div class="mini-log-entries" id="ackLog"></div>
+    </div>
+  </div>
+</div>
+
+<div class="metrics">
+  <div class="panel gauge-panel">
+    <div class="ptitle">Broker CPU 使用率</div>
+    <div class="gauge-wrap">
+      <svg class="g-svg" viewBox="0 0 110 66">
+        <path d="M8 62 A46 46 0 0 1 102 62" fill="none" stroke="#1b2d4a" stroke-width="9" stroke-linecap="round"/>
+        <path d="M8 62 A46 46 0 0 1 102 62" fill="none" stroke="#24d48a" stroke-width="9" stroke-linecap="round"
+              stroke-dasharray="144.5" stroke-dashoffset="144.5"
+              id="bGauge" style="transition:stroke-dashoffset .7s ease,stroke .5s;"/>
+        <text id="bCpuText" x="55" y="57" text-anchor="middle" font-family="IBM Plex Mono" font-size="15" font-weight="600" fill="#d4e8ff">30%</text>
+      </svg>
+    </div>
+    <div class="g-lbl">BROKER CPU</div>
+    <div class="g-sub" id="bCpuSub">正常运行</div>
+  </div>
+
+  <div class="panel gauge-panel">
+    <div class="ptitle">ZooKeeper CPU 使用率</div>
+    <div class="gauge-wrap">
+      <svg class="g-svg" viewBox="0 0 110 66">
+        <path d="M8 62 A46 46 0 0 1 102 62" fill="none" stroke="#1b2d4a" stroke-width="9" stroke-linecap="round"/>
+        <path d="M8 62 A46 46 0 0 1 102 62" fill="none" stroke="#24d48a" stroke-width="9" stroke-linecap="round"
+              stroke-dasharray="144.5" stroke-dashoffset="144.5"
+              id="zkGauge" style="transition:stroke-dashoffset .7s ease,stroke .5s;"/>
+        <text id="zkCpuText" x="55" y="57" text-anchor="middle" font-family="IBM Plex Mono" font-size="15" font-weight="600" fill="#d4e8ff">10%</text>
+      </svg>
+    </div>
+    <div class="g-lbl">ZOOKEEPER CPU</div>
+    <div class="zk-flow" id="zkFlow">
+      <span style="color:var(--txt);opacity:.7;">ZK</span>
+      <span class="zk-arrow">→→</span>
+      <span style="color:var(--red);">5MB游标数据</span>
+      <span class="zk-arrow">→→</span>
+      <span style="color:var(--txt);opacity:.7;">Broker</span>
+    </div>
+    <div class="g-sub" id="zkSub">正常运行</div>
+  </div>
+
+  <div class="panel log-panel">
+    <div class="ptitle">系统事件日志</div>
+    <div class="log-entries" id="logEl"></div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  Pulsar IndividualDeleteRanges Animation Engine
+//  All DOM manipulation uses safe textContent / createElement
+// ════════════════════════════════════════════════════════
+
+let animId = 0;
+let running = false;
+let lt = 0;
+let sent = 0, acked = 0;
+
+const MSGS = [
+  { id:'m1', pos:1, label:'msg\u2081', delay:'1\u5c0f\u65f6',  delayS:3600, clr:'#ff4040' },
+  { id:'m2', pos:2, label:'msg\u2082', delay:'10\u79d2',  delayS:10,   clr:'#2cd4e8' },
+  { id:'m3', pos:3, label:'msg\u2083', delay:'30\u79d2',  delayS:30,   clr:'#2cd4e8' },
+  { id:'m4', pos:4, label:'msg\u2084', delay:'5\u5206\u949f', delayS:300,  clr:'#ffa836' },
+  { id:'m5', pos:5, label:'msg\u2085', delay:'30\u5206\u949f',delayS:1800, clr:'#b06dff' },
+];
+
+const PHASES = [
+  { name:'\u521d\u59cb\u5316',         desc:'\u7cfb\u7edf\u5c31\u7eea\u3002Broker \u6b63\u5e38\u8fd0\u884c\uff0cCPU 30%\uff0cZooKeeper CPU 10%\uff0c\u6e38\u6807\u4e3a\u7a7a\u3002' },
+  { name:'\u6b63\u5e38\u987a\u5e8f\u6d88\u8d39',   desc:'\ud83d\udce6 \u573a\u666f\u4e00\uff1a\u53d1\u9001 3 \u6761\u76f8\u540c\u5ef6\u8fdf(5\u79d2)\u6d88\u606f \u2192 \u6309\u987a\u5e8f\u6295\u9012 \u2192 \u6d88\u8d39\u8005\u987a\u5e8f\u786e\u8ba4 \u2192 \u6e38\u6807\u6b63\u5e38\u63a8\u8fdb\u3002IndividualDeleteRanges = 0\uff0c\u4e00\u5207\u6b63\u5e38\u3002' },
+  { name:'\u53ef\u53d8\u5ef6\u8fdf\u6d88\u606f',   desc:'\u26a0\ufe0f \u573a\u666f\u4e8c\uff1a\u53d1\u9001 5 \u6761\u4e0d\u540c\u5ef6\u8fdf\u6d88\u606f\uff0810\u79d2 ~ 1\u5c0f\u65f6\uff09\u3002\u6ce8\u610f\uff1amsg\u2081 \u53d1\u9001\u6700\u65e9(pos:1)\uff0c\u4f46\u5ef6\u8fdf\u6700\u957f(1\u5c0f\u65f6)\uff01\u8fd9\u5c31\u662f\u60b2\u5287\u7684\u6839\u6e90\u3002' },
+  { name:'\u4e71\u5e8f\u786e\u8ba4\u79ef\u7d2f',   desc:'\ud83d\udd34 \u5173\u952e\u95ee\u9898\uff1amsg\u2082~msg\u2085\u6309\u5230\u671f\u65f6\u95f4\u5148\u540e\u88ab\u6d88\u8d39\u5e76\u786e\u8ba4\uff0c\u4f46 msg\u2081(1\u5c0f\u65f6)\u8fd8\u5728\u7b49\u5f85\u3002\u6e38\u6807\u88ab msg\u2081 \u6b7b\u6b7b\u5361\u5728 pos:1\uff0c\u540e\u9762\u6240\u6709\u5df2\u786e\u8ba4\u6d88\u606f\u90fd\u53d8\u6210 IndividualDeleteRanges\uff01' },
+  { name:'Ranges \u6fc0\u589e',    desc:'\ud83d\udcc8 \u89c4\u6a21\u5316\uff1a10\u4e07\u6761\u53ef\u53d8\u5ef6\u8fdf\u6d88\u606f\u540c\u65f6\u53d1\u9001\u3002IndividualDeleteRanges \u6301\u7eed\u79ef\u7d2f\uff0c\u6e38\u6807\u5143\u6570\u636e\u4ece KB \u7ea7\u81a8\u80c0\u5230 5MB+\uff0cBroker CPU \u6301\u7eed\u6500\u5347\u2026' },
+  { name:'\u91cd\u8fde\u00b7\u6b7b\u4ea1\u8c3a\u65cb',  desc:'\ud83d\udc80 \u81f4\u547d\u89e6\u53d1\uff1a\u8d1f\u8f7d\u5747\u8861/\u7f51\u7edc\u6297\u52a8 \u2192 \u6d88\u8d39\u8005\u91cd\u8fde \u2192 Broker \u4ece ZooKeeper \u53cd\u5e8f\u5217\u5316 5MB \u6e38\u6807\u5143\u6570\u636e \u2192 ZK CPU 85% \u00b7 \u8017\u65f630s \u2192 \u6d88\u8d39\u8005\u8d85\u65f6\u518d\u91cd\u8fde \u2192 \u65e0\u9650\u5faa\u73af\uff01\u7cfb\u7edf\u5b8c\u5168\u4e0d\u53ef\u7528\uff01' },
+];
+
+// ── safe DOM helpers ─────────────────────────────────────
+
+function sleep(ms){
+  const id = animId;
+  return new Promise(r => setTimeout(() => { if(animId === id) r(); }, ms));
+}
+
+function ts(){
+  const s = Math.floor(lt);
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+
+function addLog(msg, cls){
+  cls = cls || 'info';
+  const el = document.getElementById('logEl');
+  const d = document.createElement('div');
+  d.className = 'le ' + cls;
+  const t = document.createElement('span');
+  t.className = 'le-t';
+  t.textContent = '[' + ts() + ']';
+  d.appendChild(t);
+  d.appendChild(document.createTextNode(msg));
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+  while(el.children.length > 35) el.removeChild(el.firstChild);
+}
+
+function addMiniEntry(containerId, txt, clr){
+  const el = document.getElementById(containerId);
+  const d = document.createElement('div');
+  d.className = 'mini-entry';
+  d.style.color = clr || 'var(--cyan)';
+  d.textContent = txt;
+  el.appendChild(d);
+  while(el.children.length > 7) el.removeChild(el.firstChild);
+}
+
+function setPhase(i){
+  document.querySelectorAll('.pdot').forEach(function(d,j){
+    d.classList.remove('active','done');
+    if(j < i) d.classList.add('done');
+    if(j === i) d.classList.add('active');
+  });
+  document.getElementById('phaseChip').textContent = PHASES[i].name;
+  document.getElementById('sceneDesc').textContent = PHASES[i].desc;
+}
+
+function setRanges(n){
+  document.getElementById('rangesNum').textContent = n.toLocaleString();
+  document.getElementById('rangesFill').style.width = Math.min(n / 100000 * 100, 100) + '%';
+  var danger = n > 50000;
+  document.getElementById('rangesNum').classList.toggle('danger', danger);
+  var sz;
+  if(n < 100) sz = '~1 KB';
+  else if(n < 1000) sz = '~' + Math.round(n/100)*10 + ' KB';
+  else if(n < 10000) sz = '~' + (n/1000).toFixed(1) + ' MB';
+  else sz = '~' + (n/20000).toFixed(1) + ' MB';
+  document.getElementById('metaSize').textContent = sz;
+  document.getElementById('metaSize').classList.toggle('danger', danger);
+}
+
+function updateGauge(gaugeId, textId, val){
+  var fill = document.getElementById(gaugeId);
+  var txt  = document.getElementById(textId);
+  fill.style.strokeDashoffset = 144.5 - (val/100 * 144.5);
+  txt.textContent = val + '%';
+  var clr = val < 50 ? '#24d48a' : val < 75 ? '#ffa836' : '#ff4040';
+  fill.style.stroke = clr;
+  txt.setAttribute('fill', clr);
+  return clr;
+}
+
+function setBrokerCpu(v){
+  updateGauge('bGauge','bCpuText', v);
+  var mini = document.getElementById('bCpuMini');
+  mini.textContent = v + '%';
+  mini.style.color = v < 50 ? 'var(--green)' : v < 75 ? 'var(--amber)' : 'var(--red)';
+  document.getElementById('bCpuSub').textContent = v < 50 ? '正常运行' : v < 75 ? '偏高' : '⚠ 危险';
+  var badge = document.getElementById('brokerBadge');
+  badge.style.borderColor = v < 50 ? 'var(--bd)' : v < 75 ? 'var(--amber)' : 'var(--red)';
+}
+
+function setZkCpu(v){
+  updateGauge('zkGauge','zkCpuText', v);
+  document.getElementById('zkSub').textContent = v < 50 ? '正常运行' : v < 75 ? '偏高' : '⚠ 危险';
+}
+
+// ── slot management ──────────────────────────────────────
+
+function clearSlots(){ document.getElementById('slots').textContent = ''; }
+
+function makeSlot(msg, state){
+  var d = document.createElement('div');
+  d.className = 'mslot ' + (state || 'pending');
+  d.id = 'slot-' + msg.id;
+
+  var sid = document.createElement('div');
+  sid.className = 'sid';
+  sid.textContent = 'pos ' + msg.pos;
+
+  var lbl = document.createElement('div');
+  lbl.className = 'slabel';
+  lbl.style.color = msg.clr;
+  lbl.textContent = msg.label;
+
+  var dly = document.createElement('div');
+  dly.className = 'sdelay';
+  dly.textContent = msg.delay;
+
+  d.appendChild(sid);
+  d.appendChild(lbl);
+  d.appendChild(dly);
+  return d;
+}
+
+function addSlot(msg, state){
+  document.getElementById('slots').appendChild(makeSlot(msg, state));
+}
+
+function slotState(id, state){
+  var el = document.getElementById('slot-' + id);
+  if(el) el.className = 'mslot ' + state;
+}
+
+// ── cursor visualization ─────────────────────────────────
+
+function showCursor(pos, blocked){
+  var band = document.getElementById('cursorBand');
+  band.style.display = 'block';
+  document.getElementById('cursorPosLbl').textContent = 'pos: 0:' + pos;
+  document.getElementById('cursorPosLbl').className = 'cursor-pos-lbl' + (blocked ? ' blocked' : '');
+  document.getElementById('cursorArrow').className = 'cursor-arrow' + (blocked ? ' blocked' : '');
+  document.getElementById('cursorBlockMsg').style.display = blocked ? 'block' : 'none';
+  document.getElementById('watermarkEl').textContent = 'watermark: 0:' + pos;
+  document.getElementById('watermarkEl').style.color = blocked ? 'var(--red)' : 'var(--cyan)';
+}
+
+// ── CPU ramp helper ──────────────────────────────────────
+
+async function rampCpu(setter, from, to, stepMs){
+  var id = animId;
+  var v = from;
+  var dir = to > from ? 1 : -1;
+  var step = Math.ceil(Math.abs(to - from) / 20);
+  while(animId === id && (dir === 1 ? v < to : v > to)){
+    v = Math.min(Math.max(v + dir * step, Math.min(from,to)), Math.max(from,to));
+    setter(v);
+    await sleep(stepMs);
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  MAIN ANIMATION SEQUENCE
+// ════════════════════════════════════════════════════════
+
+async function runAnim(){
+  var myId = animId;
+  running = true;
+  document.getElementById('playBtn').disabled = true;
+
+  // ── Phase 0: Init ─────────────────────────────────
+  setPhase(0);
+  setBrokerCpu(30); setZkCpu(10); setRanges(0);
+  addLog('Pulsar Broker 4.0.8 启动完成');
+  addLog('ZooKeeper 连接正常', 'ok');
+  addLog('Topic delay-test 就绪，游标为空', 'ok');
+  lt += 1.5;
+  await sleep(2000);
+  if(animId !== myId) return;
+
+  // ── Phase 1: Normal ordered delivery ─────────────
+  setPhase(1);
+  clearSlots();
+  document.getElementById('cursorBand').style.display = 'none';
+  addLog('▶ 场景一：正常顺序消费测试');
+
+  var nMsgs = [
+    { id:'n1', pos:1, label:'msg\u2081', delay:'5\u79d2', clr:'#2cd4e8' },
+    { id:'n2', pos:2, label:'msg\u2082', delay:'5\u79d2', clr:'#2cd4e8' },
+    { id:'n3', pos:3, label:'msg\u2083', delay:'5\u79d2', clr:'#2cd4e8' },
+  ];
+
+  for(var i=0; i<nMsgs.length; i++){
+    var m = nMsgs[i];
+    addSlot(m, 'pending');
+    sent++; document.getElementById('sentNum').textContent = sent;
+    addMiniEntry('sendLog', '\u2192 ' + m.label + '  delay: ' + m.delay);
+    addLog('\u53d1\u9001 ' + m.label + '\uff0c\u56fa\u5b9a\u5ef6\u8fdf ' + m.delay);
+    lt += .3;
+    await sleep(350);
+    if(animId !== myId) return;
+  }
+
+  showCursor(0, false);
+  await sleep(700);
+  if(animId !== myId) return;
+
+  for(var i=0; i<nMsgs.length; i++){
+    var m = nMsgs[i];
+    slotState(m.id, 'transit');
+    addLog('\u6295\u9012 ' + m.label + ' \u2192 \u6d88\u8d39\u8005');
+    lt += .4;
+    await sleep(500);
+    if(animId !== myId) return;
+
+    slotState(m.id, 'acked');
+    acked++; document.getElementById('ackedNum').textContent = acked;
+    showCursor(i+1, false);
+    addMiniEntry('ackLog', '\u2713 ack ' + m.label + '  (\u987a\u5e8f\u786e\u8ba4)', 'var(--green)');
+    addLog('\u2713 ' + m.label + ' \u786e\u8ba4\uff0c\u6e38\u6807\u63a8\u8fdb\u81f3 pos:' + (i+1), 'ok');
+    lt += .3;
+    await sleep(550);
+    if(animId !== myId) return;
+  }
+
+  addLog('\u2705 \u6e38\u6807\u6b63\u5e38\u63a8\u8fdb\uff0cIndividualDeleteRanges = 0', 'ok');
+  setRanges(0);
+  await sleep(1400);
+  if(animId !== myId) return;
+
+  // ── Phase 2: Variable delay messages ─────────────
+  setPhase(2);
+  clearSlots();
+  document.getElementById('ackLog').textContent = '';
+  document.getElementById('sendLog').textContent = '';
+  document.getElementById('cursorBand').style.display = 'none';
+  addLog('▶ \u573a\u666f\u4e8c\uff1a\u53d1\u9001\u53ef\u53d8\u5ef6\u8fdf\u6d88\u606f\uff0810\u79d2 ~ 1\u5c0f\u65f6\uff09');
+
+  for(var i=0; i<MSGS.length; i++){
+    var m = MSGS[i];
+    addSlot(m, 'pending');
+    sent++; document.getElementById('sentNum').textContent = sent;
+    var note = m.delayS >= 3600 ? '  \u26a0 \u8d85\u957f\uff01' : '';
+    addMiniEntry('sendLog', '\u2192 ' + m.label + '  delay: ' + m.delay + note,
+                 m.delayS >= 3600 ? '#ff4040' : m.clr);
+    addLog('\u53d1\u9001 ' + m.label + '\uff0c\u5ef6\u8fdf ' + m.delay + note,
+           m.delayS >= 3600 ? 'warn' : 'info');
+    lt += .2;
+    await sleep(280);
+    if(animId !== myId) return;
+  }
+
+  addLog('\u26a0 msg\u2081 \u5728 pos:1 \u4f46\u5ef6\u8fdf\u6700\u957f\uff0c\u5c06\u6700\u540e\u88ab\u6d88\u8d39\uff01', 'warn');
+  showCursor(0, false);
+  await sleep(1800);
+  if(animId !== myId) return;
+
+  // ── Phase 3: Out-of-order acks ────────────────────
+  setPhase(3);
+  addLog('▶ \u5ef6\u8fdf\u5230\u671f\uff0c\u6d88\u606f\u6309\u5230\u671f\u65f6\u95f4\u6295\u9012...');
+
+  slotState('m1', 'stuck');
+  showCursor(0, true);
+  addLog('\u23f3 msg\u2081 \u5ef6\u8fdf1\u5c0f\u65f6\uff0c\u6e38\u6807\u5361\u5728 pos:0\uff01', 'warn');
+  lt += 1;
+  await sleep(900);
+  if(animId !== myId) return;
+
+  var DELIVERY = [1,2,3,4,0];
+  var rangesAcc = 0;
+
+  for(var di=0; di<DELIVERY.length; di++){
+    var m = MSGS[DELIVERY[di]];
+    if(m.id === 'm1'){
+      slotState('m1', 'transit');
+      addLog('\u2605 1\u5c0f\u65f6\u540e\uff0cmsg\u2081 \u7ec8\u4e8e\u5230\u671f\uff01', 'warn');
+      lt += .5;
+      await sleep(700);
+      if(animId !== myId) return;
+      slotState('m1', 'acked');
+      acked++; document.getElementById('ackedNum').textContent = acked;
+      showCursor(5, false);
+      addMiniEntry('ackLog', '\u2713 ack msg\u2081  (\u7b49\u4e861\u5c0f\u65f6\uff01)', '#ffa836');
+      addLog('\u6e38\u6807\u63a8\u8fdb\uff0cIndividualDeleteRanges \u6e05\u96f6 \u2713', 'ok');
+      lt += .3;
+      rangesAcc = 0; setRanges(0);
+      await sleep(700);
+    } else {
+      slotState(m.id, 'transit');
+      addLog('\u6295\u9012 ' + m.label + ' (' + m.delay + ') \u2192 \u6d88\u8d39\u8005');
+      lt += .3;
+      await sleep(500);
+      if(animId !== myId) return;
+
+      slotState(m.id, 'acked');
+      acked++; document.getElementById('ackedNum').textContent = acked;
+      rangesAcc++;
+      setRanges(rangesAcc);
+      showCursor(0, true);
+      addMiniEntry('ackLog', '\u2713 ack ' + m.label + '  pos:' + m.pos + ' \u26a1', '#ffa836');
+      addLog('\u26a0 ack pos:' + m.pos + '\uff0c\u4f46 pos:1(msg\u2081) \u672a\u786e\u8ba4\uff01Ranges \u2192 ' + rangesAcc, 'warn');
+      lt += .5;
+      await sleep(850);
+      if(animId !== myId) return;
+    }
+  }
+
+  addLog('(\u4ee5\u4e0a\u4e3a5\u6761\u6d88\u606f\u7684\u6f14\u793a\uff0c\u5b9e\u9645\u751f\u4ea7\u4e2d\u670910\u4e07\u6761...)', 'info');
+  await sleep(1200);
+  if(animId !== myId) return;
+
+  // ── Phase 4: Scale up ────────────────────────────
+  setPhase(4);
+  clearSlots();
+  document.getElementById('cursorBand').style.display = 'none';
+
+  var stuckSlot = makeSlot({ id:'stuck0', pos:'pos:1', label:'msg\u2081', delay:'1hr\u23f3', clr:'#ff4040' }, 'blocked');
+  document.getElementById('slots').appendChild(stuckSlot);
+
+  var manySlot = document.createElement('div');
+  manySlot.className = 'mslot acked';
+  var ms1 = document.createElement('div'); ms1.className = 'sid'; ms1.textContent = 'pos 2~N';
+  var ms2 = document.createElement('div'); ms2.className = 'slabel'; ms2.style.color = 'var(--green)'; ms2.textContent = '\u2713\u2713\u2713';
+  var ms3 = document.createElement('div'); ms3.className = 'sdelay'; ms3.textContent = '\u5747\u5df2\u786e\u8ba4';
+  manySlot.appendChild(ms1); manySlot.appendChild(ms2); manySlot.appendChild(ms3);
+  document.getElementById('slots').appendChild(manySlot);
+
+  addLog('▶ \u89c4\u6a21\u5316\uff1a\u53d1\u9001 10 \u4e07\u6761\u53ef\u53d8\u5ef6\u8fdf\u6d88\u606f');
+  addLog('IndividualDeleteRanges \u5f00\u59cb\u7206\u70b8\u5f0f\u589e\u957f...', 'warn');
+  lt += 1;
+
+  var startId = animId;
+  for(var step=0; step<100; step++){
+    if(animId !== startId) return;
+    var progress = (step+1)/100;
+    var eased = Math.pow(progress, 1.8);
+    setRanges(Math.round(eased * 100000));
+    setBrokerCpu(Math.round(30 + progress * 35));
+    lt += .06;
+    await sleep(55);
+  }
+  if(animId !== myId) return;
+
+  addLog('ranges: 10,000 \u2192 \u6e38\u6807\u5143\u6570\u636e ~1MB', 'warn');
+  lt += .5; await sleep(600); if(animId !== myId) return;
+  addLog('ranges: 50,000 \u2192 \u6e38\u6807\u5143\u6570\u636e ~2.5MB', 'warn');
+  lt += .5; await sleep(600); if(animId !== myId) return;
+  addLog('ranges: 100,000 \u2192 \u6e38\u6807\u5143\u6570\u636e ~5MB \u26a0', 'err');
+  lt += 1; await sleep(800); if(animId !== myId) return;
+
+  // ── Phase 5: Reconnect death spiral ──────────────
+  setPhase(5);
+  addLog('');
+  addLog('\ud83d\udc80 [CRITICAL] \u8d1f\u8f7d\u5747\u8861\uff1aTopic \u6240\u6709\u6743\u8f6c\u79fb\uff01', 'crit');
+  addLog('\u6d88\u8d39\u8005\u8fde\u63a5\u4e2d\u65ad\uff0c\u9700\u91cd\u65b0\u5efa\u7acb\u8fde\u63a5...', 'err');
+  lt += 1;
+  await sleep(900);
+  if(animId !== myId) return;
+
+  var ci = document.getElementById('consIcon');
+  ci.classList.add('dead'); ci.textContent = '\u274c';
+  document.getElementById('consLbl').textContent = '\u8fde\u63a5\u65ad\u5f00\uff01';
+  document.getElementById('ackedNum').classList.remove('green');
+  document.getElementById('ackedNum').classList.add('red');
+
+  await sleep(700);
+  if(animId !== myId) return;
+
+  document.getElementById('deathSpiral').classList.add('on');
+
+  for(var attempt=1; attempt<=3; attempt++){
+    document.getElementById('reconnectCnt').textContent = attempt;
+    addLog('\u2192 \u7b2c' + attempt + '\u6b21\u91cd\u8fde\uff1a\u4ece ZooKeeper \u52a0\u8f7d 5MB \u6e38\u6807\u5143\u6570\u636e...', 'err');
+    lt += 1;
+
+    // parallel CPU spikes via sequential fast steps
+    var id2 = animId;
+    var zkV = zkCpu, bV = 65;
+    for(var sp=0; sp<30; sp++){
+      if(animId !== id2) return;
+      zkV = Math.min(85, zkV + 2.5);
+      bV  = Math.min(95, bV  + 1.0);
+      setZkCpu(Math.round(zkV));
+      setBrokerCpu(Math.round(bV));
+      await sleep(70);
+    }
+    if(animId !== myId) return;
+
+    document.getElementById('zkFlow').classList.add('on');
+    document.getElementById('zkSub').textContent = '\ud83d\udd04 \u53cd\u5e8f\u5217\u5316\u4e2d...';
+    addLog('ZooKeeper CPU \u98d9\u5347\u81f3 ' + Math.round(zkV) + '%\uff01\u53cd\u5e8f\u5217\u5316 100,000 \u4e2a\u8303\u56f4...', 'crit');
+    lt += 2;
+
+    var fillEl = document.getElementById('reconnFill');
+    for(var p=0; p<=75; p++){
+      if(animId !== myId) return;
+      fillEl.style.width = p + '%';
+      lt += .04;
+      await sleep(35);
+    }
+    if(animId !== myId) return;
+
+    addLog('\u23f1 \u53cd\u5e8f\u5217\u5316\u8017\u65f6 30+ \u79d2\uff0c\u6d88\u8d39\u8005\u8d85\u65f6\uff01', 'err');
+    lt += 5;
+    await sleep(600);
+    if(animId !== myId) return;
+
+    fillEl.style.width = '0%';
+    document.getElementById('zkFlow').classList.remove('on');
+
+    if(attempt < 3){
+      setZkCpu(45); setBrokerCpu(80);
+      document.getElementById('zkSub').textContent = '\u7b49\u5f85\u91cd\u8bd5...';
+      await sleep(500);
+      if(animId !== myId) return;
+    }
+  }
+
+  setBrokerCpu(95); setZkCpu(85);
+  document.getElementById('zkSub').textContent = '\ud83d\udd34 \u8d85\u8f7d';
+  document.getElementById('zkFlow').classList.add('on');
+  addLog('');
+  addLog('\ud83d\udd34 SYSTEM CRITICAL: \u6d88\u8d39\u5b8c\u5168\u505c\u6b62\uff01', 'crit');
+  addLog('\u6d88\u606f\u6301\u7eed\u79ef\u538b\uff0c\u751f\u4ea7\u73af\u5883\u4e0d\u53ef\u7528\uff01', 'crit');
+  addLog('Broker CPU: 95%  |  ZooKeeper CPU: 85%', 'err');
+  lt += 3;
+
+  document.getElementById('sceneDesc').textContent =
+    '\ud83d\udc80 \u6b7b\u4ea1\u8c3a\u65cb\u5df2\u5f62\u6210\uff01\u6062\u590d\u6b65\u9aa4\uff1a\u2460 \u624b\u52a8\u8f6c\u79fb Topic \u6240\u6709\u6743\u89e3\u9664\u5361\u6b7b \u2192 \u2461 \u589e\u52a0\u5206\u533a\u6570\u5206\u6563 IndividualDeleteRanges \u2192 \u2462 \u6309\u5ef6\u8fdf\u65f6\u957f\u505a\u81ea\u5b9a\u4e49\u5206\u533a\u8def\u7531\uff08\u6839\u672c\u89e3\u6cd5\uff09';
+
+  var pb = document.getElementById('playBtn');
+  pb.disabled = false;
+  pb.textContent = '\u21ba \u91cd\u65b0\u64ad\u653e';
+  pb.onclick = function(){ resetAnim(); setTimeout(startAnim, 200); };
+  running = false;
+}
+
+// ── start / reset ────────────────────────────────────────
+
+function startAnim(){
+  if(running) return;
+  document.getElementById('playBtn').textContent = '▶ 开始演示';
+  document.getElementById('playBtn').onclick = startAnim;
+  runAnim();
+}
+
+function resetAnim(){
+  animId++;
+  running = false;
+  sent = 0; acked = 0; lt = 0;
+
+  var pb = document.getElementById('playBtn');
+  pb.disabled = false;
+  pb.textContent = '▶ 开始演示';
+  pb.onclick = startAnim;
+
+  document.getElementById('sentNum').textContent = '0';
+  document.getElementById('ackedNum').textContent = '0';
+  document.getElementById('ackedNum').classList.add('green');
+  document.getElementById('ackedNum').classList.remove('red');
+  document.getElementById('consLbl').textContent = '已确认 / 条';
+  var ci = document.getElementById('consIcon');
+  ci.classList.remove('dead'); ci.textContent = '📥';
+
+  document.getElementById('deathSpiral').classList.remove('on');
+  document.getElementById('reconnFill').style.width = '0%';
+  document.getElementById('zkFlow').classList.remove('on');
+  document.getElementById('zkSub').textContent = '正常运行';
+  document.getElementById('bCpuSub').textContent = '正常运行';
+  document.getElementById('cursorBand').style.display = 'none';
+  document.getElementById('cursorBlockMsg').style.display = 'none';
+
+  setBrokerCpu(30); setZkCpu(10); setRanges(0);
+  clearSlots();
+  document.getElementById('sendLog').textContent = '';
+  document.getElementById('ackLog').textContent = '';
+
+  var logEl = document.getElementById('logEl');
+  logEl.textContent = '';
+  var d = document.createElement('div');
+  d.className = 'le info';
+  var t = document.createElement('span'); t.className = 'le-t'; t.textContent = '[00:00]';
+  d.appendChild(t);
+  d.appendChild(document.createTextNode('等待演示开始...'));
+  logEl.appendChild(d);
+
+  document.querySelectorAll('.pdot').forEach(function(d){ d.classList.remove('active','done'); });
+  document.getElementById('phaseChip').textContent = '待开始';
+  document.getElementById('sceneDesc').textContent = '▶ 点击「开始演示」查看动画（约 40 秒自动播放）';
+}
+
+document.getElementById('playBtn').onclick = startAnim;
+document.getElementById('resetBtn').onclick = resetAnim;
+resetAnim();
+</script>
+</body>
+</html>
