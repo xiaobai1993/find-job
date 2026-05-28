@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>外部请求访问 Payment Pod 流程</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 32px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 22px; font-weight: 700; color: #58a6ff; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: #8b949e; margin-bottom: 32px; }
+
+  /* ── Main Flow ── */
+  .flow-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .flow-node {
+    width: 100%;
+    max-width: 700px;
+    border-radius: 10px;
+    padding: 16px 20px;
+    border: 1px solid;
+    position: relative;
+  }
+  .node-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .node-icon { font-size: 20px; }
+  .node-title { font-size: 15px; font-weight: 700; }
+  .node-subtitle { font-size: 12px; margin-top: 2px; }
+  .node-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-weight: 500;
+  }
+  .tag-blue   { background: #1f3058; color: #79c0ff; border: 1px solid #388bfd30; }
+  .tag-green  { background: #1c3a2a; color: #7ee787; border: 1px solid #3fb95030; }
+  .tag-orange { background: #3d2b00; color: #f0883e; border: 1px solid #d2992230; }
+  .tag-purple { background: #2d1f3d; color: #d2a8ff; border: 1px solid #8957e530; }
+  .tag-red    { background: #3d1f1f; color: #ff7b72; border: 1px solid #f8514930; }
+  .tag-teal   { background: #1a2d3d; color: #56d4dd; border: 1px solid #1f6feb30; }
+
+  /* Color variants */
+  .node-client   { background: #1c2a3a; border-color: #388bfd; }
+  .node-kong     { background: #3d2b00; border-color: #d29922; }
+  .node-rate     { background: #3d1a1a; border-color: #f85149; }
+  .node-service  { background: #1a2d3a; border-color: #388bfd; }
+  .node-istio    { background: #2d1f3d; border-color: #8957e5; }
+  .node-vs       { background: #251f3d; border-color: #8957e5; }
+  .node-stable   { background: #1c3a2a; border-color: #3fb950; }
+  .node-canary   { background: #2d1a0a; border-color: #d29922; }
+  .node-pod      { background: #0f2d0f; border-color: #22c55e; }
+
+  /* Arrow */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 700px;
+    padding: 4px 0;
+  }
+  .arrow-line {
+    width: 2px;
+    height: 20px;
+    background: linear-gradient(180deg, #30363d, #58a6ff);
+  }
+  .arrow-head {
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 10px solid #58a6ff;
+  }
+  .arrow-label {
+    font-size: 11px;
+    color: #8b949e;
+    margin: 2px 0;
+    background: #0d1117;
+    padding: 1px 8px;
+    border-radius: 3px;
+    border: 1px solid #21262d;
+  }
+
+  /* Kong split */
+  .kong-split {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 700px;
+  }
+  .kong-box {
+    flex: 1;
+    border-radius: 8px;
+    padding: 12px 14px;
+    border: 1px solid #d29922;
+    background: #2d1f00;
+  }
+  .kong-box-title { font-size: 13px; font-weight: 600; color: #f0883e; margin-bottom: 6px; }
+  .kong-detail { font-size: 11px; color: #8b949e; margin-bottom: 4px; }
+  .kong-detail span { color: #f0883e; font-family: monospace; }
+
+  /* VS Split */
+  .vs-split {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 700px;
+  }
+  .vs-box {
+    flex: 1;
+    border-radius: 8px;
+    padding: 14px;
+    border: 1px solid;
+  }
+  .vs-stable { border-color: #3fb950; background: #1c3a2a; }
+  .vs-canary { border-color: #d29922; background: #2d2000; opacity: 0.7; }
+  .vs-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .vs-weight {
+    font-size: 28px;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .weight-stable { color: #56d364; }
+  .weight-canary { color: #f0883e; }
+  .vs-desc { font-size: 11px; color: #8b949e; }
+
+  /* Pod cluster */
+  .pod-cluster {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: 700px;
+    flex-wrap: wrap;
+  }
+  .pod-card {
+    flex: 1;
+    min-width: 130px;
+    border: 1px solid #22c55e;
+    border-radius: 8px;
+    padding: 12px;
+    background: #0f2d0f;
+  }
+  .pod-name { font-size: 11px; font-family: monospace; color: #56d364; margin-bottom: 8px; font-weight: 600; }
+  .pod-layer {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 11px;
+  }
+  .layer-envoy { background: #2d1f3d; color: #d2a8ff; }
+  .layer-app   { background: #1c3a2a; color: #7ee787; }
+  .layer-dot { width: 6px; height: 6px; border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Detail panel */
+  .detail-panel {
+    margin-top: 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  @media (max-width: 700px) { .detail-panel { grid-template-columns: 1fr; } }
+  .detail-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .detail-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #58a6ff;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #21262d;
+  }
+  .kv { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
+  .kv-k { font-size: 11px; color: #8b949e; min-width: 90px; flex-shrink: 0; }
+  .kv-v { font-size: 11px; color: #e6edf3; font-family: monospace; word-break: break-all; }
+  .kv-v.green { color: #56d364; }
+  .kv-v.blue { color: #79c0ff; }
+  .kv-v.orange { color: #f0883e; }
+  .kv-v.purple { color: #d2a8ff; }
+
+  /* Egress note */
+  .egress-section { max-width: 900px; margin: 24px auto 0; }
+  .egress-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 16px 20px;
+  }
+  .egress-title { font-size: 13px; font-weight: 700; color: #58a6ff; margin-bottom: 10px; }
+  .egress-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .egress-chip {
+    font-size: 11px;
+    font-family: monospace;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: #1a2d1a;
+    color: #7ee787;
+    border: 1px solid #3fb95030;
+  }
+  .egress-chip.ext {
+    background: #1a2d3a;
+    color: #79c0ff;
+    border-color: #388bfd30;
+  }
+</style>
+</head>
+<body>
+
+<h1>🌐 外部请求访问 Payment Pod 流程</h1>
+<p class="subtitle">gRPC over HTTPS · Kong Ingress → Istio Service Mesh → Payment Pod | Namespace: app-meican-pay</p>
+
+<div class="flow-container">
+
+  <!-- Client -->
+  <div class="flow-node node-client">
+    <div class="node-header">
+      <span class="node-icon">🖥️</span>
+      <div>
+        <div class="node-title">外部 gRPC 客户端</div>
+        <div class="node-subtitle" style="color:#79c0ff">内部其他服务 / 调用方</div>
+      </div>
+    </div>
+    <div class="node-tags">
+      <span class="tag tag-blue">Host: payment-grpc.app-meican-pay.ntrnl-eks-fan2.meican</span>
+      <span class="tag tag-blue">Protocol: gRPC over HTTPS</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">DNS 解析 → Kong Ingress Controller VIP</div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- Kong Split -->
+  <div class="kong-split">
+    <div class="kong-box">
+      <div class="kong-box-title">Kong Ingress Controller 1</div>
+      <div class="kong-detail">Class: <span>kong1</span></div>
+      <div class="kong-detail">Name: <span>payment-grpc-kong1</span></div>
+      <div class="kong-detail">TLS: <span>konghq.com/protocols: https</span></div>
+      <div class="node-tags" style="margin-top:6px">
+        <span class="tag tag-red">Rate Limiting: payment-rate-limiting-kong</span>
+      </div>
+    </div>
+    <div class="kong-box">
+      <div class="kong-box-title">Kong Ingress Controller 2</div>
+      <div class="kong-detail">Class: <span>kong2</span></div>
+      <div class="kong-detail">Name: <span>payment-grpc-kong2</span></div>
+      <div class="kong-detail">TLS: <span>konghq.com/protocols: https</span></div>
+      <div class="node-tags" style="margin-top:6px">
+        <span class="tag tag-red">Rate Limiting: payment-rate-limiting-kong</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">通过限流检查后，路由到 payment Service</div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- K8s Service -->
+  <div class="flow-node node-service">
+    <div class="node-header">
+      <span class="node-icon">☸️</span>
+      <div>
+        <div class="node-title">Kubernetes Service: payment</div>
+        <div class="node-subtitle" style="color:#79c0ff">ClusterIP · Namespace: app-meican-pay</div>
+      </div>
+    </div>
+    <div class="node-tags">
+      <span class="tag tag-blue">Port: 8023 (gRPC)</span>
+      <span class="tag tag-blue">selector: app=payment</span>
+      <span class="tag tag-teal">konghq.com/protocol: grpc</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">Istio Sidecar 拦截出站流量 (iptables REDIRECT)</div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- Istio VirtualService -->
+  <div class="flow-node node-istio">
+    <div class="node-header">
+      <span class="node-icon">🔀</span>
+      <div>
+        <div class="node-title">Istio VirtualService: payment-vsvc</div>
+        <div class="node-subtitle" style="color:#d2a8ff">host: payment.app-meican-pay.svc.cluster.local</div>
+      </div>
+    </div>
+    <div class="node-tags">
+      <span class="tag tag-purple">timeout: 10s</span>
+      <span class="tag tag-purple">retries: 3 attempts</span>
+      <span class="tag tag-purple">retryOn: unavailable</span>
+      <span class="tag tag-purple">route name: primary</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">按权重分流（Canary 发布期间动态调整）</div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- VS Split weights -->
+  <div class="vs-split">
+    <div class="vs-box vs-stable">
+      <div class="vs-title" style="color:#56d364">payment-stable</div>
+      <div class="vs-weight weight-stable">100%</div>
+      <div class="vs-desc">稳定版本 Service<br>selector: app=payment<br>DestinationRule: ROUND_ROBIN<br>subset: v1</div>
+    </div>
+    <div class="vs-box vs-canary">
+      <div class="vs-title" style="color:#f0883e">payment-canary</div>
+      <div class="vs-weight weight-canary">0%</div>
+      <div class="vs-desc">金丝雀版本 Service<br>selector: app=payment (canary)<br>DestinationRule: ROUND_ROBIN<br>subset: v1</div>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="arrow-label">DestinationRule ROUND_ROBIN 负载均衡选择 Pod</div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- Pods -->
+  <div class="pod-cluster">
+    <div class="pod-card">
+      <div class="pod-name">payment-xxxxxxx-1</div>
+      <div class="pod-layer layer-envoy">
+        <div class="layer-dot" style="background:#d2a8ff"></div>
+        Istio Envoy Sidecar
+      </div>
+      <div class="pod-layer layer-app">
+        <div class="layer-dot" style="background:#56d364"></div>
+        payment-image :8023
+      </div>
+    </div>
+    <div class="pod-card">
+      <div class="pod-name">payment-xxxxxxx-2</div>
+      <div class="pod-layer layer-envoy">
+        <div class="layer-dot" style="background:#d2a8ff"></div>
+        Istio Envoy Sidecar
+      </div>
+      <div class="pod-layer layer-app">
+        <div class="layer-dot" style="background:#56d364"></div>
+        payment-image :8023
+      </div>
+    </div>
+    <div class="pod-card">
+      <div class="pod-name">payment-xxxxxxx-3</div>
+      <div class="pod-layer layer-envoy">
+        <div class="layer-dot" style="background:#d2a8ff"></div>
+        Istio Envoy Sidecar
+      </div>
+      <div class="pod-layer layer-app">
+        <div class="layer-dot" style="background:#56d364"></div>
+        payment-image :8023
+      </div>
+    </div>
+    <div class="pod-card">
+      <div class="pod-name">payment-xxxxxxx-4</div>
+      <div class="pod-layer layer-envoy">
+        <div class="layer-dot" style="background:#d2a8ff"></div>
+        Istio Envoy Sidecar
+      </div>
+      <div class="pod-layer layer-app">
+        <div class="layer-dot" style="background:#56d364"></div>
+        payment-image :8023
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Detail Panels -->
+<div class="detail-panel">
+  <div class="detail-card">
+    <div class="detail-title">Kong Rate Limiting 说明</div>
+    <div class="kv"><span class="kv-k">Plugin</span><span class="kv-v blue">payment-rate-limiting-kong</span></div>
+    <div class="kv"><span class="kv-k">应用于</span><span class="kv-v">kong1 和 kong2 两个 Ingress</span></div>
+    <div class="kv"><span class="kv-k">路径</span><span class="kv-v orange">/ (Prefix)</span></div>
+    <div class="kv"><span class="kv-k">配置文件</span><span class="kv-v blue">kong-rate-limiting.yaml</span></div>
+    <div class="kv"><span class="kv-k">高可用</span><span class="kv-v green">kong1 + kong2 双 IC 保证入口高可用</span></div>
+  </div>
+  <div class="detail-card">
+    <div class="detail-title">Istio Service Mesh 说明</div>
+    <div class="kv"><span class="kv-k">Sidecar 模式</span><span class="kv-v purple">nativeSidecar (K8s 原生)</span></div>
+    <div class="kv"><span class="kv-k">注入标注</span><span class="kv-v purple">sidecar.istio.io/inject: "true"</span></div>
+    <div class="kv"><span class="kv-k">VirtualService</span><span class="kv-v blue">payment-vsvc</span></div>
+    <div class="kv"><span class="kv-k">超时</span><span class="kv-v orange">10s</span></div>
+    <div class="kv"><span class="kv-k">重试</span><span class="kv-v orange">3次 / unavailable</span></div>
+    <div class="kv"><span class="kv-k">LB 策略</span><span class="kv-v blue">ROUND_ROBIN</span></div>
+  </div>
+  <div class="detail-card">
+    <div class="detail-title">Sidecar Egress 出站管控</div>
+    <div class="kv"><span class="kv-k">策略</span><span class="kv-v orange">REGISTRY_ONLY（白名单模式）</span></div>
+    <div class="kv"><span class="kv-k">说明</span><span class="kv-v">只允许访问 egress 列表中明确注册的地址</span></div>
+    <div class="kv"><span class="kv-k">内部依赖</span><span class="kv-v green">Nacos / Pulsar / 同 NS 服务</span></div>
+    <div class="kv"><span class="kv-k">外部依赖</span><span class="kv-v blue">RDS / ElastiCache / ECS 服务</span></div>
+  </div>
+  <div class="detail-card">
+    <div class="detail-title">Metrics &amp; Observability</div>
+    <div class="kv"><span class="kv-k">Metrics Port</span><span class="kv-v blue">18888 (HTTP)</span></div>
+    <div class="kv"><span class="kv-k">采集方式</span><span class="kv-v blue">ServiceMonitor (Prometheus)</span></div>
+    <div class="kv"><span class="kv-k">Service</span><span class="kv-v blue">payment-telemetry :18888</span></div>
+    <div class="kv"><span class="kv-k">告警</span><span class="kv-v orange">PagerDuty (alert.yaml)</span></div>
+  </div>
+</div>
+
+<!-- Egress Allowlist -->
+<div class="egress-section">
+  <div class="egress-card">
+    <div class="egress-title">🔒 Istio Sidecar Egress 出站白名单（部分）</div>
+    <div class="egress-grid">
+      <span class="egress-chip">nacos-hs.nacos</span>
+      <span class="egress-chip">nacos-cs.nacos</span>
+      <span class="egress-chip">pulsar-broker.pulsar</span>
+      <span class="egress-chip">biz-center.app-keepalive</span>
+      <span class="egress-chip">idmapping.app-planet</span>
+      <span class="egress-chip">generator.app-kiwi</span>
+      <span class="egress-chip">*.app-meican-pay.svc.cluster.local</span>
+      <span class="egress-chip ext">fan2-monopoly-cluster RDS</span>
+      <span class="egress-chip ext">monopoly-payment ElastiCache</span>
+      <span class="egress-chip ext">production-payment-redis</span>
+      <span class="egress-chip ext">divide-bill RDS</span>
+      <span class="egress-chip ext">ccc.meican.com</span>
+      <span class="egress-chip ext">*.cn-northwest-1.amazonaws.com.cn</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

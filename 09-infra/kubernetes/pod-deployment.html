@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Payment Pod 部署与启动流程</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 32px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 22px; font-weight: 700; color: #58a6ff; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: #8b949e; margin-bottom: 32px; }
+  h2 { font-size: 15px; font-weight: 600; color: #f0f6fc; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  h2 .icon { font-size: 18px; }
+
+  .section { margin-bottom: 40px; }
+  .card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  /* ── Canary Steps Timeline ── */
+  .canary-timeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .canary-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 110px;
+    position: relative;
+  }
+  .canary-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 28px;
+    right: -24px;
+    width: 48px;
+    height: 2px;
+    background: linear-gradient(90deg, #388bfd, #56d364);
+    z-index: 1;
+  }
+  .step-circle {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 15px;
+    border: 2px solid;
+    margin-bottom: 8px;
+    position: relative;
+    z-index: 2;
+  }
+  .step-circle .pct { font-size: 13px; font-weight: 700; }
+  .step-circle .pct-unit { font-size: 9px; font-weight: 400; margin-top: -2px; }
+  .step-0  { background: #1f2937; border-color: #4b5563; color: #9ca3af; }
+  .step-15 { background: #1c2a1c; border-color: #22c55e; color: #86efac; }
+  .step-40 { background: #1c2820; border-color: #10b981; color: #6ee7b7; }
+  .step-60 { background: #1a2d1a; border-color: #16a34a; color: #4ade80; }
+  .step-80 { background: #162d16; border-color: #15803d; color: #4ade80; }
+  .step-100{ background: #0f2d0f; border-color: #22c55e; color: #4ade80; }
+  .pause-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+  }
+  .pause-auto { background: #1f3058; color: #79c0ff; }
+  .pause-manual { background: #3d1f1f; color: #ff7b72; }
+  .step-label {
+    font-size: 11px;
+    color: #8b949e;
+    text-align: center;
+    max-width: 95px;
+  }
+  .legend-row { display: flex; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b949e; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── Pod Startup ── */
+  .startup-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 700px) { .startup-grid { grid-template-columns: 1fr; } }
+
+  .lifecycle-steps { display: flex; flex-direction: column; gap: 0; }
+  .lifecycle-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-left: 2px solid #21262d;
+    padding-left: 16px;
+    margin-left: 12px;
+    position: relative;
+  }
+  .lifecycle-item:last-child { border-left-color: transparent; }
+  .lc-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-left: -24px;
+    position: relative;
+    z-index: 1;
+  }
+  .lc-1 { background: #1f4068; color: #79c0ff; border: 2px solid #388bfd; }
+  .lc-2 { background: #3d2b00; color: #f0883e; border: 2px solid #d29922; }
+  .lc-3 { background: #1d2d3e; color: #79c0ff; border: 2px solid #388bfd; }
+  .lc-4 { background: #2d1f3d; color: #d2a8ff; border: 2px solid #8957e5; }
+  .lc-5 { background: #1c3a2a; color: #7ee787; border: 2px solid #3fb950; }
+  .lc-6 { background: #1c3a2a; color: #7ee787; border: 2px solid #3fb950; }
+  .lc-7 { background: #0f2d0f; color: #56d364; border: 2px solid #22c55e; }
+  .lc-title { font-size: 13px; font-weight: 600; color: #e6edf3; margin-bottom: 2px; }
+  .lc-desc { font-size: 12px; color: #8b949e; }
+  .lc-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-top: 3px;
+    font-family: monospace;
+  }
+  .tag-blue { background: #1f3058; color: #79c0ff; }
+  .tag-green { background: #1c3a2a; color: #7ee787; }
+  .tag-orange { background: #3d2b00; color: #f0883e; }
+  .tag-purple { background: #2d1f3d; color: #d2a8ff; }
+
+  /* ── Resource + Topology ── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 700px) { .info-grid { grid-template-columns: 1fr; } }
+
+  .info-box {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .info-box-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #58a6ff;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .kv-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .kv-key { font-size: 12px; color: #8b949e; }
+  .kv-val { font-size: 12px; font-weight: 600; color: #e6edf3; font-family: monospace; }
+  .kv-val.green { color: #56d364; }
+  .kv-val.blue  { color: #79c0ff; }
+  .kv-val.orange{ color: #f0883e; }
+
+  /* ── Pod Spread Diagram ── */
+  .spread-diagram {
+    display: flex;
+    gap: 12px;
+    margin-top: 0;
+    flex-wrap: wrap;
+  }
+  .az-box {
+    flex: 1;
+    min-width: 130px;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 12px;
+    background: #0d1117;
+  }
+  .az-label { font-size: 11px; color: #58a6ff; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; }
+  .node-box {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 8px;
+    margin-bottom: 6px;
+  }
+  .node-label { font-size: 10px; color: #8b949e; margin-bottom: 6px; }
+  .pod-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #1c3a2a;
+    border: 1px solid #3fb950;
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-size: 11px;
+    color: #56d364;
+    font-weight: 600;
+  }
+  .pod-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: #56d364; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .hpa-bar-container { margin-top: 10px; }
+  .hpa-label { font-size: 11px; color: #8b949e; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .hpa-bar { height: 10px; background: #21262d; border-radius: 5px; overflow: hidden; }
+  .hpa-fill { height: 100%; background: linear-gradient(90deg, #388bfd, #56d364); border-radius: 5px; transition: width 0.5s; }
+</style>
+</head>
+<body>
+
+<h1>⚙️ Payment Pod 部署与启动流程</h1>
+<p class="subtitle">基于 Argo Rollouts Canary + Istio 流量切分 | Namespace: app-meican-pay</p>
+
+<!-- Section 1: Canary Rollout -->
+<div class="section">
+  <div class="card">
+    <h2><span class="icon">🚀</span> Canary 发布步骤（Argo Rollout）</h2>
+    <div class="canary-timeline">
+
+      <div class="canary-step">
+        <div class="step-circle step-0">
+          <span class="pct">0</span><span class="pct-unit">%</span>
+        </div>
+        <div class="pause-badge pause-auto">⏱ 8s 自动</div>
+        <div class="step-label">新 ReplicaSet 创建，不切流量</div>
+      </div>
+
+      <div class="canary-step">
+        <div class="step-circle step-15">
+          <span class="pct">15</span><span class="pct-unit">%</span>
+        </div>
+        <div class="pause-badge pause-manual">⏸ 人工审批</div>
+        <div class="step-label">Istio VirtualService 切 15% 流量</div>
+      </div>
+
+      <div class="canary-step">
+        <div class="step-circle step-40">
+          <span class="pct">40</span><span class="pct-unit">%</span>
+        </div>
+        <div class="pause-badge pause-auto">⏱ 40s 自动</div>
+        <div class="step-label">继续扩大 Canary 流量</div>
+      </div>
+
+      <div class="canary-step">
+        <div class="step-circle step-60">
+          <span class="pct">60</span><span class="pct-unit">%</span>
+        </div>
+        <div class="pause-badge pause-auto">⏱ 20s 自动</div>
+        <div class="step-label">超过半数流量进入新版本</div>
+      </div>
+
+      <div class="canary-step">
+        <div class="step-circle step-80">
+          <span class="pct">80</span><span class="pct-unit">%</span>
+        </div>
+        <div class="pause-badge pause-auto">⏱ 20s 自动</div>
+        <div class="step-label">大部分流量切至新版本</div>
+      </div>
+
+      <div class="canary-step">
+        <div class="step-circle step-100">
+          <span class="pct">100</span><span class="pct-unit">%</span>
+        </div>
+        <div class="pause-badge pause-auto">✅ 完成</div>
+        <div class="step-label">Stable RS 更新，Canary RS 缩容</div>
+      </div>
+
+    </div>
+
+    <div class="legend-row">
+      <div class="legend-item"><div class="legend-dot" style="background:#388bfd"></div> VirtualService weight 由 Argo Rollout 自动修改</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ff7b72"></div> 人工审批：需要 kubectl argo rollouts promote payment</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#56d364"></div> 回滚：kubectl argo rollouts abort payment</div>
+    </div>
+    <div style="margin-top:12px; padding:10px 14px; background:#1c2a3a; border-radius:6px; font-size:12px; color:#79c0ff;">
+      💡 maxSurge: 25% · maxUnavailable: 0 · 保证发布期间始终有 4 个可用副本（不主动下线旧 Pod）
+    </div>
+  </div>
+</div>
+
+<!-- Section 2: Pod Startup Lifecycle -->
+<div class="section">
+  <div class="card">
+    <h2><span class="icon">📦</span> Pod 启动生命周期</h2>
+    <div class="startup-grid">
+      <div class="lifecycle-steps">
+        <div class="lifecycle-item">
+          <div class="lc-dot lc-1">1</div>
+          <div>
+            <div class="lc-title">调度器分配节点</div>
+            <div class="lc-desc">Scheduler 根据约束选择节点</div>
+            <span class="lc-tag tag-blue">nodeSelector: arm64 / intend:app1</span><br>
+            <span class="lc-tag tag-blue">topologySpreadConstraints: zone + hostname</span>
+          </div>
+        </div>
+        <div class="lifecycle-item">
+          <div class="lc-dot lc-2">2</div>
+          <div>
+            <div class="lc-title">拉取镜像</div>
+            <div class="lc-desc">从 ECR 拉取 Payment 镜像</div>
+            <span class="lc-tag tag-orange">693295102651.dkr.ecr.cn-northwest-1.amazonaws.com.cn</span><br>
+            <span class="lc-tag tag-orange">imagePullPolicy: IfNotPresent</span>
+          </div>
+        </div>
+        <div class="lifecycle-item">
+          <div class="lc-dot lc-4">3</div>
+          <div>
+            <div class="lc-title">Istio Sidecar 启动</div>
+            <div class="lc-desc">Native Sidecar 注入并初始化 Envoy Proxy</div>
+            <span class="lc-tag tag-purple">sidecar.istio.io/nativeSidecar: "true"</span>
+          </div>
+        </div>
+        <div class="lifecycle-item">
+          <div class="lc-dot lc-3">4</div>
+          <div>
+            <div class="lc-title">容器启动 &amp; 加载 Nacos 配置</div>
+            <div class="lc-desc">Payment 进程启动，通过 --config 参数拉取配置</div>
+            <span class="lc-tag tag-blue">nacos://http:nacos-hs.nacos:8848/meican-pay</span><br>
+            <span class="lc-tag tag-blue">dataid=config.toml · group=payment · --watch true</span>
+          </div>
+        </div>
+        <div class="lifecycle-item">
+          <div class="lc-dot lc-5">5</div>
+          <div>
+            <div class="lc-title">gRPC Server 监听端口</div>
+            <div class="lc-desc">Payment 服务监听 gRPC 和 Metrics 端口</div>
+            <span class="lc-tag tag-green">containerPort: 8023 (gRPC)</span>&nbsp;
+            <span class="lc-tag tag-green">containerPort: 18888 (metrics)</span>
+          </div>
+        </div>
+        <div class="lifecycle-item">
+          <div class="lc-dot lc-6">6</div>
+          <div>
+            <div class="lc-title">Readiness Probe 检查</div>
+            <div class="lc-desc">K8s 探测容器是否就绪</div>
+            <span class="lc-tag tag-green">tcpSocket: port 8023</span><br>
+            <span class="lc-tag tag-green">initialDelaySeconds: 8 · periodSeconds: 5 · failureThreshold: 5</span>
+          </div>
+        </div>
+        <div class="lifecycle-item" style="border-left-color:transparent">
+          <div class="lc-dot lc-7">✓</div>
+          <div>
+            <div class="lc-title">Pod Ready → 加入 Service Endpoints</div>
+            <div class="lc-desc">Endpoint slice 更新，开始接收流量</div>
+            <span class="lc-tag tag-green">preStop: sleep 5s · terminationGracePeriod: 10s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Resource + HPA info -->
+      <div>
+        <div class="info-box" style="margin-bottom:12px">
+          <div class="info-box-title">容器资源配额</div>
+          <div class="kv-row"><span class="kv-key">CPU Request</span><span class="kv-val blue">500m</span></div>
+          <div class="kv-row"><span class="kv-key">CPU Limit</span><span class="kv-val orange">1000m</span></div>
+          <div class="kv-row"><span class="kv-key">Memory Request</span><span class="kv-val blue">512Mi</span></div>
+          <div class="kv-row"><span class="kv-key">Memory Limit</span><span class="kv-val orange">896Mi</span></div>
+        </div>
+        <div class="info-box" style="margin-bottom:12px">
+          <div class="info-box-title">HPA 弹性伸缩</div>
+          <div class="kv-row"><span class="kv-key">Min Replicas</span><span class="kv-val green">4</span></div>
+          <div class="kv-row"><span class="kv-key">Max Replicas</span><span class="kv-val green">15</span></div>
+          <div class="kv-row"><span class="kv-key">触发指标</span><span class="kv-val blue">CPU 500m (avg)</span></div>
+          <div class="kv-row"><span class="kv-key">扩容策略</span><span class="kv-val orange">Min(100%/5s, +2/5s)</span></div>
+          <div class="kv-row"><span class="kv-key">缩容策略</span><span class="kv-val blue">-10%/60s · 稳定窗口 5m</span></div>
+          <div class="hpa-bar-container">
+            <div class="hpa-label"><span>当前副本 (示例 4/15)</span></div>
+            <div class="hpa-bar"><div class="hpa-fill" style="width:27%"></div></div>
+          </div>
+        </div>
+        <div class="info-box">
+          <div class="info-box-title">优雅停机流程</div>
+          <div class="kv-row"><span class="kv-key">preStop</span><span class="kv-val blue">sleep 5s</span></div>
+          <div class="kv-row"><span class="kv-key">terminationGrace</span><span class="kv-val blue">10s</span></div>
+          <div style="font-size:11px; color:#8b949e; margin-top:6px;">
+            收到 SIGTERM → 先 sleep 5s 让 LB 摘除 → 处理剩余请求 → 进程退出
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 3: Pod Distribution -->
+<div class="section">
+  <div class="card">
+    <h2><span class="icon">🗺️</span> Pod 拓扑分布（TopologySpreadConstraints）</h2>
+    <div class="spread-diagram">
+      <div class="az-box">
+        <div class="az-label">🌐 AZ-A (cn-northwest-1a)</div>
+        <div class="node-box">
+          <div class="node-label">Node: arm64 · intend:app1</div>
+          <div class="pod-chip"><div class="dot"></div> payment-xxx-1</div>
+        </div>
+        <div class="node-box">
+          <div class="node-label">Node: arm64 · intend:app1</div>
+          <div class="pod-chip"><div class="dot"></div> payment-xxx-2</div>
+        </div>
+      </div>
+      <div class="az-box">
+        <div class="az-label">🌐 AZ-B (cn-northwest-1b)</div>
+        <div class="node-box">
+          <div class="node-label">Node: arm64 · intend:app1</div>
+          <div class="pod-chip"><div class="dot"></div> payment-xxx-3</div>
+        </div>
+      </div>
+      <div class="az-box">
+        <div class="az-label">🌐 AZ-C (cn-northwest-1c)</div>
+        <div class="node-box">
+          <div class="node-label">Node: arm64 · intend:app1</div>
+          <div class="pod-chip"><div class="dot"></div> payment-xxx-4</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px; font-size:12px; color:#8b949e;">
+      maxSkew: 1 · whenUnsatisfiable: ScheduleAnyway —— 尽力均匀分布，不强制阻塞调度
+    </div>
+  </div>
+</div>
+
+<!-- Section 4: Summary Info -->
+<div class="section">
+  <div class="card">
+    <h2><span class="icon">ℹ️</span> 关键配置一览</h2>
+    <div class="info-grid">
+      <div class="info-box">
+        <div class="info-box-title">Service Account</div>
+        <div class="kv-row"><span class="kv-key">SA</span><span class="kv-val blue">payment-sa</span></div>
+        <div class="kv-row"><span class="kv-key">Secret</span><span class="kv-val blue">payment-resource-schema</span></div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-title">镜像 &amp; 仓库</div>
+        <div class="kv-row"><span class="kv-key">Registry</span><span class="kv-val orange">ECR cn-northwest-1</span></div>
+        <div class="kv-row"><span class="kv-key">Repo</span><span class="kv-val blue">meican-pay/payment</span></div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-title">环境变量</div>
+        <div class="kv-row"><span class="kv-key">LOG_HANDLER</span><span class="kv-val blue">console</span></div>
+        <div class="kv-row"><span class="kv-key">LOG_FORMAT</span><span class="kv-val blue">json</span></div>
+        <div class="kv-row"><span class="kv-key">APP_GROUP</span><span class="kv-val blue">meican-pay</span></div>
+        <div class="kv-row"><span class="kv-key">APP_PROJECT</span><span class="kv-val blue">payment</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
