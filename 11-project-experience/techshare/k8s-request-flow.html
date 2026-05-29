@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meican EKS — 请求执行流程</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07090f;
+  --surface: #0d1117;
+  --border: #1e2733;
+  --cyan: #00e5ff;
+  --purple: #b388ff;
+  --green: #69ff47;
+  --amber: #ffd740;
+  --red: #ff5252;
+  --dim: #3a4a5a;
+  --text: #c8d6e5;
+  --text-dim: #5a7080;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Mono', monospace;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* HEADER */
+header {
+  padding: 24px 32px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+header h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--cyan), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.5px;
+}
+header span {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* MAIN LAYOUT */
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  height: calc(100vh - 73px);
+}
+
+/* LEFT: DIAGRAM */
+.diagram {
+  padding: 20px 24px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+/* LAYER GROUPS */
+.layer {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.layer-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.layer-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* NODE */
+.node {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+  position: relative;
+}
+.node.active {
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(0,229,255,0.25);
+  background: rgba(0,229,255,0.05);
+}
+.node.done {
+  border-color: var(--green);
+  background: rgba(105,255,71,0.04);
+}
+.node-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.05);
+}
+.node.active .node-icon { background: rgba(0,229,255,0.15); }
+.node.done .node-icon { background: rgba(105,255,71,0.12); }
+.node-name {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.node.active .node-name { color: var(--cyan); }
+.node.done .node-name { color: var(--green); }
+.node-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.step-badge {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.node.active .step-badge { background: var(--cyan); color: #000; }
+.node.done .step-badge { background: var(--green); color: #000; }
+
+/* CONNECTOR */
+.connector {
+  display: flex;
+  align-items: center;
+  padding-left: 32px;
+  height: 20px;
+  position: relative;
+}
+.connector-line {
+  width: 2px;
+  height: 20px;
+  background: var(--border);
+  margin-left: 15px;
+  position: relative;
+  overflow: hidden;
+}
+.connector-line .bead {
+  position: absolute;
+  top: -6px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: none;
+}
+.connector-line.active .bead {
+  animation: flow-down 0.6s linear infinite;
+}
+@keyframes flow-down {
+  from { top: -8px; }
+  to { top: 22px; }
+}
+.connector-line.done {
+  background: linear-gradient(to bottom, var(--green), var(--green));
+}
+
+/* KONG PLUGINS */
+.plugins-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 14px 10px;
+}
+.chip {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.02);
+  transition: all 0.3s;
+  letter-spacing: 0.5px;
+}
+.chip.lit {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: rgba(255,215,64,0.08);
+  box-shadow: 0 0 6px rgba(255,215,64,0.3);
+}
+
+/* CONTROLS */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.btn {
+  padding: 7px 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 1px;
+}
+.btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.btn.primary { border-color: var(--cyan); color: var(--cyan); background: rgba(0,229,255,0.08); }
+.btn.primary:hover { background: rgba(0,229,255,0.16); }
+.speed-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: 8px;
+}
+select.speed-sel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.progress-bar {
+  flex: 1;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 0 8px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--purple));
+  border-radius: 2px;
+  transition: width 0.4s ease;
+  width: 0%;
+}
+
+/* RIGHT: INFO PANEL */
+.info-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.info-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.info-step-num {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.info-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--cyan);
+}
+.info-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.info-desc {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+.info-code {
+  background: #090d13;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  color: #8fbcbb;
+  margin-bottom: 12px;
+}
+.tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.tag {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  letter-spacing: 0.5px;
+}
+.tag.cyan { border-color: var(--cyan); color: var(--cyan); }
+.tag.purple { border-color: var(--purple); color: var(--purple); }
+.tag.green { border-color: var(--green); color: var(--green); }
+.tag.amber { border-color: var(--amber); color: var(--amber); }
+.latency-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.latency-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  width: 90px;
+}
+.lat-bar-bg {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.lat-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), var(--amber));
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+.lat-val {
+  font-size: 11px;
+  color: var(--amber);
+  width: 50px;
+  text-align: right;
+}
+
+/* STEP PANELS — all hidden by default, shown when active */
+.step-panel { display: none; }
+.step-panel.visible { display: block; }
+
+/* SUMMARY CARD */
+.summary-card {
+  display: none;
+  margin: 16px 20px;
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  padding: 16px;
+  background: rgba(105,255,71,0.04);
+}
+.summary-card.visible { display: block; }
+.summary-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--green);
+  margin-bottom: 12px;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text-dim);
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-row span { color: var(--text); }
+
+/* IDLE PLACEHOLDER */
+.idle-msg {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 40px 20px;
+  line-height: 1.8;
+}
+.idle-msg .arrow { color: var(--cyan); font-size: 20px; display: block; margin-bottom: 8px; }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Meican EKS — 请求执行流程</h1>
+  <span>eks-fan2 · cn-northwest-1 · 3 AZ</span>
+</header>
+
+<div style="display:flex;flex-direction:column;height:calc(100vh - 73px)">
+  <div class="layout">
+
+    <!-- LEFT DIAGRAM -->
+    <div class="diagram" id="diagram">
+
+      <div class="layer">
+        <div class="layer-label">External / Internet</div>
+        <div class="layer-body">
+          <div class="node" id="n0" onclick="jump(0)">
+            <div class="node-icon">💻</div>
+            <div><div class="node-name">Client</div><div class="node-sub">用户 / 业务方</div></div>
+            <div class="step-badge" id="b0">1</div>
+          </div>
+          <div class="connector"><div class="connector-line" id="c0"><div class="bead"></div></div></div>
+          <div class="node" id="n1" onclick="jump(1)">
+            <div class="node-icon">🌐</div>
+            <div><div class="node-name">Route53 DNS</div><div class="node-sub">解析到 NLB 地址</div></div>
+            <div class="step-badge" id="b1">2</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="connector" style="padding-left:40px"><div class="connector-line" id="c1"><div class="bead"></div></div></div>
+
+      <div class="layer">
+        <div class="layer-label">AWS Network</div>
+        <div class="layer-body">
+          <div class="node" id="n2" onclick="jump(2)">
+            <div class="node-icon">⚡</div>
+            <div><div class="node-name">NLB (Network Load Balancer)</div><div class="node-sub">跨 3 AZ 四层转发，保留源 IP</div></div>
+            <div class="step-badge" id="b2">3</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="connector" style="padding-left:40px"><div class="connector-line" id="c2"><div class="bead"></div></div></div>
+
+      <div class="layer">
+        <div class="layer-label">Kong Ingress (双活)</div>
+        <div class="layer-body">
+          <div class="node" id="n3" onclick="jump(3)">
+            <div class="node-icon">🦍</div>
+            <div><div class="node-name">Kong Gateway Pod</div><div class="node-sub">Lua + Nginx，Plugin Chain</div></div>
+            <div class="step-badge" id="b3">4</div>
+          </div>
+          <div class="plugins-row" id="pluginsRow">
+            <div class="chip" id="chip0">rate-limiter</div>
+            <div class="chip" id="chip1">jwt-auth</div>
+            <div class="chip" id="chip2">circuit-breaker</div>
+            <div class="chip" id="chip3">set-upstream</div>
+            <div class="chip" id="chip4">request-log</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="connector" style="padding-left:40px"><div class="connector-line" id="c3"><div class="bead"></div></div></div>
+
+      <div class="layer">
+        <div class="layer-label">Kubernetes Cluster (eks-fan2)</div>
+        <div class="layer-body">
+          <div class="node" id="n4" onclick="jump(4)">
+            <div class="node-icon">☸️</div>
+            <div><div class="node-name">ClusterIP Service</div><div class="node-sub">kube-proxy 写入 iptables 规则</div></div>
+            <div class="step-badge" id="b4">5</div>
+          </div>
+          <div class="connector"><div class="connector-line" id="c4"><div class="bead"></div></div></div>
+          <div class="node" id="n5" onclick="jump(5)">
+            <div class="node-icon">🔗</div>
+            <div><div class="node-name">iptables DNAT</div><div class="node-sub">随机选取后端 Pod IP</div></div>
+            <div class="step-badge" id="b5">6</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="connector" style="padding-left:40px"><div class="connector-line" id="c5"><div class="bead"></div></div></div>
+
+      <div class="layer">
+        <div class="layer-label">Pod (Istio Sidecar 注入)</div>
+        <div class="layer-body">
+          <div class="node" id="n6" onclick="jump(6)">
+            <div class="node-icon">🛡️</div>
+            <div><div class="node-name">Envoy Sidecar (Inbound)</div><div class="node-sub">iptables 劫持 :15006，mTLS + 链路追踪</div></div>
+            <div class="step-badge" id="b6">7</div>
+          </div>
+          <div class="connector"><div class="connector-line" id="c6"><div class="bead"></div></div></div>
+          <div class="node" id="n7" onclick="jump(7)">
+            <div class="node-icon">🚀</div>
+            <div><div class="node-name">App Container</div><div class="node-sub">业务逻辑处理，读 DB / Redis / Pulsar</div></div>
+            <div class="step-badge" id="b7">8</div>
+          </div>
+          <div class="connector"><div class="connector-line" id="c7"><div class="bead"></div></div></div>
+          <div class="node" id="n8" onclick="jump(8)">
+            <div class="node-icon">📤</div>
+            <div><div class="node-name">Response 回传</div><div class="node-sub">Envoy Outbound → Kong → NLB → Client</div></div>
+            <div class="step-badge" id="b8">9</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT INFO PANEL -->
+    <div class="info-panel">
+      <div class="info-header">
+        <div class="info-step-num" id="panelStepNum">STEP 0 / 9</div>
+        <div class="info-title" id="panelTitle">点击节点或播放</div>
+      </div>
+      <div class="info-body" id="infoBody">
+
+        <!-- IDLE -->
+        <div class="step-panel visible" id="sp-idle">
+          <div class="idle-msg">
+            <span class="arrow">▶</span>
+            点击 PLAY 自动播放<br>或点击左侧节点查看详情
+          </div>
+        </div>
+
+        <!-- STEP 0: Client -->
+        <div class="step-panel" id="sp0">
+          <div class="info-desc">客户端发起 HTTPS 请求。域名格式通常为 <strong>api.meican.com</strong>，请求头携带 JWT Token 或内部 service token。</div>
+          <pre class="info-code">GET /v2/orders HTTP/1.1
+Host: api.meican.com
+Authorization: Bearer eyJhbGci...
+X-Request-ID: 7f3a9c1e</pre>
+          <div class="tags-row">
+            <span class="tag cyan">HTTPS/2</span>
+            <span class="tag purple">JWT</span>
+            <span class="tag amber">TLS 1.3</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">客户端延迟</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:5%"></div></div>
+            <span class="lat-val">~0ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 1: Route53 -->
+        <div class="step-panel" id="sp1">
+          <div class="info-desc">Route53 将域名解析为 NLB 的 DNS 名称。支持加权路由 (Weighted Routing) 实现多集群流量分配，TTL 通常设为 60s。</div>
+          <pre class="info-code">; Route53 Record
+api.meican.com.  60  A  ALIAS
+  → eks-fan2-nlb-xxx.elb.amazonaws.com.cn
+
+; 支持加权路由
+eks-fan2  Weight=80
+eks-fan3  Weight=20</pre>
+          <div class="tags-row">
+            <span class="tag cyan">Route53</span>
+            <span class="tag purple">Weighted Routing</span>
+            <span class="tag green">TTL 60s</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">DNS 解析</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:8%"></div></div>
+            <span class="lat-val">~1-5ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 2: NLB -->
+        <div class="step-panel" id="sp2">
+          <div class="info-desc">Network Load Balancer 工作在 L4，保留客户端源 IP（Proxy Protocol v2），跨 3 个可用区（cn-northwest-1a/b/c）进行四层转发，将流量分发到 Kong Pod。</div>
+          <pre class="info-code"># NLB 配置要点
+- 协议: TCP 443
+- 跨 AZ 负载均衡: enabled
+- 保留源IP: Proxy Protocol v2
+- 健康检查: TCP:8000/10s
+- 目标组: Kong Pod NodePort</pre>
+          <div class="tags-row">
+            <span class="tag cyan">L4 TCP</span>
+            <span class="tag purple">3 AZ</span>
+            <span class="tag green">Source IP 保留</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">NLB 转发</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:10%"></div></div>
+            <span class="lat-val">&lt;1ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 3: Kong -->
+        <div class="step-panel" id="sp3">
+          <div class="info-desc">Kong Gateway 接收请求后依次执行 Plugin Chain。通过 KongPlugin CRD 配置，插件按优先级顺序运行：限流 → 鉴权 → 熔断 → 路由。</div>
+          <pre class="info-code"># KongIngress 路由规则
+apiVersion: configuration.konghq.com/v1
+kind: KongIngress
+metadata:
+  name: order-service-ingress
+route:
+  methods: [GET, POST]
+  strip_path: true
+  preserve_host: false
+---
+# KongPlugin: Rate Limiter
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: rate-limit-100
+plugin: rate-limiting
+config:
+  minute: 100
+  policy: redis</pre>
+          <div class="tags-row">
+            <span class="tag cyan">KongPlugin CRD</span>
+            <span class="tag amber">Plugin Chain</span>
+            <span class="tag purple">Lua/Nginx</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">Kong 处理</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:20%"></div></div>
+            <span class="lat-val">~2-5ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 4: ClusterIP -->
+        <div class="step-panel" id="sp4">
+          <div class="info-desc">Kong 通过 set-upstream 插件将请求转发到目标 Service 的 ClusterIP。kube-proxy 在每个 Node 上维护 iptables 规则，将 ClusterIP 转换为 PodIP。</div>
+          <pre class="info-code"># Service 定义
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: meican
+spec:
+  type: ClusterIP
+  selector:
+    app: order-service
+  ports:
+  - port: 80
+    targetPort: 8080
+
+# DNS: order-service.meican.svc.cluster.local</pre>
+          <div class="tags-row">
+            <span class="tag cyan">ClusterIP</span>
+            <span class="tag purple">kube-proxy</span>
+            <span class="tag green">CoreDNS</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">Service 路由</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:12%"></div></div>
+            <span class="lat-val">&lt;0.5ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 5: iptables -->
+        <div class="step-panel" id="sp5">
+          <div class="info-desc">iptables 在 PREROUTING 链通过 DNAT 规则将 ClusterIP 随机替换为一个后端 Pod IP。Istio 接管后，iptables 还会劫持所有出站流量到 Envoy（port 15001）。</div>
+          <pre class="info-code"># kube-proxy 生成的 iptables 规则
+-A KUBE-SERVICES -d 10.96.1.100/32 \
+  -p tcp --dport 80 \
+  -j KUBE-SVC-ORDER
+
+-A KUBE-SVC-ORDER -m statistic \
+  --mode random --probability 0.333 \
+  -j KUBE-SEP-POD1
+-A KUBE-SVC-ORDER \
+  -j KUBE-SEP-POD2   # 余下均匀分配
+
+-A KUBE-SEP-POD1 -j DNAT \
+  --to-destination 172.16.1.5:8080</pre>
+          <div class="tags-row">
+            <span class="tag cyan">DNAT</span>
+            <span class="tag amber">负载均衡</span>
+            <span class="tag purple">iptables PREROUTING</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">DNAT 转换</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:6%"></div></div>
+            <span class="lat-val">&lt;0.1ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 6: Envoy -->
+        <div class="step-panel" id="sp6">
+          <div class="info-desc">Istio 注入的 Envoy Sidecar 通过 iptables 劫持入站流量（port 15006，UID 1337 绕过）。执行 mTLS 终止、链路追踪 Header 注入（Jaeger B3/W3C Trace），应用 VirtualService 流量策略。</div>
+          <pre class="info-code"># Istio iptables 劫持规则
+iptables -t nat -A PREROUTING -p tcp \
+  -j ISTIO_INBOUND
+iptables -t nat -A ISTIO_INBOUND \
+  -p tcp --dport 8080 \
+  -j ISTIO_IN_REDIRECT
+iptables -t nat -A ISTIO_IN_REDIRECT \
+  -p tcp -j REDIRECT --to-port 15006
+
+# 绕过: 进程 UID=1337 (Envoy自身)
+iptables -t nat -A OUTPUT \
+  -m owner --uid-owner 1337 -j RETURN
+
+# VirtualService: 金丝雀发布
+spec:
+  http:
+  - match: [headers: {x-canary: exact: "true"}]
+    route: [{destination: {subset: v2}}]
+  - route: [{destination: {subset: v1, weight: 90},
+             {destination: {subset: v2, weight: 10}}]</pre>
+          <div class="tags-row">
+            <span class="tag cyan">Envoy Sidecar</span>
+            <span class="tag purple">mTLS</span>
+            <span class="tag green">Jaeger Tracing</span>
+            <span class="tag amber">VirtualService</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">Envoy 处理</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:15%"></div></div>
+            <span class="lat-val">~1-2ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 7: App -->
+        <div class="step-panel" id="sp7">
+          <div class="info-desc">业务容器处理请求。通过 IRSA（IAM Roles for Service Accounts）无密钥访问 AWS 服务。通过 Tower 平台注入环境变量，配置数据库连接等信息。Fluent-bit Sidecar 收集日志发送至 Pulsar。</div>
+          <pre class="info-code"># IRSA: Pod 无需 AK/SK
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-service-sa
+  annotations:
+    eks.amazonaws.com/role-arn:
+      arn:aws:iam::123456:role/order-role
+# EKS Webhook 自动注入:
+# AWS_WEB_IDENTITY_TOKEN_FILE
+# AWS_ROLE_ARN
+
+# Tower 注入的环境变量
+env:
+  DB_HOST: rds.meican.internal
+  REDIS_ADDR: redis.meican.internal:6379
+  PULSAR_URL: pulsar://pulsar.meican.internal
+
+# Fluent-bit: 日志链路
+# Pod Log → Fluent-bit → Pulsar → ES → Kibana</pre>
+          <div class="tags-row">
+            <span class="tag cyan">IRSA</span>
+            <span class="tag purple">Tower Platform</span>
+            <span class="tag green">Fluent-bit</span>
+            <span class="tag amber">Business Logic</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">业务处理</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:70%"></div></div>
+            <span class="lat-val">~10-50ms</span>
+          </div>
+        </div>
+
+        <!-- STEP 8: Response -->
+        <div class="step-panel" id="sp8">
+          <div class="info-desc">响应沿原路返回：App → Envoy Outbound（port 15001）→ iptables → Kong → NLB → Client。Envoy 上报 Span 至 Jaeger DaemonSet，Prometheus 记录请求指标，Kiali 呈现调用拓扑。</div>
+          <pre class="info-code">HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-ID: 7f3a9c1e
+X-Trace-ID: 4bf92f3577b34da6a3ce929d  # Jaeger
+X-Envoy-Upstream-Service-Time: 12
+
+{"orders": [...], "total": 42}
+
+# Prometheus 指标 (Envoy 自动上报)
+istio_requests_total{
+  destination_service="order-service",
+  response_code="200"
+} += 1
+
+# 完整链路: ~15-60ms P99</pre>
+          <div class="tags-row">
+            <span class="tag cyan">Jaeger Span</span>
+            <span class="tag purple">Prometheus</span>
+            <span class="tag green">Kiali</span>
+            <span class="tag amber">P99 &lt;60ms</span>
+          </div>
+          <div class="latency-row">
+            <span class="latency-label">总链路延迟</span>
+            <div class="lat-bar-bg"><div class="lat-bar-fill" style="width:90%"></div></div>
+            <span class="lat-val">~15-60ms</span>
+          </div>
+        </div>
+
+        <!-- SUMMARY -->
+        <div class="summary-card" id="summaryCard">
+          <div class="summary-title">✓ 完整链路耗时统计</div>
+          <div class="summary-row">DNS 解析 (Route53)<span>1–5 ms</span></div>
+          <div class="summary-row">NLB 四层转发<span>&lt;1 ms</span></div>
+          <div class="summary-row">Kong Plugin Chain<span>2–5 ms</span></div>
+          <div class="summary-row">iptables DNAT<span>&lt;0.1 ms</span></div>
+          <div class="summary-row">Envoy Sidecar (in+out)<span>2–4 ms</span></div>
+          <div class="summary-row">业务逻辑 (含 DB/Redis)<span>10–50 ms</span></div>
+          <div class="summary-row" style="border-top:1px solid rgba(105,255,71,0.2);margin-top:6px;padding-top:8px;color:var(--green);font-weight:700">总计 P50 / P99<span>~20ms / ~60ms</span></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLS BAR -->
+  <div class="controls">
+    <button class="btn primary" id="playBtn" onclick="togglePlay()">▶ PLAY</button>
+    <button class="btn" onclick="resetAll()">↺ RESET</button>
+    <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
+    <span class="speed-label">速度</span>
+    <select class="speed-sel" id="speedSel" onchange="setSpeed(this.value)">
+      <option value="2000">0.5×</option>
+      <option value="1200" selected>1×</option>
+      <option value="700">2×</option>
+      <option value="400">3×</option>
+    </select>
+  </div>
+</div>
+
+<script>
+var currentStep = -1;
+var playing = false;
+var timer = null;
+var intervalMs = 1200;
+var pluginTimer = null;
+var totalSteps = 9;
+
+var stepTitles = [
+  "Client 发起请求",
+  "Route53 DNS 解析",
+  "NLB 四层转发",
+  "Kong Plugin Chain",
+  "ClusterIP Service",
+  "iptables DNAT",
+  "Envoy Sidecar 入站",
+  "App Container 处理",
+  "Response 回传完成"
+];
+
+function setSpeed(val) {
+  intervalMs = parseInt(val, 10);
+  if (playing) {
+    clearInterval(timer);
+    timer = setInterval(tick, intervalMs);
+  }
+}
+
+function togglePlay() {
+  if (playing) {
+    pause();
+  } else {
+    play();
+  }
+}
+
+function play() {
+  playing = true;
+  document.getElementById('playBtn').textContent = '⏸ PAUSE';
+  if (currentStep >= totalSteps - 1) {
+    resetAll();
+  }
+  timer = setInterval(tick, intervalMs);
+  tick();
+}
+
+function pause() {
+  playing = false;
+  document.getElementById('playBtn').textContent = '▶ PLAY';
+  if (timer) clearInterval(timer);
+  timer = null;
+}
+
+function tick() {
+  if (currentStep < totalSteps - 1) {
+    activate(currentStep + 1);
+  } else {
+    pause();
+    document.getElementById('summaryCard').classList.add('visible');
+  }
+}
+
+function resetAll() {
+  pause();
+  clearPlugins();
+  currentStep = -1;
+  for (var i = 0; i < totalSteps; i++) {
+    var n = document.getElementById('n' + i);
+    var b = document.getElementById('b' + i);
+    var c = document.getElementById('c' + i);
+    if (n) { n.classList.remove('active', 'done'); }
+    if (b) { b.style.background = ''; b.style.color = ''; }
+    if (c) { c.classList.remove('active', 'done'); }
+  }
+  document.getElementById('progFill').style.width = '0%';
+  document.getElementById('panelStepNum').textContent = 'STEP 0 / 9';
+  document.getElementById('panelTitle').textContent = '点击节点或播放';
+  showPanel('idle');
+  document.getElementById('summaryCard').classList.remove('visible');
+}
+
+function activate(idx) {
+  // Mark previous as done
+  if (currentStep >= 0) {
+    var prev = document.getElementById('n' + currentStep);
+    if (prev) { prev.classList.remove('active'); prev.classList.add('done'); }
+    var prevC = document.getElementById('c' + currentStep);
+    if (prevC) { prevC.classList.remove('active'); prevC.classList.add('done'); }
+  }
+
+  currentStep = idx;
+
+  // Activate current node
+  var node = document.getElementById('n' + idx);
+  if (node) { node.classList.add('active'); }
+
+  // Activate connector leading TO this node (connector idx = idx-1)
+  var prevConn = document.getElementById('c' + (idx - 1));
+  if (prevConn) { prevConn.classList.add('active'); }
+
+  // Activate connector FROM this node
+  var conn = document.getElementById('c' + idx);
+  if (conn) { conn.classList.add('active'); }
+
+  // Update progress
+  var pct = ((idx + 1) / totalSteps * 100).toFixed(1);
+  document.getElementById('progFill').style.width = pct + '%';
+
+  // Update info panel
+  document.getElementById('panelStepNum').textContent = 'STEP ' + (idx + 1) + ' / ' + totalSteps;
+  document.getElementById('panelTitle').textContent = stepTitles[idx];
+  showPanel(idx);
+
+  // Kong plugin animation
+  if (idx === 3) {
+    animatePlugins();
+  } else {
+    clearPlugins();
+  }
+}
+
+function showPanel(id) {
+  // Hide idle
+  var idle = document.getElementById('sp-idle');
+  if (idle) idle.classList.remove('visible');
+
+  // Hide all step panels
+  for (var i = 0; i < totalSteps; i++) {
+    var sp = document.getElementById('sp' + i);
+    if (sp) sp.classList.remove('visible');
+  }
+
+  if (id === 'idle') {
+    if (idle) idle.classList.add('visible');
+  } else {
+    var target = document.getElementById('sp' + id);
+    if (target) target.classList.add('visible');
+  }
+}
+
+function jump(idx) {
+  if (playing) pause();
+  // Activate all nodes up to idx
+  for (var i = 0; i < idx; i++) {
+    var n = document.getElementById('n' + i);
+    if (n) { n.classList.remove('active'); n.classList.add('done'); }
+    var c = document.getElementById('c' + i);
+    if (c) { c.classList.remove('active'); c.classList.add('done'); }
+  }
+  // Clear nodes after idx
+  for (var j = idx + 1; j < totalSteps; j++) {
+    var nn = document.getElementById('n' + j);
+    if (nn) { nn.classList.remove('active', 'done'); }
+    var cc = document.getElementById('c' + j);
+    if (cc) { cc.classList.remove('active', 'done'); }
+  }
+  currentStep = idx - 1;
+  document.getElementById('summaryCard').classList.remove('visible');
+  activate(idx);
+}
+
+function animatePlugins() {
+  clearPlugins();
+  var chips = document.querySelectorAll('.chip');
+  var i = 0;
+  pluginTimer = setInterval(function() {
+    if (i < chips.length) {
+      chips[i].classList.add('lit');
+      i++;
+    } else {
+      clearInterval(pluginTimer);
+    }
+  }, 300);
+}
+
+function clearPlugins() {
+  if (pluginTimer) { clearInterval(pluginTimer); pluginTimer = null; }
+  var chips = document.querySelectorAll('.chip');
+  for (var k = 0; k < chips.length; k++) {
+    chips[k].classList.remove('lit');
+  }
+}
+</script>
+</body>
+</html>
