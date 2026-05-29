@@ -1,6 +1,6 @@
-# API 网关 全解 + 支付场景应用
+# API 网关 全解 + 支付场景应用（Go + Kong）
 
-> 重点讲 Spring Cloud Gateway，对比 Nginx/Kong，核心功能、高可用、最佳实践
+> 基于真实 Go 支付收银台项目（checkout），讲 Kong 外部网关 + gRPC 拦截器链内部网关的双层架构
 
 ---
 
@@ -8,167 +8,440 @@
 
 ### 1. 为什么需要 API 网关？作用是什么？
 
-**答：**
-API网关是微服务的统一入口，所有请求都先过网关，相当于门卫，把所有的公共逻辑都放在网关层做，不用每个服务都写一遍。
+API 网关是微服务的统一入口，所有请求先过网关，把公共逻辑集中处理，后端服务不用每个都写一遍。
 
 **核心作用：**
-1. **路由转发**：所有请求统一入口，根据路径、参数转发到对应的后端服务，前端不用知道各个服务的地址，只需要连网关就行
-2. **统一鉴权**：所有请求的权限校验、token校验都在网关层做，不用每个服务都写一遍鉴权逻辑
-3. **限流熔断**：入口处就做全局限流、熔断，防止流量打垮后端服务，防护第一道关口
-4. **黑白名单**：IP黑白名单、用户黑白名单，直接在网关层拦截，不用到后端
-5. **日志监控**：所有请求的访问日志、耗时、错误码统一采集，不用每个服务都打日志
-6. **链路追踪**：统一生成traceId，透传到后端，全链路追踪
-7. **协议转换**：HTTP转gRPC、REST转Dubbo，协议转换，对外暴露HTTP，内部用gRPC
-8. **灰度发布**：根据请求的参数、用户ID、头信息，把流量打到不同版本的后端服务，实现灰度发布
-9. **跨域处理**：跨域统一在网关层处理，不用每个服务都配置
+
+1. **路由转发**：统一入口，根据路径、Header、参数路由到对应服务，调用方不需要知道内部地址
+2. **统一鉴权**：token 校验、签名验证在网关层集中做
+3. **限流熔断**：入口处做全局限流，防止流量打垮后端
+4. **黑白名单**：IP 或用户黑名单，直接在网关拦截
+5. **日志监控**：所有请求的访问日志、耗时、错误码统一采集
+6. **链路追踪**：统一生成 traceId，透传到后端全链路
+7. **协议转换**：对外 HTTPS，内部 gRPC，网关做转换
+8. **幂等保障**：对支付等关键请求做幂等处理，防重复提交
 
 > 网关是微服务的第一道防线，所有流量都经过这里，是高可用和安全的关键节点。
 
 ---
 
-### 2. 常见的API网关有哪些？区别是什么？你们用的哪个？
+### 2. 你们用的什么网关？为什么选它？
 
-**答：** 常见的四大网关：
+**答：** 两层网关架构：
 
-| 维度 | Spring Cloud Gateway | Kong | Nginx + Lua (OpenResty) | Zuul1（Netflix，已淘汰） |
-|-----|----------------------|------|-------------------------|-------------------------|
-| 开发语言 | Java，基于Spring WebFlux 响应式 | Lua + Nginx | Lua + Nginx | Java，同步阻塞 |
-| 性能 | 很高，异步非阻塞，比Zuul高好几倍 | 极高，Nginx原生性能 | 最高，原生Nginx性能 | 低，同步阻塞，已淘汰 |
-| 易用性 | 非常简单，Spring生态原生集成，Java开发直接上手 | 一般，要会Lua，有自己的控制台 | 难，要写Lua脚本，开发调试麻烦 | 简单，但是性能差 |
-| 功能丰富度 | 常用功能都有，扩展方便，Java写过滤器就行 | 功能非常丰富，插件生态好，限流、鉴权、限流都有插件 | 最灵活，想怎么写怎么写，但是要自己实现 | 功能少 |
-| 适用场景 | Java技术栈，Spring Cloud微服务，团队都是Java开发，首选 | 多语言技术栈，需要丰富的插件，网关是独立团队维护 | 超大规模，性能要求极高，有专门的网关团队 | 老项目，现在没人用了 |
+**第一层：Kong 外部网关（K8s Ingress）**
 
-> **我们支付用的是 Spring Cloud Gateway**
-> 我们都是Java技术栈，Spring Cloud 生态，直接集成非常方便，开发过滤器什么的都是Java写，不用学Lua，上手快，性能也完全够用，支付QPS几千，完全扛得住，不用搞复杂的OpenResty或者Kong，运维成本低。
+- Kong 部署在 Kubernetes，作为集群入口，通过 Ingress 资源配置路由
+- 外部流量（三方回调、SDK 调用）先经过 Kong，再到内部服务
+- 通过 KongPlugin 挂载限流、鉴权等插件
+
+**第二层：checkout gRPC 拦截器链（业务网关层）**
+
+- checkout 服务本身就是收银台网关，对外暴露 HTTP（三方回调）和 gRPC（内部 SDK 调用）两个端口
+- gRPC 拦截器链承担了内部的鉴权、幂等、限流等逻辑
+
+**为什么选 Kong：**
+
+- 云原生，和 Kubernetes 生态原生集成，通过 CRD（KongPlugin / KongIngress）声明式配置，运维简单
+- 插件丰富：限流、鉴权、日志、熔断开箱即用
+- 支持 gRPC 和 HTTP 协议，适合我们的双协议场景
+- Redis 后端做分布式限流，多个网关实例共享计数，全局准确
 
 ---
 
-## 二、Spring Cloud Gateway 核心原理
+## 二、整体架构
 
-### 3. Spring Cloud Gateway 的核心概念是什么？工作流程？
+### 3. checkout 服务的整体架构是什么？
 
-**答：** 三大核心概念：
-1. **Route 路由**：网关的基本单元，一个路由就是一组转发规则，包含ID、目标地址、断言、过滤器，比如路径是`/pay/**`就转发到支付服务
-2. **Predicate 断言**：匹配规则，满足什么条件才走这个路由，比如路径匹配、Header匹配、参数匹配、Cookie匹配，多个断言可以组合
-3. **Filter 过滤器**：请求转发前后做处理，比如修改请求头、修改请求参数、鉴权、限流、日志，分前置过滤器和后置过滤器
+```text
+外部流量（三方支付回调 / 端上 SDK）
+        ↓
+  Kong API Gateway（K8s Ingress）
+  - HTTPS 终止
+  - Kong 限流插件（100 req/s per consumer，Redis 后端）
+        ↓
+  checkout 服务
+  ├── HTTP Server（Gin）      ← 三方支付回调
+  │   └── /v1/callback/
+  │       ├── POST /wechat-notify/:configId
+  │       ├── POST /alipay-notify/:configId
+  │       ├── POST /abc-notify/:configId
+  │       ├── POST /sqb-notify/:configId
+  │       ├── POST /allinpay-notify/:configId
+  │       └── POST /ccc-notify
+  │
+  └── gRPC Server            ← 内部 SDK / 商户端调用
+      └── 拦截器链（按顺序执行）
+          1. extractPlatformFromMD   ← 从 metadata 提取 platform
+          2. setMchIDIntoCtx         ← 商户 ID 校验和注入
+          3. buildSDKIdempotentInterceptor ← 幂等处理
+          4. checkSDKCallerInterceptor    ← SDK 调用方校验（签名/token）
+          5. checkPrivateInterceptor      ← 内部私有接口鉴权
+          6. buildRateLimiterInterceptor  ← gRPC 层限流
+              ↓
+      各业务 Service Handler
 
-**工作流程：**
+基础设施：
+  - PostgreSQL（GORM，读写分离，dbresolver）
+  - Redis（缓存 + 分布式锁 + 限流计数）
+  - Pulsar（事务消息 txmsg）
+  - gRPC 连接池（下游：tpw / payment / subsidy / member 等多个服务）
+  - OTLP（链路追踪 + 指标）
 ```
-客户端请求 → 网关
-          → 断言匹配路由
-          → 前置过滤器链处理（鉴权、限流、日志、加请求头）
-          → 转发到后端服务
-          → 后置过滤器链处理（修改响应、统计耗时、打日志）
-          → 返回响应给客户端
+
+---
+
+## 三、gRPC 拦截器链
+
+### 4. gRPC 拦截器链的设计是什么？每一层做什么？
+
+**注册入口：**
+
+```go
+// internal/net/grpc/interceptor/interceptor.go
+func SetInterceptors(cfg *xgrpc.Config, p *infra.Provider) {
+    interceptors := []grpc.UnaryServerInterceptor{
+        extractPlatformFromMD,         // 1. 提取平台信息
+        setMchIDIntoCtx,               // 2. 商户 ID 校验
+        buildSDKIdempotentInterceptor(p), // 3. 幂等
+        checkSDKCallerInterceptor,     // 4. SDK 调用方校验
+        checkPrivateInterceptor,       // 5. 私有接口鉴权
+        buildRateLimiterInterceptor(p),// 6. 限流
+    }
+}
+```
+
+**各层职责：**
+
+| 拦截器 | 作用 | 生效范围 |
+|--------|------|----------|
+| `extractPlatformFromMD` | 从 gRPC metadata 提取 platform 存入 ctx | 所有请求 |
+| `setMchIDIntoCtx` | 从 metadata 解析商户 ID，校验商户配置存在，注入 ctx | MchService / LegacyMchService / PayAfterMchService |
+| `buildSDKIdempotentInterceptor` | Redis SetNX 幂等，防重复支付 | SDK 支付/充值/退款等写操作 |
+| `checkSDKCallerInterceptor` | 校验调用方：用户 ID 或 PaymentSlipToken + RSA 签名 | SDK Service |
+| `checkPrivateInterceptor` | clientID/clientSecret 校验，检查接口权限 | Private Service |
+| `buildRateLimiterInterceptor` | Redis 令牌桶限流，按 method 单独配置阈值 | 配置了规则的 method |
+
+---
+
+### 5. gRPC 层幂等是怎么实现的？
+
+**幂等的核心问题**：网络抖动时客户端重试，如果服务端重复处理，会导致重复扣款。
+
+**实现方案：Redis SetNX + 请求指纹**
+
+```go
+// 1. 计算请求指纹
+func calcRequestMD5(reqID, fullMethod string, req proto.Message) (string, error) {
+    body, _ := proto.Marshal(req)
+
+    var bf bytes.Buffer
+    bf.WriteString(reqID)      // 客户端传的 requestID（来自 gRPC metadata）
+    bf.WriteString(fullMethod) // 方法名，区分不同接口
+    bf.Write(body)             // 请求体序列化
+
+    sum := md5.Sum(bf.Bytes())
+    return hex.EncodeToString(sum[:]), nil
+}
+
+// 2. SetNX 占位，防止并发重复处理
+ok, err = p.CacheRedis.SetNX(ctx, respCacheKey(reqMD5), "1", 30*time.Second).Result()
+if !ok {
+    // 触发幂等：从 Redis 取上次的响应直接返回
+    return idempotentHandle(ctx, p, reqMD5, req, info)
+}
+
+// 3. 处理完成后缓存响应（proto 序列化存 Redis）
+respBytes, _ := proto.Marshal(resp.(proto.Message))
+p.CacheRedis.Set(ctx, respCacheKey(reqMD5), respBytes, consts.IdempotentCacheExpiration)
+```
+
+**关键细节：**
+
+- `requestID` 由客户端生成，存在 gRPC metadata 里，标识同一笔业务请求
+- 指纹 = `MD5(requestID + method + proto(req))`，同一请求指纹相同
+- 处理中状态用 `"1"` 占位，30s 超时，防止服务宕机后 key 永久占用
+- 某些错误码（内部错误、超时）不缓存响应，客户端重试可以重新处理
+
+---
+
+### 6. SDK 调用方校验怎么做的？
+
+SDK 调用支持两种调用方身份：
+
+**类型一：用户直接调用**
+
+```go
+if commonv2pb.CallerType_CALLER_TYPE_USER == caller.GetType() {
+    // 必须有 userId 或 clientMemberId 之一
+    if caller.GetUserId() == nil && caller.GetClientMemberId() == nil {
+        return buildErrorResp(info, resultcode.PermissionDenied, ...)
+    }
+}
+```
+
+**类型二：通过 PaymentSlipToken 调用（支付单 token）**
+
+```go
+} else if commonv2pb.CallerType_CALLER_TYPE_OTHER == caller.GetType() {
+    // 1. 解析 PaymentSlipToken（JWT 格式，用商户 RSA 公钥验签）
+    data, ok := checkPaymentSlipToken(ctx, token.GetValue())
+
+    // 2. 校验 token 里的 paymentSlipID 和请求的 paymentSlipID 一致
+    if data.PaymentSlipID != r.GetPaymentSlipId() { ... }
+
+    // 3. 从 token 里提取 mchID
+    mchID = data.MchID
+}
+```
+
+**SDK 支付额外的 RSA 签名验证：**
+
+```go
+// 对 PayRequest，还要验证 RSA 签名，防止篡改支付金额
+func checkSDKPaySign(ctx context.Context, req *sdkpb.PayRequest) (int64, bool) {
+    // 从 metadata 提取签名参数（timestamp, nonceStr, signature, mchID）
+    params, _ := sign.ParamsFromMD(md)
+
+    // 用商户公钥（或全局支付公钥）验签
+    verifier := signsdk.NewSDKPayVerifier(
+        req.GetPaymentSlipId(), params.Timestamp, params.NonceStr,
+        params.Signature, publicKey,
+    )
+    verifier.Verify()
+}
 ```
 
 ---
 
-### 4. 怎么自定义过滤器？你们网关做了哪些过滤器？
+### 7. 私有接口鉴权怎么做的？
 
-**答：**
-自定义过滤器很简单，继承GlobalFilter，重写filter方法就行，全局生效，所有请求都走。
+内部服务调用 checkout 的私有接口，用 clientID + clientSecret 鉴权：
 
-我们网关主要做了这些过滤器：
-1. **统一鉴权过滤器**：校验用户token、商户token，校验不通过直接返回401，不用到后端服务
-2. **全局限流过滤器**：IP限流、用户限流、接口总限流，超过了直接返回429，第一道防线
-3. **黑白名单过滤器**：IP黑名单、恶意用户直接拦截，不用到后端
-4. **日志过滤器**：记录所有请求的URL、参数、耗时、状态码、用户ID，统一打日志，上报到监控系统
-5. **TraceId过滤器**：请求进来就生成全局唯一的traceId，放到请求头里，透传到所有后端服务，全链路追踪，排查问题的时候根据traceId就能查到所有日志
-6. **灰度发布过滤器**：根据请求头里的用户标签、商户ID，把流量转发到灰度版本的服务，实现灰度发布
-7. **跨域过滤器**：统一处理跨域请求，不用每个服务都配
-8. **参数校验过滤器**：公共的参数校验，比如必填参数，直接在网关层校验，不合法直接返回，不用到后端
+```go
+func checkPrivateInterceptor(...) {
+    // 1. 从 gRPC metadata 取 client-Id 和 client-secret
+    clientID := md.Get("client-Id")
+    clientSecret := md.Get("client-secret")
 
----
+    // 2. 查客户端配置（从 DB 加载到内存），校验 secret
+    clientConf := client.GetClient(clientID[0], clientSecret[0])
 
-## 三、支付场景最佳实践 & 踩坑经验
-
-### 5. 你们支付网关做了哪些防护措施？怎么保证高可用？
-
-**答：** 网关是入口，高可用最重要，我们做了很多防护：
-
-**高可用方面：**
-1. **集群部署**，至少3个节点，前面挂Nginx负载均衡，单台挂了不影响整体
-2. **多机房部署**，每个机房都有网关节点，单机房挂了不影响其他机房
-3. **无损上下线**，发布的时候先把节点从注册中心摘下来，等存量请求处理完了再重启，不会有请求报错
-4. **降级机制**，网关压力大的时候，非核心接口直接降级返回，优先保证支付核心接口可用
-5. **资源隔离**，核心支付接口单独的线程池，非核心接口用另外的线程池，非核心接口慢了不会影响核心接口
-
-**安全防护方面：**
-1. **多层限流**：全局限流、IP限流、用户限流、商户限流、接口单独限流，层层防护，不会被流量打垮
-2. **WAF防护**：防SQL注入、XSS、恶意参数，直接在网关层拦截攻击
-3. **黑白名单**：恶意IP、恶意用户直接拦截，不用到后端
-4. **防重放攻击**：请求加签名、时间戳，过期的请求直接拒绝，防止有人抓包重放请求
-5. **敏感数据脱敏**：返回的敏感数据，比如手机号、身份证号，直接在网关层脱敏，不用每个服务都处理
+    // 3. 检查该客户端是否有权限访问这个方法
+    if !clientConf.CheckAccessAuth(info.FullMethod) {
+        return buildErrorResp(info, resultcode.PermissionDenied, ...)
+    }
+}
+```
 
 ---
 
-### 6. 网关怎么做限流？怎么实现的？
+## 四、限流
 
-**答：** 我们用的是Redis + Lua脚本实现的分布式令牌桶限流，支持多种维度：
-1. **全局限流**：整个网关总QPS不超过阈值，比如总5000QPS
-2. **IP限流**：同一个IP一分钟最多请求多少次，防刷
-3. **用户/商户限流**：同一个用户、同一个商户最多QPS，防止单个商户把资源占满
-4. **接口级限流**：每个接口单独设置限流阈值，核心接口阈值大，非核心的小
+### 8. 限流是怎么做的？有几层？
 
-**实现方式：**
-用Spring Cloud Gateway自带的Redis RateLimiter，底层就是Lua脚本+令牌桶算法，原子执行，性能很高，分布式的，多个网关实例共享限流计数，全局限流准确。
+**两层限流：**
+
+**第一层：Kong 插件限流（HTTP 入口）**
+
+```yaml
+# argo-sandbox/helm/templates/kong-rate-limiting.yaml
+plugin: rate-limiting
+config:
+  second: 100          # 每秒 100 次
+  policy: redis        # Redis 后端，分布式，多实例共享计数
+  limit_by: consumer   # 按 consumer 维度限流
+  fault_tolerant: true # Redis 故障时放行，不影响业务
+```
+
+**第二层：gRPC 拦截器限流（业务接口）**
+
+```go
+// internal/pkg/ratelimit/rate_limiter.go
+// 底层用 go-redis/redis_rate，令牌桶算法，Lua 脚本原子执行
+func (r *redisRateLimiter) Acquire(ctx context.Context, tokenBucketNum int, key string) bool {
+    res, err := r.limit.Allow(ctx, key, redisrate.PerSecond(tokenBucketNum))
+    if err != nil {
+        return true // Redis 故障时放行，降级不限流
+    }
+    return res.Allowed > 0
+}
+
+// 按 method 维度配置限流规则，key = method+业务维度
+func (l *Interceptor) Limit(ctx context.Context, fullMethod string, req any) bool {
+    rule, ok := l.rule[fullMethod] // 没配置规则的接口不限流
+    if !ok {
+        return false
+    }
+    key := rateLimitRequest.RateLimitKey() // 业务 key，比如商户 ID
+    return !l.limiter.Acquire(ctx, rule.TokenPerSecond, key)
+}
+```
+
+**两层限流的分工：**
+
+```text
+Kong 层：入口总流量控制，防止恶意流量打穿，粒度是 consumer 维度
+gRPC 层：接口级精细控制，按 method 配置不同阈值，粒度到商户/用户维度
+```
 
 ---
 
-### 7. 灰度发布怎么在网关实现的？支付场景怎么做灰度？
+## 五、HTTP 回调层
 
-**答：** 我们支付发布都是灰度的，不会直接全量发，非常稳妥：
-1. 发布新版本的支付服务，打标签，比如version=gray
-2. 网关上配置灰度规则，比如内部员工、测试商户的请求，头里带gray=1的，就转发到灰度版本的服务
-3. 先小流量灰度，比如10%的流量打给新版本，观察没问题了再慢慢放量，到50%，最后100%全量
-4. 出问题了立刻把灰度流量切回老版本，影响范围小，不会全量出问题
-5. 大促前发布，只灰度给测试流量，全量用户还是老版本，非常安全
+### 9. 三方支付回调是怎么处理的？
 
-**实现方式：**
-自定义全局过滤器，根据请求的头信息、用户ID、商户ID，判断要不要走灰度，然后修改路由的目标地址，转发到对应版本的服务就行，非常简单。
+checkout 服务的 HTTP 层（Gin）专门处理三方支付回调，不做业务逻辑，只做透传：
+
+```go
+// internal/net/http/routes.go
+callback := s.Group("/v1/callback")
+callback.POST("/wechat-notify/:configId", h.WechatCallback.WechatNotifyToTpw)
+callback.POST("/alipay-notify/:configId", h.AlipayCallback.AlipayNotifyToTPw)
+callback.POST("/abc-notify/:configId",    h.AbcCallback.AbcPayNotifyToTPw)
+callback.POST("/sqb-notify/:configId",    h.SqbCallback.SqbNotifyToTpw)
+callback.POST("/allinpay-notify/:configId", h.AllinpayCallback.AllinpayNotifyToTPw)
+callback.POST("/ccc-notify",              h.WalletNotify.WalletNotifyToTpw)
+```
+
+**以微信回调为例：**
+
+```go
+func (w *wechatCallback) WechatNotifyToTpw(ctx *gin.Context) {
+    // 1. 解析 URL 参数（configId 区分商户配置）
+    configId := ctx.Param("configId")
+
+    // 2. 读取请求体
+    body, _ := io.ReadAll(ctx.Request.Body)
+
+    // 3. 提取微信签名头（Serial/Timestamp/Nonce/Signature），后续在 tpw 层验签
+    callback := notifystruct.WechatCallback{
+        WechatpaySerial:    ctx.Request.Header.Get("Wechatpay-Serial"),
+        WechatpayTimestamp: ctx.Request.Header.Get("Wechatpay-Timestamp"),
+        WechatpayNonce:     ctx.Request.Header.Get("Wechatpay-Nonce"),
+        WechatpaySignature: ctx.Request.Header.Get("Wechatpay-Signature"),
+        Body: string(body),
+    }
+
+    // 4. 透传给 tpw 服务（第三方支付通道服务）处理
+    w.Tpw.Callback(reqCtx, &tpwpb.CallbackRequest{
+        TpwConfigId:  configIdInt64,
+        Body:         dataStr,
+        CallbackType: commonpb.CallbackType_WECHAT_PAY,
+    })
+
+    // 5. 返回微信要求的成功格式
+    ctx.JSON(http.StatusOK, struct{ Code string; Message string }{"SUCCESS", "成功"})
+}
+```
+
+**设计原则**：HTTP 层只做接收和透传，不做验签，不做业务逻辑，验签和业务处理都在 tpw 服务里，checkout 只是"搬运工"。
 
 ---
 
-### 8. 用网关踩过什么坑？怎么解决的？
+## 六、下游服务连接管理
 
-**答：** 说几个真实的，非常加分
+### 10. 下游 gRPC 服务怎么管理的？
 
-**坑1：最开始默认的Netty线程池太小，高并发的时候请求排队，响应很慢，超时很多**
-大促的时候，网关CPU还很空闲，但是响应时间特别长，很多超时，后来发现是Netty的worker线程数设的太小了，默认是CPU核数，请求都在排队
-- 解决：调大Netty的线程数，加大工作线程池大小，瞬间就好了，超时率降下来了
+用 **gRPC 连接池** 管理下游连接，避免频繁建连销连的开销：
 
-**坑2：请求体太大，默认的请求大小限制是256KB，回调的时候微信发的XML超过了，被网关拦截了，回调失败**
-最开始没注意，回调过来的报文比较大，超过了默认的大小，网关直接返回413，微信回调失败，导致很多支付结果没更新
-- 解决：调大请求体大小限制，调到10MB，针对回调接口单独配置，就好了
+```go
+// internal/infra/provider.go
+// payment 相关服务共享同一个连接池
+paymentRPCPool, _ := grpcutils.NewGRPCPool(
+    cfg.RPCClients.PaymentServiceAddr,
+    poolConfig,
+    grpcutils.WithJWT(app.Credentials.Identifier.JWT),
+    grpcutils.WithTelemetry(app.Telemetry),
+)
 
-**坑3：网关层做了太多逻辑，复杂的参数校验、业务逻辑都放网关了，导致网关性能越来越差，还经常发版**
-最开始图省事，很多业务校验逻辑都放网关写了，网关越来越重，还要经常发版，发版影响所有业务
-- 解决：网关只做通用的、公共的逻辑，业务逻辑都放回各自的服务去，保持网关轻量，尽量少发版，网关是入口，稳定最重要，不要往里面塞太多业务逻辑
+// 监控连接池状态
+monitor := metrics.NewPoolMonitor(metrics.NewRPCPoolMetricInfo("payment", paymentRPCPool))
+monitor.StartMonitoring()
 
-**坑4：限流阈值设的太小，大促的时候正常流量也被限了，很多用户支付不了**
-最开始限流阈值按平时的峰值设的，大促的时候流量是平时的3倍，直接被限流了，大量支付请求被拒绝
-- 解决：阈值放配置中心，动态可调整，大促前提前调大阈值，并且压测做好，留至少3倍冗余，不要压到极限。
+// 多个 service client 复用同一个 pool
+rechargeService, _             = rpcclient.NewRechargeService(paymentRPCPool)
+paymentMeicanServiceClient, _  = rpcclient.NewPaymentMeicanServiceClient(paymentRPCPool)
+paymentWebServiceClientV2, _   = rpcclient.NewPaymentWebServiceClient(paymentRPCPool)
+paymentQuickServiceClientV2, _ = rpcclient.NewPaymentQuickServiceClient(paymentRPCPool)
+```
+
+连接池配置（来自 config）：
+
+```text
+InitConn:     初始连接数
+MaxConn:      最大连接数
+DialTimeout:  建连超时
+IdleTimeout:  空闲连接超时（自动释放）
+PingInterval: 心跳检测间隔（保活）
+PingTimeout:  心跳超时
+```
 
 ---
 
-### 9. 网关怎么排查问题？怎么监控？
+## 七、高可用与踩坑
 
-**答：**
-**监控方面：**
-1. 四大黄金指标：请求量、响应时间、错误率、拒绝率，都有监控大盘，实时看
-2. 每个接口的单独监控，TOP N的慢接口、错误接口，都有告警
-3. 网关的CPU、内存、线程池、队列长度，都有监控，满了立刻告警
+### 11. 网关层怎么保证高可用？
 
-**排查方面：**
-1. 全链路追踪，每个请求都有traceId，出了问题拿traceId直接查全链路的日志，看是网关的问题还是后端的问题
-2. 网关所有请求都打访问日志，包含URL、参数、耗时、状态码、来源IP，出了问题直接查日志
-3. 动态调整日志级别，出问题的时候开debug日志，排查完了调回去，不用重启
+**部署层面：**
+
+1. **多实例部署**：checkout 在 K8s 上跑多个 Pod，前面是 Kong，单个 Pod 挂了不影响整体
+2. **HPA 自动扩容**：配置了 HPA，流量高峰时自动扩 Pod，配合 Kong 的限流防止扩太慢时被打穿
+3. **Argo Rollout 灰度发布**：用 Argo Rollout 做金丝雀发布，新版本先接少量流量，观察没问题再全量，出问题立刻回滚
+4. **优雅退出**：K8s 滚动更新时，收到 SIGTERM 先停止接收新请求，等存量请求处理完再退出
+
+**限流降级：**
+
+- Redis 故障时，Kong 的 `fault_tolerant: true` 让限流降级放行，不影响业务
+- gRPC 层限流 Redis 故障时也降级放行（`return true`），业务优先
+
+**连接池监控：**
+
+- gRPC 连接池有 metrics 监控，连接数异常告警
+
+---
+
+### 12. 踩过什么坑？
+
+**坑 1：微信回调请求体超过默认限制**
+
+微信回调的 body 里包含加密的业务数据，有时比较大，超过了默认的请求体大小限制，网关直接返回 413，微信重试几次后放弃，支付结果迟迟不更新。
+
+- 解决：针对回调接口调大请求体限制，并在 Kong 层也同步调整 `client_max_body_size`
+
+**坑 2：gRPC 幂等的错误码要细分**
+
+最初所有错误都缓存响应，导致内部错误（数据库超时、下游不可用）也被缓存，客户端重试拿到的是旧的错误响应，实际上问题已经恢复了，但还是返回错误。
+
+- 解决：区分不缓存的错误码（`InternalError`、`WalletPayTimeout`），这些错误不缓存，让客户端能真正重试：
+
+```go
+var errorCodesForNotCachingResp = map[int32]struct{}{
+    resultcode.InternalError.Value():    {},
+    resultcode.WalletPayTimeout.Value(): {},
+}
+```
+
+**坑 3：gRPC 拦截器链顺序出错导致鉴权绕过**
+
+早期拦截器顺序不对，幂等拦截器在鉴权之前执行，导致未鉴权的请求也触发了幂等逻辑，泄露了 Redis key 的状态信息。
+
+- 解决：严格约定拦截器顺序，鉴权拦截器必须在幂等拦截器之前，且用代码注释标注顺序依赖关系
+
+**坑 4：限流 key 设计不合理**
+
+最初限流 key 只用了 method 名，同一个 method 全局共享一个计数，导致一个大商户的高频请求把其他所有商户的配额都用完了，其他商户报限流错误。
+
+- 解决：限流 key 改为 `method + 商户 ID`，每个商户独立计数，互不影响
 
 ---
 
 ## 面试答题技巧
-网关这块，重点突出：
-1. **网关的定位**，就是做通用公共逻辑的，不要塞业务逻辑，保持轻量稳定，这个是核心设计原则，说出来就说明你懂网关的设计思想
-2. **多层防护**，限流、黑白名单、安全防护、降级、资源隔离，这些都是生产环境必须做的，说出来就知道你有生产运维经验
-3. **灰度发布**，支付场景最重要的就是发布安全，灰度发布的实践是非常大的加分项，说明你们的生产流程很规范。
+
+网关这块，重点突出三点：
+
+1. **双层架构**：Kong 做入口流量控制，gRPC 拦截器链做业务层精细控制，各层分工清晰，说出来就知道你对网关设计有系统性思考
+
+2. **幂等设计**：支付场景幂等是核心，Redis SetNX + 请求指纹 + 区分不缓存的错误码，这套组合能说清楚就非常有说服力
+
+3. **踩坑经历**：特别是错误码区分不缓存、限流 key 粒度这两个坑，都是真实踩过的，面试官一听就知道是生产经验，不是背题
