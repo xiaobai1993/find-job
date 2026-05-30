@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCP 连接 · 通信 · 断开 — 交互式可视化</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f172a;--card:#1e293b;--border:#334155;--fg:#e2e8f0;--muted:#94a3b8;
+  --accent:#38bdf8;--green:#4ade80;--red:#f87171;--yellow:#fbbf24;--orange:#fb923c;--purple:#c084fc;
+}
+body{background:var(--bg);color:var(--fg);font-family:'SF Mono','Fira Code',Consolas,monospace;overflow-x:hidden}
+h1{text-align:center;padding:20px 0 8px;font-size:20px;font-weight:600;letter-spacing:1px}
+.subtitle{text-align:center;color:var(--muted);font-size:12px;margin-bottom:16px}
+
+.controls{display:flex;gap:10px;justify-content:center;align-items:center;padding:10px 20px;flex-wrap:wrap}
+.btn{padding:8px 18px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer;font-family:inherit;font-size:13px;transition:all .2s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.phase-tabs{display:flex;gap:4px;background:var(--card);border-radius:8px;padding:4px;border:1px solid var(--border)}
+.phase-tab{padding:6px 14px;border-radius:5px;cursor:pointer;font-size:12px;transition:all .2s;color:var(--muted);border:none;background:transparent;font-family:inherit}
+.phase-tab.active{background:var(--accent);color:var(--bg)}
+.phase-tab:hover:not(.active){color:var(--fg)}
+
+.main{display:flex;gap:16px;padding:0 20px 20px;max-width:1400px;margin:0 auto}
+.left-panel{flex:1;min-width:0}
+.right-panel{width:340px;flex-shrink:0;display:flex;flex-direction:column;gap:12px}
+
+.timeline-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;position:relative;overflow:hidden}
+.timeline-box h2{font-size:13px;color:var(--accent);margin-bottom:12px;font-weight:600}
+.timeline{position:relative;height:420px;display:flex;justify-content:space-between;align-items:stretch}
+.endpoint{width:90px;display:flex;flex-direction:column;align-items:center;z-index:2}
+.endpoint-icon{width:54px;height:54px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:6px;border:2px solid var(--border);background:var(--bg)}
+.endpoint-label{font-size:12px;font-weight:600}
+.endpoint-state{font-size:10px;color:var(--muted);margin-top:4px;min-height:28px;text-align:center;line-height:1.3}
+.lane{flex:1;position:relative}
+.lane-line{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--border)}
+
+.packet{position:absolute;transform:translateX(-50%);z-index:3;display:flex;align-items:center;gap:4px;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap;opacity:0;pointer-events:none;transition:none}
+.packet .arrow{font-size:9px;opacity:.7}
+.packet.client-to-server{background:rgba(56,189,248,.15);border:1px solid rgba(56,189,248,.4);color:var(--accent)}
+.packet.server-to-client{background:rgba(74,222,128,.15);border:1px solid rgba(74,222,128,.4);color:var(--green)}
+.packet.retransmit{background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.4);color:var(--red)}
+.packet.ack-only{background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.4);color:var(--yellow)}
+.packet.animating{opacity:1;pointer-events:auto}
+
+.tl-label{position:absolute;left:50%;transform:translateX(-50%);font-size:9px;white-space:nowrap;z-index:1}
+
+.info-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+.info-box h2{font-size:13px;color:var(--accent);margin-bottom:8px;font-weight:600}
+.info-content{font-size:12px;line-height:1.8;color:var(--muted)}
+.info-content b,.info-content strong{color:var(--fg);font-weight:600}
+.info-content code{background:rgba(56,189,248,.1);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:11px}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;margin:0 2px}
+.tag.syn{background:rgba(56,189,248,.2);color:var(--accent)}
+.tag.ack{background:rgba(74,222,128,.2);color:var(--green)}
+.tag.fin{background:rgba(248,113,113,.2);color:var(--red)}
+.tag.rst{background:rgba(251,191,36,.2);color:var(--yellow)}
+
+.cwnd-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+.cwnd-box h2{font-size:13px;color:var(--accent);margin-bottom:8px;font-weight:600}
+#cwndCanvas{width:100%;border-radius:6px;background:var(--bg)}
+.cwnd-legend{display:flex;gap:12px;margin-top:8px;font-size:10px;color:var(--muted)}
+.cwnd-legend span::before{content:'';display:inline-block;width:10px;height:3px;border-radius:1px;margin-right:4px;vertical-align:middle}
+.legend-cwnd::before{background:var(--accent)}
+.legend-ssthresh::before{background:var(--orange)}
+.legend-rwnd::before{background:var(--purple)}
+
+.window-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+.window-box h2{font-size:13px;color:var(--accent);margin-bottom:8px;font-weight:600}
+.window-viz{position:relative;height:44px;border-radius:6px;background:var(--bg);border:1px solid var(--border);overflow:hidden;margin-bottom:6px}
+.window-seg{position:absolute;top:0;height:100%;transition:all .4s ease;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;border-right:1px solid rgba(0,0,0,.3)}
+.seg-sent{background:rgba(56,189,248,.3);color:var(--accent)}
+.seg-acked{background:rgba(74,222,128,.3);color:var(--green)}
+.seg-unsent{background:transparent;color:var(--muted);border:1px dashed var(--border);border-right:1px dashed var(--border)}
+.window-info{display:flex;gap:12px;font-size:10px;color:var(--muted)}
+.window-info span b{color:var(--fg)}
+
+.state-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+.state-box h2{font-size:13px;color:var(--accent);margin-bottom:8px;font-weight:600}
+.state-pair{display:flex;justify-content:space-between;gap:10px}
+.state-item{flex:1;text-align:center;padding:8px;border-radius:6px;background:var(--bg);border:1px solid var(--border)}
+.state-item .role{font-size:10px;color:var(--muted)}
+.state-item .state{font-size:13px;font-weight:700;margin-top:2px}
+
+.speed-ctrl{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.speed-ctrl input{width:80px;accent-color:var(--accent)}
+.step-counter{font-size:12px;color:var(--muted);text-align:center;padding:4px}
+</style>
+</head>
+<body>
+
+<h1>TCP 连接 · 通信 · 断开连接</h1>
+<p class="subtitle">交互式可视化 — 三次握手 / 滑动窗口 / 拥塞控制 / 四次挥手</p>
+
+<div class="controls">
+  <div class="phase-tabs">
+    <button class="phase-tab active" data-phase="handshake">三次握手</button>
+    <button class="phase-tab" data-phase="data">数据通信</button>
+    <button class="phase-tab" data-phase="wave">四次挥手</button>
+  </div>
+  <button class="btn" id="btnPlay">▶ 自动播放</button>
+  <button class="btn" id="btnStep">▶ 下一步</button>
+  <button class="btn" id="btnReset">↺ 重置</button>
+  <div class="speed-ctrl">
+    <span>速度</span>
+    <input type="range" id="speedSlider" min="1" max="5" value="3">
+    <span id="speedLabel">1x</span>
+  </div>
+</div>
+
+<div class="step-counter" id="stepCounter"></div>
+
+<div class="main">
+  <div class="left-panel">
+    <div class="timeline-box">
+      <h2>数据包时间线</h2>
+      <div class="timeline" id="timeline">
+        <div class="endpoint">
+          <div class="endpoint-icon">🖥</div>
+          <div class="endpoint-label">Client</div>
+          <div class="endpoint-state" id="clientState">CLOSED</div>
+        </div>
+        <div class="lane" id="lane">
+          <div class="lane-line"></div>
+        </div>
+        <div class="endpoint">
+          <div class="endpoint-icon">🖧</div>
+          <div class="endpoint-label">Server</div>
+          <div class="endpoint-state" id="serverState">CLOSED</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-panel">
+    <div class="state-box">
+      <h2>TCP 状态</h2>
+      <div class="state-pair">
+        <div class="state-item"><div class="role">Client</div><div class="state" id="stClient">CLOSED</div></div>
+        <div class="state-item"><div class="role">Server</div><div class="state" id="stServer">CLOSED</div></div>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <h2>当前步骤说明</h2>
+      <div class="info-content" id="infoContent">点击「下一步」或「自动播放」开始演示</div>
+    </div>
+
+    <div class="window-box">
+      <h2>滑动窗口</h2>
+      <div class="window-viz" id="windowViz"></div>
+      <div class="window-info">
+        <span>cwnd: <b id="infoCwnd">1</b></span>
+        <span>ssthresh: <b id="infoSsthresh">16</b></span>
+        <span>rwnd: <b id="infoRwnd">32</b></span>
+        <span>发送窗口: <b id="infoSendWin">1</b></span>
+      </div>
+    </div>
+
+    <div class="cwnd-box">
+      <h2>拥塞窗口变化</h2>
+      <canvas id="cwndCanvas" width="310" height="140"></canvas>
+      <div class="cwnd-legend">
+        <span class="legend-cwnd">cwnd</span>
+        <span class="legend-ssthresh">ssthresh</span>
+        <span class="legend-rwnd">rwnd</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  Info builder — safe DOM construction, no innerHTML
+// ============================================================
+function buildInfo(parts) {
+  const $info = document.getElementById('infoContent');
+  $info.textContent = '';
+  parts.forEach(p => {
+    if (typeof p === 'string') {
+      $info.appendChild(document.createTextNode(p));
+    } else if (p.t === 'b') {
+      const el = document.createElement('b');
+      el.textContent = p.v;
+      $info.appendChild(el);
+    } else if (p.t === 'code') {
+      const el = document.createElement('code');
+      el.textContent = p.v;
+      $info.appendChild(el);
+    } else if (p.t === 'br') {
+      $info.appendChild(document.createElement('br'));
+    } else if (p.t === 'tag') {
+      const el = document.createElement('span');
+      el.className = 'tag ' + p.cls;
+      el.textContent = p.v;
+      $info.appendChild(el);
+    }
+  });
+}
+
+// ============================================================
+//  Phase definitions
+// ============================================================
+const PHASES = {
+  handshake: {
+    steps: [
+      {
+        clientState:'CLOSED', serverState:'LISTEN',
+        info:()=> buildInfo([
+          '初始状态',{t:'br'},'Client 处于 ',{t:'b',v:'CLOSED'},'，Server 已经 ',{t:'b',v:'LISTEN'},' 等待连接。',{t:'br'},{t:'br'},
+          'Server 调用 ',{t:'code',v:'listen()'},' 后进入 LISTEN 状态，等待 Client 的 SYN 报文。'
+        ]),
+        packets:[], cwnd:1, ssthresh:16, rwnd:32
+      },
+      {
+        clientState:'SYN_SENT', serverState:'LISTEN',
+        info:()=> buildInfo([
+          {t:'b',v:'第 1 次握手'},' — Client → Server',{t:'br'},
+          {t:'tag',cls:'syn',v:'SYN'},' seq=0',{t:'br'},{t:'br'},
+          'Client 调用 ',{t:'code',v:'connect()'},'，发送 SYN 报文：',{t:'br'},
+          '• SYN 标志位置 1',{t:'br'},
+          '• seq = 0（初始序号 ISN）',{t:'br'},
+          '• Client 进入 ',{t:'b',v:'SYN_SENT'},{t:'br'},{t:'br'},
+          'ISN 不是从 0 开始，实际是随机生成的（防攻击），这里简化为 0。'
+        ]),
+        packets:[{dir:'c2s', label:'SYN', detail:'seq=0', type:'syn'}], cwnd:1, ssthresh:16, rwnd:32
+      },
+      {
+        clientState:'SYN_SENT', serverState:'SYN_RCVD',
+        info:()=> buildInfo([
+          {t:'b',v:'第 2 次握手'},' — Server → Client',{t:'br'},
+          {t:'tag',cls:'syn',v:'SYN'},{t:'tag',cls:'ack',v:'ACK'},' seq=0, ack=1',{t:'br'},{t:'br'},
+          'Server 收到 SYN，回复 SYN+ACK：',{t:'br'},
+          '• SYN 和 ACK 标志位同时置 1',{t:'br'},
+          '• seq = 0（Server 的 ISN）',{t:'br'},
+          '• ack = 1 = Client seq + 1（确认收到）',{t:'br'},
+          '• Server 进入 ',{t:'b',v:'SYN_RCVD'},{t:'br'},{t:'br'},
+          '为什么合并？Server 还没数据要发，合并节省一个 RTT。'
+        ]),
+        packets:[{dir:'s2c', label:'SYN+ACK', detail:'seq=0, ack=1', type:'synack'}], cwnd:1, ssthresh:16, rwnd:32
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'SYN_RCVD',
+        info:()=> buildInfo([
+          {t:'b',v:'第 3 次握手'},' — Client → Server',{t:'br'},
+          {t:'tag',cls:'ack',v:'ACK'},' seq=1, ack=1',{t:'br'},{t:'br'},
+          'Client 收到 SYN+ACK，发送 ACK：',{t:'br'},
+          '• ACK 标志位置 1',{t:'br'},
+          '• seq = 1（上次的 seq+1）',{t:'br'},
+          '• ack = 1（确认 Server 的 SYN）',{t:'br'},
+          '• Client 进入 ',{t:'b',v:'ESTABLISHED'},{t:'br'},{t:'br'},
+          'Client 此时已经可以发数据了（半连接）。'
+        ]),
+        packets:[{dir:'c2s', label:'ACK', detail:'seq=1, ack=1', type:'ack'}], cwnd:1, ssthresh:16, rwnd:32
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'连接建立完成'},{t:'br'},{t:'br'},
+          'Server 收到 ACK 后也进入 ',{t:'b',v:'ESTABLISHED'},'，双方可以开始数据通信。',{t:'br'},{t:'br'},
+          '面试追问：为什么是三次不是两次？',{t:'br'},
+          '→ 防止',{t:'b',v:'历史重复 SYN'},'：如果只有两次握手，一个延迟的旧 SYN 到达 Server，Server 会直接建立连接浪费资源。三次握手让 Client 有机会确认这个连接是不是自己要的。'
+        ]),
+        packets:[], cwnd:1, ssthresh:16, rwnd:32
+      }
+    ]
+  },
+
+  data: {
+    steps: [
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'慢开始（Slow Start）'},' — RTT 1',{t:'br'},
+          '发送 1 个 MSS，cwnd = 1',{t:'br'},{t:'br'},
+          '刚建立连接，不知道网络能承受多少流量，从 cwnd=1 开始。',{t:'br'},
+          '每收到一个 ACK，cwnd ',{t:'b',v:'指数增长'},'：1→2→4→8→16…',{t:'br'},{t:'br'},
+          '「慢开始」不是速度慢，而是',{t:'b',v:'起点低'},'，但增长很快。'
+        ]),
+        packets:[{dir:'c2s', label:'DATA', detail:'seq=1, len=1MSS', type:'data'}],
+        cwnd:1, ssthresh:16, rwnd:32, sent:1, acked:0
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'慢开始'},' — RTT 2',{t:'br'},
+          '收到 ACK → cwnd = 2，发送 2 个 MSS',{t:'br'},{t:'br'},
+          '1 个 ACK 到达，cwnd += 1 MSS（指数增长）',{t:'br'},
+          '现在可以发 2 个段了。'
+        ]),
+        packets:[
+          {dir:'s2c', label:'ACK', detail:'ack=2', type:'ack-only'},
+          {dir:'c2s', label:'DATA x2', detail:'seq=2,3 len=2MSS', type:'data'}
+        ],
+        cwnd:2, ssthresh:16, rwnd:32, sent:3, acked:1
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'慢开始'},' — RTT 3',{t:'br'},
+          '收到 2 个 ACK → cwnd = 4，发送 4 个 MSS',{t:'br'},{t:'br'},
+          '指数增长继续：2→4，现在可以一次发 4 个段。'
+        ]),
+        packets:[
+          {dir:'s2c', label:'ACK x2', detail:'ack=3,4', type:'ack-only'},
+          {dir:'c2s', label:'DATA x4', detail:'seq=4~7 len=4MSS', type:'data'}
+        ],
+        cwnd:4, ssthresh:16, rwnd:32, sent:7, acked:3
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'慢开始'},' — RTT 4',{t:'br'},
+          '收到 4 个 ACK → cwnd = 8，发送 8 个 MSS',{t:'br'},{t:'br'},
+          'cwnd 快速增长：4→8。即将到达 ssthresh=16。'
+        ]),
+        packets:[
+          {dir:'s2c', label:'ACK x4', detail:'ack=5~8', type:'ack-only'},
+          {dir:'c2s', label:'DATA x8', detail:'seq=8~15 len=8MSS', type:'data'}
+        ],
+        cwnd:8, ssthresh:16, rwnd:32, sent:15, acked:7
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'拥塞避免（Congestion Avoidance）'},' — RTT 5',{t:'br'},
+          'cwnd = 16 达到 ssthresh，切换到拥塞避免',{t:'br'},
+          '发送 16 个 MSS，但增长变慢',{t:'br'},{t:'br'},
+          'cwnd >= ssthresh 后，每个 RTT cwnd 只 ',{t:'b',v:'+1 MSS（线性增长）'},'，不再指数增长。',{t:'br'},
+          '这是为了温和地探测网络容量上限。'
+        ]),
+        packets:[
+          {dir:'s2c', label:'ACK x8', detail:'ack=9~16', type:'ack-only'},
+          {dir:'c2s', label:'DATA x16', detail:'seq=16~31 len=16MSS', type:'data'}
+        ],
+        cwnd:16, ssthresh:16, rwnd:32, sent:31, acked:15
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'拥塞避免'},' — RTT 6',{t:'br'},
+          '收到 16 个 ACK → cwnd = 17',{t:'br'},{t:'br'},
+          '线性增长：每收到一个 ACK，cwnd += 1/cwnd MSS。',{t:'br'},
+          '16 个 ACK 累加约 +1 MSS。慢但安全。'
+        ]),
+        packets:[
+          {dir:'s2c', label:'ACK x16', detail:'ack=17~32', type:'ack-only'},
+          {dir:'c2s', label:'DATA x17', detail:'seq=32~48 len=17MSS', type:'data'}
+        ],
+        cwnd:17, ssthresh:16, rwnd:32, sent:48, acked:31
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'丢包检测'},' — 3 个重复 ACK！',{t:'br'},
+          'seq=33 的包丢失，Server 连续收到后续包',{t:'br'},{t:'br'},
+          'Server 期望 ack=33，但收到 seq=34,35,36…',{t:'br'},
+          '每收到一个就发一次重复 ACK（ack=33）',{t:'br'},
+          '→ 3 个重复 ACK 触发',{t:'b',v:'快重传'},{t:'br'},{t:'br'},
+          '比 RTO 超时更快发现丢包！'
+        ]),
+        packets:[
+          {dir:'s2c', label:'DUP ACK x3', detail:'ack=33 (x3)', type:'ack-only'},
+        ],
+        cwnd:17, ssthresh:16, rwnd:32, sent:48, acked:31, loss:true
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'快重传 + 快恢复'},{t:'br'},
+          'ssthresh = cwnd/2 = 8，cwnd = ssthresh + 3 = 11',{t:'br'},
+          '立即重传丢失的 seq=33',{t:'br'},{t:'br'},
+          '快重传：不用等 RTO 超时，3 个重复 ACK 就重传',{t:'br'},
+          '快恢复：不回到慢开始（cwnd=1），而是设为 ssthresh+3',{t:'br'},
+          '→ +3 是因为已经收到 3 个重复 ACK，说明网络还能传数据',{t:'br'},{t:'br'},
+          '这是 Reno 算法的核心改进。'
+        ]),
+        packets:[
+          {dir:'c2s', label:'RETRANSMIT', detail:'seq=33 (重传)', type:'retransmit'},
+        ],
+        cwnd:11, ssthresh:8, rwnd:32, sent:48, acked:31
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'快恢复完成'},{t:'br'},
+          '收到重传 ACK → cwnd = ssthresh = 8',{t:'br'},
+          '回到拥塞避免阶段',{t:'br'},{t:'br'},
+          '恢复后 cwnd 设为 ssthresh，继续线性增长。',{t:'br'},
+          '没有回到慢开始 cwnd=1，所以叫「快恢复」。',{t:'br'},{t:'br'},
+          '对比：',{t:'br'},
+          '• 3 个重复 ACK → 快重传 + 快恢复（温和）',{t:'br'},
+          '• RTO 超时 → 慢开始 cwnd=1（激进）'
+        ]),
+        packets:[
+          {dir:'s2c', label:'ACK', detail:'ack=49 (恢复)', type:'ack-only'},
+        ],
+        cwnd:8, ssthresh:8, rwnd:32, sent:48, acked:48
+      },
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'继续拥塞避免'},{t:'br'},
+          'cwnd 从 8 开始线性增长',{t:'br'},{t:'br'},
+          '快恢复后网络恢复正常，继续缓慢探测。',{t:'br'},
+          '每个 RTT cwnd +1。',{t:'br'},{t:'br'},
+          '拥塞控制核心思想：',{t:'br'},
+          '• 增加带宽利用率（慢开始指数增长）',{t:'br'},
+          '• 避免拥塞（到 ssthresh 后线性增长）',{t:'br'},
+          '• 快速恢复（丢包不回到起点）'
+        ]),
+        packets:[
+          {dir:'c2s', label:'DATA x8', detail:'seq=49~56', type:'data'},
+          {dir:'s2c', label:'ACK', detail:'ack=57', type:'ack-only'},
+        ],
+        cwnd:9, ssthresh:8, rwnd:32, sent:56, acked:56
+      }
+    ]
+  },
+
+  wave: {
+    steps: [
+      {
+        clientState:'ESTABLISHED', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'数据传输完成'},{t:'br'},
+          '双方都处于 ESTABLISHED 状态。',{t:'br'},{t:'br'},
+          '现在 Client 主动发起断开连接（调用 ',{t:'code',v:'close()'},'）。',{t:'br'},{t:'br'},
+          '四次挥手可以由任一方发起，这里以 Client 主动断开为例。'
+        ]),
+        packets:[], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'FIN_WAIT_1', serverState:'ESTABLISHED',
+        info:()=> buildInfo([
+          {t:'b',v:'第 1 次挥手'},' — Client → Server',{t:'br'},
+          {t:'tag',cls:'fin',v:'FIN'},{t:'tag',cls:'ack',v:'ACK'},' seq=M, ack=N',{t:'br'},{t:'br'},
+          'Client 调用 close()，发送 FIN：',{t:'br'},
+          '• FIN 标志位置 1（我不再发数据了）',{t:'br'},
+          '• Client 进入 ',{t:'b',v:'FIN_WAIT_1'},{t:'br'},{t:'br'},
+          'FIN 只表示「我不发了」，不表示「我不收了」。半关闭状态下 Client 还可以收数据。'
+        ]),
+        packets:[{dir:'c2s', label:'FIN', detail:'seq=M', type:'fin'}], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'FIN_WAIT_1', serverState:'CLOSE_WAIT',
+        info:()=> buildInfo([
+          {t:'b',v:'第 2 次挥手'},' — Server → Client',{t:'br'},
+          {t:'tag',cls:'ack',v:'ACK'},' ack=M+1',{t:'br'},{t:'br'},
+          'Server 收到 FIN，回复 ACK：',{t:'br'},
+          '• 确认号 = M+1',{t:'br'},
+          '• Server 进入 ',{t:'b',v:'CLOSE_WAIT'},{t:'br'},{t:'br'},
+          '此时 Server 还可以继续发数据（半关闭状态）。',{t:'br'},
+          '如果 Server 有数据要发，可以继续发完再关闭。'
+        ]),
+        packets:[{dir:'s2c', label:'ACK', detail:'ack=M+1', type:'ack'}], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'FIN_WAIT_2', serverState:'CLOSE_WAIT',
+        info:()=> buildInfo([
+          {t:'b',v:'Client 进入 FIN_WAIT_2'},{t:'br'},{t:'br'},
+          'Client 收到 ACK 后进入 ',{t:'b',v:'FIN_WAIT_2'},'，等待 Server 的 FIN。',{t:'br'},{t:'br'},
+          '此时 Client 已经不能发数据，但还能收。',{t:'br'},
+          'Server 在 CLOSE_WAIT 状态，可能还在处理最后的逻辑、发送剩余数据。',{t:'br'},{t:'br'},
+          '大量 CLOSE_WAIT 说明 Server 没有正确调用 close()，是代码 bug。'
+        ]),
+        packets:[], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'FIN_WAIT_2', serverState:'LAST_ACK',
+        info:()=> buildInfo([
+          {t:'b',v:'第 3 次挥手'},' — Server → Client',{t:'br'},
+          {t:'tag',cls:'fin',v:'FIN'},{t:'tag',cls:'ack',v:'ACK'},' seq=N, ack=M+1',{t:'br'},{t:'br'},
+          'Server 也调用了 close()，发送 FIN：',{t:'br'},
+          '• Server 也关闭发送方向',{t:'br'},
+          '• Server 进入 ',{t:'b',v:'LAST_ACK'},'（等待最后的 ACK）',{t:'br'},{t:'br'},
+          '为什么不能像三次握手那样合并？',{t:'br'},
+          '→ 第 2 次挥手的 ACK 和第 3 次挥手的 FIN 之间，Server 可能还有数据要发！'
+        ]),
+        packets:[{dir:'s2c', label:'FIN', detail:'seq=N', type:'fin'}], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'TIME_WAIT', serverState:'LAST_ACK',
+        info:()=> buildInfo([
+          {t:'b',v:'第 4 次挥手'},' — Client → Server',{t:'br'},
+          {t:'tag',cls:'ack',v:'ACK'},' ack=N+1',{t:'br'},{t:'br'},
+          'Client 收到 FIN，发送最后的 ACK：',{t:'br'},
+          '• Client 进入 ',{t:'b',v:'TIME_WAIT'},'（不是直接 CLOSED！）',{t:'br'},
+          '• Server 收到后进入 CLOSED',{t:'br'},{t:'br'},
+          'TIME_WAIT 要等 2MSL（最长报文段寿命，约 60 秒）才关闭。'
+        ]),
+        packets:[{dir:'c2s', label:'ACK', detail:'ack=N+1', type:'ack'}], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'TIME_WAIT', serverState:'CLOSED',
+        info:()=> buildInfo([
+          {t:'b',v:'Server 已关闭'},{t:'br'},{t:'br'},
+          'Server 收到最后的 ACK，进入 ',{t:'b',v:'CLOSED'},'，释放资源。',{t:'br'},
+          'Client 还在 TIME_WAIT 状态等待。',{t:'br'},{t:'br'},
+          '为什么需要 TIME_WAIT？',{t:'br'},
+          '1. 确保最后的 ACK 能到达 Server（如果丢了，Server 会重发 FIN，Client 可以重发 ACK）',{t:'br'},
+          '2. 让本连接的所有延迟报文在网络中消失，避免新连接收到旧数据'
+        ]),
+        packets:[], cwnd:9, ssthresh:8, rwnd:32
+      },
+      {
+        clientState:'CLOSED', serverState:'CLOSED',
+        info:()=> buildInfo([
+          {t:'b',v:'连接完全关闭'},{t:'br'},{t:'br'},
+          'TIME_WAIT 等待 2MSL 后，Client 进入 CLOSED。',{t:'br'},{t:'br'},
+          '面试常考：',{t:'br'},
+          '• TIME_WAIT 过多？→ 调 ',{t:'code',v:'tcp_tw_reuse'},'、',{t:'code',v:'tcp_max_tw_buckets'},'、短连接改长连接',{t:'br'},
+          '• CLOSE_WAIT 过多？→ 代码 bug，没有正确 close()',{t:'br'},
+          '• 2MSL 多长？→ Linux 默认 60 秒（',{t:'code',v:'tcp_fin_timeout'},' 可调）',{t:'br'},
+          '• 为什么是 2MSL？→ 1 个 MSL 保证 ACK 到达 + 1 个 MSL 保证重传 FIN 消失'
+        ]),
+        packets:[], cwnd:9, ssthresh:8, rwnd:32
+      }
+    ]
+  }
+};
+
+// ============================================================
+//  State
+// ============================================================
+let currentPhase = 'handshake';
+let currentStep = 0;
+let isPlaying = false;
+let playTimer = null;
+let cwndHistory = [];
+
+const speedMs = [2000, 1500, 1000, 600, 350];
+
+// ============================================================
+//  DOM refs
+// ============================================================
+const $lane = document.getElementById('lane');
+const $clientState = document.getElementById('clientState');
+const $serverState = document.getElementById('serverState');
+const $stClient = document.getElementById('stClient');
+const $stServer = document.getElementById('stServer');
+const $stepCounter = document.getElementById('stepCounter');
+const $cwndCanvas = document.getElementById('cwndCanvas');
+const $windowViz = document.getElementById('windowViz');
+const $infoCwnd = document.getElementById('infoCwnd');
+const $infoSsthresh = document.getElementById('infoSsthresh');
+const $infoRwnd = document.getElementById('infoRwnd');
+const $infoSendWin = document.getElementById('infoSendWin');
+const ctx = $cwndCanvas.getContext('2d');
+
+// ============================================================
+//  Phase switching
+// ============================================================
+document.querySelectorAll('.phase-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    if (isPlaying) stopPlay();
+    document.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentPhase = tab.dataset.phase;
+    currentStep = 0;
+    clearPackets();
+    cwndHistory = [];
+    renderStep();
+  });
+});
+
+// ============================================================
+//  Controls
+// ============================================================
+document.getElementById('btnStep').addEventListener('click', () => {
+  if (isPlaying) stopPlay();
+  advanceStep();
+});
+
+document.getElementById('btnPlay').addEventListener('click', () => {
+  if (isPlaying) { stopPlay(); return; }
+  isPlaying = true;
+  document.getElementById('btnPlay').textContent = '⏸ 暂停';
+  document.getElementById('btnPlay').classList.add('active');
+  autoAdvance();
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (isPlaying) stopPlay();
+  currentStep = 0;
+  clearPackets();
+  cwndHistory = [];
+  renderStep();
+});
+
+const $speedSlider = document.getElementById('speedSlider');
+const $speedLabel = document.getElementById('speedLabel');
+$speedSlider.addEventListener('input', () => {
+  const labels = ['0.5x','0.75x','1x','1.5x','2x'];
+  $speedLabel.textContent = labels[$speedSlider.value - 1];
+});
+
+function autoAdvance() {
+  if (!isPlaying) return;
+  const phase = PHASES[currentPhase];
+  if (currentStep >= phase.steps.length - 1) { stopPlay(); return; }
+  advanceStep();
+  playTimer = setTimeout(autoAdvance, speedMs[$speedSlider.value - 1]);
+}
+
+function stopPlay() {
+  isPlaying = false;
+  clearTimeout(playTimer);
+  document.getElementById('btnPlay').textContent = '▶ 自动播放';
+  document.getElementById('btnPlay').classList.remove('active');
+}
+
+function advanceStep() {
+  const phase = PHASES[currentPhase];
+  if (currentStep < phase.steps.length - 1) {
+    currentStep++;
+    renderStep();
+  }
+}
+
+// ============================================================
+//  Rendering
+// ============================================================
+function renderStep() {
+  const phase = PHASES[currentPhase];
+  const step = phase.steps[currentStep];
+
+  // States
+  $clientState.textContent = step.clientState;
+  $serverState.textContent = step.serverState;
+  $stClient.textContent = step.clientState;
+  $stServer.textContent = step.serverState;
+
+  // Info (call builder function)
+  step.info();
+
+  // Step counter
+  $stepCounter.textContent = '步骤 ' + (currentStep + 1) + ' / ' + phase.steps.length;
+
+  // Packets
+  renderPackets(step.packets);
+
+  // Window info
+  $infoCwnd.textContent = step.cwnd;
+  $infoSsthresh.textContent = step.ssthresh;
+  $infoRwnd.textContent = step.rwnd;
+  const sendWin = Math.min(step.cwnd, step.rwnd);
+  $infoSendWin.textContent = sendWin;
+  renderWindow(step);
+
+  // CWND graph
+  cwndHistory.push({ cwnd: step.cwnd, ssthresh: step.ssthresh, rwnd: step.rwnd });
+  drawCwndGraph();
+}
+
+// ============================================================
+//  Packet animation
+// ============================================================
+function clearPackets() {
+  document.querySelectorAll('.packet').forEach(el => el.remove());
+  document.querySelectorAll('.tl-label').forEach(el => el.remove());
+}
+
+function renderPackets(packets) {
+  clearPackets();
+
+  const laneH = 420;
+  const stepCount = PHASES[currentPhase].steps.length;
+  const yStep = laneH / (stepCount + 1);
+  const baseY = yStep * currentStep;
+
+  packets.forEach((pkt, i) => {
+    const el = document.createElement('div');
+    el.className = 'packet';
+
+    if (pkt.type === 'retransmit') el.classList.add('retransmit');
+    else if (pkt.type === 'ack-only') el.classList.add('ack-only');
+    else if (pkt.dir === 'c2s') el.classList.add('client-to-server');
+    else el.classList.add('server-to-client');
+
+    const arrow = pkt.dir === 'c2s' ? '→' : '←';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.style.fontWeight = '700';
+    labelSpan.textContent = pkt.label;
+
+    const detailSpan = document.createElement('span');
+    detailSpan.style.fontSize = '10px';
+    detailSpan.style.opacity = '0.7';
+    detailSpan.textContent = pkt.detail;
+
+    const arrowSpan = document.createElement('span');
+    arrowSpan.className = 'arrow';
+    arrowSpan.textContent = arrow;
+
+    el.appendChild(labelSpan);
+    el.appendChild(detailSpan);
+    el.appendChild(arrowSpan);
+
+    const isC2S = pkt.dir === 'c2s';
+    const startX = isC2S ? '5%' : '95%';
+    const endX = isC2S ? '95%' : '5%';
+    const yPx = baseY + i * 30;
+
+    el.style.top = yPx + 'px';
+    el.style.left = startX;
+    el.style.transform = 'translateX(-50%)';
+    el.style.opacity = '0';
+
+    $lane.appendChild(el);
+
+    // Animate
+    requestAnimationFrame(() => {
+      el.classList.add('animating');
+      el.style.transition = 'left 0.6s cubic-bezier(0.4,0,0.2,1), opacity 0.3s';
+      el.style.opacity = '1';
+      el.style.left = endX;
+    });
+
+    // Timeline label
+    const label = document.createElement('div');
+    label.className = 'tl-label';
+    label.style.top = (yPx - 14) + 'px';
+    label.style.color = pkt.dir === 'c2s' ? 'var(--accent)' : 'var(--green)';
+    label.style.fontSize = '9px';
+    if (isC2S) {
+      label.style.left = '2px';
+      label.style.transform = 'none';
+      label.style.textAlign = 'left';
+    } else {
+      label.style.right = '2px';
+      label.style.left = 'auto';
+      label.style.transform = 'none';
+      label.style.textAlign = 'right';
+    }
+    label.textContent = pkt.label;
+    $lane.appendChild(label);
+  });
+}
+
+// ============================================================
+//  Sliding window visualization
+// ============================================================
+function renderWindow(step) {
+  $windowViz.textContent = '';
+
+  const cwnd = step.cwnd || 1;
+  const rwnd = step.rwnd || 32;
+  const sendWin = Math.min(cwnd, rwnd);
+  const acked = step.acked || 0;
+  const sent = step.sent || 0;
+
+  const totalSegs = 32;
+  const start = Math.max(0, acked);
+  const end = Math.min(totalSegs, Math.max(sent, acked + sendWin + 4));
+  const count = end - start;
+
+  for (let i = start; i < end; i++) {
+    const seg = document.createElement('div');
+    seg.className = 'window-seg';
+    const pct = 100 / count;
+    seg.style.left = ((i - start) / count * 100) + '%';
+    seg.style.width = pct + '%';
+
+    if (i < acked) {
+      seg.classList.add('seg-acked');
+      seg.textContent = '✓';
+    } else if (i < sent) {
+      seg.classList.add('seg-sent');
+      seg.textContent = i + 1;
+    } else {
+      seg.classList.add('seg-unsent');
+      seg.textContent = i + 1;
+    }
+
+    $windowViz.appendChild(seg);
+  }
+
+  // Window bracket
+  const winStart = acked;
+  const winEnd = acked + sendWin;
+  const bracket = document.createElement('div');
+  bracket.style.cssText = 'position:absolute;top:0;height:100%;border:2px solid var(--accent);border-radius:4px;pointer-events:none;z-index:5;transition:all .4s';
+  bracket.style.left = ((winStart - start) / count * 100) + '%';
+  bracket.style.width = ((winEnd - winStart) / count * 100) + '%';
+  $windowViz.appendChild(bracket);
+}
+
+// ============================================================
+//  Congestion window graph
+// ============================================================
+function drawCwndGraph() {
+  const W = $cwndCanvas.width;
+  const H = $cwndCanvas.height;
+  const pad = { t: 15, r: 10, b: 22, l: 30 };
+
+  ctx.clearRect(0, 0, W, H);
+  if (cwndHistory.length === 0) return;
+
+  const maxVal = Math.max(32, ...cwndHistory.map(h => Math.max(h.cwnd, h.rwnd)));
+  const n = cwndHistory.length;
+  const plotW = W - pad.l - pad.r;
+  const plotH = H - pad.t - pad.b;
+
+  function x(i) { return pad.l + (i / Math.max(1, n - 1)) * plotW; }
+  function y(v) { return pad.t + plotH - (v / maxVal) * plotH; }
+
+  // Grid
+  ctx.strokeStyle = 'rgba(148,163,184,0.1)';
+  ctx.lineWidth = 0.5;
+  for (let v = 0; v <= maxVal; v += 8) {
+    ctx.beginPath(); ctx.moveTo(pad.l, y(v)); ctx.lineTo(W - pad.r, y(v)); ctx.stroke();
+  }
+
+  // rwnd
+  ctx.strokeStyle = 'rgba(192,132,252,0.4)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  cwndHistory.forEach((h, i) => { i === 0 ? ctx.moveTo(x(i), y(h.rwnd)) : ctx.lineTo(x(i), y(h.rwnd)); });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ssthresh
+  ctx.strokeStyle = 'rgba(251,146,60,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 3]);
+  ctx.beginPath();
+  cwndHistory.forEach((h, i) => { i === 0 ? ctx.moveTo(x(i), y(h.ssthresh)) : ctx.lineTo(x(i), y(h.ssthresh)); });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // cwnd
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  cwndHistory.forEach((h, i) => { i === 0 ? ctx.moveTo(x(i), y(h.cwnd)) : ctx.lineTo(x(i), y(h.cwnd)); });
+  ctx.stroke();
+
+  // Dots
+  cwndHistory.forEach((h, i) => {
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath();
+    ctx.arc(x(i), y(h.cwnd), 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Axes
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'right';
+  for (let v = 0; v <= maxVal; v += 8) {
+    ctx.fillText(v, pad.l - 4, y(v) + 3);
+  }
+  ctx.textAlign = 'center';
+  ctx.fillText('RTT', W / 2, H - 3);
+}
+
+// ============================================================
+//  Init
+// ============================================================
+renderStep();
+</script>
+</body>
+</html>
