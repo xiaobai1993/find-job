@@ -782,3 +782,62 @@ m.Store("new-key", "value")  // 可能耗时！
 ## 八、一句话总结
 
 > **sync.Map 用空间换时间，通过 read+dirty 双 map 设计实现读无锁，适合读多写少、key 稳定的场景。Go 1.24 升级为 HashTrieMap，细粒度锁消除写竞争，无预热期，key 可被 GC 回收。写多读少、key 频繁增删的场景用 map + RWMutex 更好。**
+
+---
+
+## 九、记忆口诀：一锁·两表·三态·四提升·五操作
+
+> 🎯 动态可视化练习：打开 `sync-map-visual.html` 交互操作加深印象
+
+### 1. 数字口诀
+
+| 数字 | 关键词 | 记忆 |
+|------|--------|------|
+| **一锁** | `Mutex` | 只保护 dirty 的写入，已有 key 更新不走这把锁 |
+| **两表** | `read` + `dirty` | read 前台无锁查，dirty 后台加锁写，共享 `*entry` 指针 |
+| **三态** | `valid` / `nil` / `expunged` | 在岗/休假/离职（详见下方类比） |
+| **四提升** | `misses >= len(dirty)` | 投诉太多，把仓库搬前台 |
+| **五操作** | Load/Store/Delete/Range/LoadOrStore | 核心操作流程 |
+
+### 2. 超市类比法
+
+| sync.Map 概念 | 超市类比 | 解释 |
+|---------------|---------|------|
+| **read** | 前台货架 | 顾客自由挑选，无需排队（无锁） |
+| **dirty** | 后台仓库 | 新货先入库，店员（Mutex）才能进出 |
+| **misses** | 投诉次数 | 顾客在前台找不到东西，每次 +1 |
+| **提升** | 搬仓 | 投诉太多，把仓库全搬前台 |
+| **entry 指针共享** | 价格标签 | 前台仓库共享标签，改一处自动同步 |
+| **valid** | 🟢 在岗 | 人在工位，随时可找 |
+| **nil** | 🟡 休假 | 人不在但工位还在，CAS 可随时激活 |
+| **expunged** | 🔴 离职 | 人走了工位也撤了，回来要走流程（加锁） |
+
+### 3. 操作流程口诀
+
+**Load：** "先查前台再后台，后台找多了就搬前台"
+
+```
+read 查 → 没找到? amended? → 加锁 → 查 dirty → miss 满了? → 提升!
+```
+
+**Store：** "老客户无锁改，新客户加锁存后台"
+
+```
+read 有? → CAS 更新(无锁!)    |    read 没有? → 加锁 → dirty 有?更新 : 新key写dirty
+```
+
+**Delete：** "前台有就标记走，前台没有去后台真删"
+
+```
+read 有? → CAS 置 nil(软删除,无锁)  |  read 没有? → 加锁 → 从 dirty 硬删除
+```
+
+**三态转换：** "在岗无锁找，休假 CAS 回，离职加锁办"
+
+```
+valid ←→ valid (Store CAS)
+valid → nil (Delete CAS)
+nil → valid (Store CAS 激活)
+nil → expunged (dirty 重建时标记)
+expunged → valid (加锁: unexpunge + 加回 dirty + CAS)
+```
