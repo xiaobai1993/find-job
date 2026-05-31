@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gopark vs entersyscall 动态可视化</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.container{max-width:1280px;margin:0 auto;padding:20px}
+
+.hdr{text-align:center;margin-bottom:18px}
+.hdr h1{font-size:26px;font-weight:800;background:linear-gradient(135deg,#fbbf24,#f87171,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr p{color:#64748b;font-size:13px;margin-top:4px}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;margin-bottom:16px;background:#1e293b;border-radius:10px;padding:4px}
+.tab{flex:1;padding:10px 6px;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;transition:all .25s;background:transparent;color:#64748b}
+.tab.active{color:white}
+.tab.active.t0{background:linear-gradient(135deg,#f59e0b,#d97706)}
+.tab.active.t1{background:linear-gradient(135deg,#ef4444,#dc2626)}
+.tab.active.t2{background:linear-gradient(135deg,#8b5cf6,#6d28d9)}
+.panel{display:none}.panel.active{display:block}
+
+.card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:20px;margin-bottom:16px}
+.card-title{font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+
+/* Controls */
+.ctrl-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.btn{padding:8px 18px;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+.btn-play{background:linear-gradient(135deg,#10b981,#059669);color:white}
+.btn-step{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+.btn-reset{background:#334155;color:#94a3b8}
+
+/* Narration */
+.narr{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px 18px;min-height:50px;margin-bottom:14px;font-size:13px;line-height:1.8;color:#e2e8f0;transition:all .3s}
+.narr.highlight-wait{border-color:rgba(245,158,11,.4);box-shadow:0 0 16px rgba(245,158,11,.1)}
+.narr.highlight-sys{border-color:rgba(239,68,68,.4);box-shadow:0 0 16px rgba(239,68,68,.1)}
+.narr .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;margin-right:4px}
+.narr .tag.w{background:#92400e;color:#fcd34d}
+.narr .tag.s{background:#7f1d1d;color:#fca5a5}
+.narr .tag.ok{background:#065f46;color:#6ee7b7}
+.narr .key{color:#fbbf24;font-weight:700}
+.narr .code{background:#0f172a;padding:1px 5px;border-radius:3px;font-family:'SF Mono',monospace;font-size:11px;color:#93c5fd}
+
+/* Canvas */
+.canvas{background:#0d1117;border:1px solid #21262d;border-radius:14px;padding:20px;min-height:420px;position:relative;margin-bottom:16px}
+
+/* P row */
+.p-row{display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;padding:14px;background:rgba(234,88,12,.04);border:1px solid rgba(234,88,12,.15);border-radius:10px;position:relative}
+.p-label{font-size:12px;font-weight:700;color:#fb923c;min-width:24px;padding-top:4px}
+
+/* M block */
+.m-block{width:60px;height:60px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0;transition:all .5s;position:relative}
+.m-block.running{background:linear-gradient(135deg,#7c3aed,#6d28d9);border:2px solid #a78bfa}
+.m-block.blocked{background:#450a0a;border:2px solid #dc2626;animation:blockPulse 2s infinite}
+.m-block.idle{background:#1e293b;border:2px dashed #475569;color:#64748b}
+.m-block small{font-size:9px;font-weight:400;color:inherit;opacity:.7}
+.m-state{position:absolute;bottom:-16px;font-size:9px;font-weight:600;white-space:nowrap;color:#94a3b8}
+@keyframes blockPulse{0%,100%{box-shadow:0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 14px rgba(239,68,68,.4)}}
+
+/* P block */
+.p-block{width:60px;height:60px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0;transition:all .5s;position:relative}
+.p-block.running{background:linear-gradient(135deg,#ea580c,#c2410c);border:2px solid #fb923c}
+.p-block.psyscall{background:#4c1d95;border:2px solid #8b5cf6;animation:sysPulse 2s infinite}
+.p-block.idle{background:#1e293b;border:2px dashed #475569;color:#64748b}
+.p-block small{font-size:9px;font-weight:400;color:inherit;opacity:.7}
+.p-state{position:absolute;bottom:-16px;font-size:9px;font-weight:600;white-space:nowrap;color:#94a3b8}
+@keyframes sysPulse{0%,100%{box-shadow:0 0 0 rgba(139,92,246,0)}50%{box-shadow:0 0 14px rgba(139,92,246,.3)}}
+
+.bind{width:16px;height:2px;background:#475569;flex-shrink:0;margin-top:28px}
+.bind.on{background:#6366f1}
+
+/* Queue area */
+.queue-area{flex:1;display:flex;flex-direction:column;gap:6px;min-height:60px}
+.queue-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.queue-label{font-size:10px;color:#64748b;font-weight:600;min-width:70px}
+
+/* G item */
+.g{width:44px;height:44px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;font-weight:800;transition:all .4s;position:relative;cursor:default}
+.g .gn{font-size:11px}
+.g .gs{font-size:7px;opacity:.8}
+.g.runnable{background:#065f46;color:#6ee7b7;border:1.5px solid #10b981}
+.g.running{background:#7c2d12;color:#fdba74;border:1.5px solid #f97316;animation:runPulse 1.2s infinite}
+.g.waiting{background:#92400e;color:#fcd34d;border:1.5px solid #f59e0b;opacity:.8}
+.g.syscall{background:#4c1d95;color:#c4b5fd;border:1.5px solid #8b5cf6;animation:sysG 1.5s infinite}
+@keyframes runPulse{0%,100%{transform:scale(1);box-shadow:0 0 0 rgba(249,115,22,0)}50%{transform:scale(1.08);box-shadow:0 0 10px rgba(249,115,22,.3)}}
+@keyframes sysG{0%,100%{opacity:.6}50%{opacity:1}}
+@keyframes gMove{0%{opacity:0;transform:translateY(-10px) scale(.8)}100%{opacity:1;transform:translateY(0) scale(1)}}
+.g.anim-in{animation:gMove .4s ease}
+
+/* Data structure box (channel / mutex / timer) */
+.ds-box{margin-top:12px;border-radius:10px;padding:14px;transition:all .4s;position:relative;overflow:hidden}
+.ds-box.channel-ds{background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.2)}
+.ds-box.mutex-ds{background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.2)}
+.ds-box.timer-ds{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2)}
+.ds-box.active{animation:dsGlow 1s ease}
+.ds-box.channel-ds.active{border-color:rgba(56,189,248,.6);box-shadow:0 0 20px rgba(56,189,248,.15)}
+.ds-box.mutex-ds.active{border-color:rgba(167,139,250,.6);box-shadow:0 0 20px rgba(167,139,250,.15)}
+.ds-box.timer-ds.active{border-color:rgba(16,185,129,.6);box-shadow:0 0 20px rgba(16,185,129,.15)}
+@keyframes dsGlow{0%{transform:scale(1)}50%{transform:scale(1.01)}100%{transform:scale(1)}}
+.ds-title{font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.ds-waiters{display:flex;gap:6px;flex-wrap:wrap;min-height:40px;align-items:center;padding:8px;background:rgba(0,0,0,.2);border-radius:6px}
+.ds-waiters:empty::after{content:'等待队列为空';color:#475569;font-size:11px}
+.ds-arrow{position:absolute;top:-20px;left:50%;transform:translateX(-50%);font-size:14px;color:#64748b;opacity:0;transition:opacity .4s}
+.ds-arrow.show{opacity:1}
+
+/* Orphan M area (syscall) */
+.orphan-area{margin-top:10px;padding:12px;background:rgba(239,68,68,.04);border:1px dashed rgba(239,68,68,.3);border-radius:10px;min-height:0;max-height:0;overflow:hidden;transition:all .5s}
+.orphan-area.visible{min-height:70px;max-height:120px;padding:12px}
+.orphan-label{font-size:10px;color:#f87171;font-weight:600;margin-bottom:6px}
+.orphan-content{display:flex;align-items:center;gap:10px}
+
+/* Kernel box (syscall) */
+.kernel-box{margin-top:10px;background:rgba(239,68,68,.04);border:1px solid rgba(239,68,68,.15);border-radius:10px;padding:14px;min-height:0;max-height:0;overflow:hidden;transition:all .5s}
+.kernel-box.visible{min-height:70px;max-height:120px;padding:14px}
+.kernel-label{font-size:11px;color:#f87171;font-weight:700;margin-bottom:6px}
+.kernel-content{display:flex;align-items:center;gap:10px;font-size:12px;color:#fca5a5}
+
+/* Compare table (panel 2) */
+.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.cmp-col{border-radius:12px;padding:18px}
+.cmp-col.wait-col{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2)}
+.cmp-col.sys-col{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2)}
+.cmp-title{font-size:14px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.cmp-col.wait-col .cmp-title{color:#fcd34d}
+.cmp-col.sys-col .cmp-title{color:#fca5a5}
+.cmp-row{display:flex;gap:8px;font-size:12px;line-height:1.8;margin-bottom:4px}
+.cmp-key{color:#94a3b8;min-width:90px;flex-shrink:0}
+.cmp-val{color:#e2e8f0}
+
+/* All gopark scenarios (panel 2) */
+.scenario-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.scenario-card{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px;transition:all .3s;cursor:default}
+.scenario-card:hover{border-color:#6366f1;transform:translateY(-2px)}
+.sc-card-icon{font-size:20px;margin-bottom:6px}
+.sc-card-title{font-size:13px;font-weight:700;margin-bottom:6px;color:#e2e8f0}
+.sc-card-adopt{font-size:11px;color:#93c5fd;margin-bottom:4px}
+.sc-card-wake{font-size:11px;color:#6ee7b7}
+
+/* Log */
+.log-box{background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:12px;max-height:160px;overflow-y:auto;font-family:'SF Mono','Fira Code',monospace;font-size:11px;line-height:1.6}
+.log-box::-webkit-scrollbar{width:3px}
+.log-box::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
+.ll{padding:1px 0}.ll .ts{color:#475569;margin-right:6px}
+.ll.lw{color:#fcd34d}.ll.ls{color:#f87171}.ll.lo{color:#6ee7b7}.ll.li{color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="hdr">
+  <h1>gopark vs entersyscall 动态可视化</h1>
+  <p>G 阻塞的两种方式：被数据结构收养 vs 跟 M 一起进内核</p>
+</div>
+
+<div class="tabs">
+  <button class="tab active t0" onclick="switchP(0)">gopark 动画</button>
+  <button class="tab t1" onclick="switchP(1)">entersyscall 动画</button>
+  <button class="tab t2" onclick="switchP(2)">对比总览</button>
+</div>
+
+<!-- Panel 0: gopark -->
+<div class="panel active" id="p0">
+  <div class="ctrl-bar">
+    <button class="btn btn-play" id="goparkAuto" onclick="goparkAutoPlay()">自动演示</button>
+    <button class="btn btn-step" onclick="goparkStep()">下一步</button>
+    <button class="btn btn-reset" onclick="goparkReset()">重置</button>
+    <select id="goparkType" style="padding:8px 12px;border:1px solid #475569;border-radius:7px;background:#1e293b;color:#e2e8f0;font-size:12px" onchange="goparkReset()">
+      <option value="channel">channel 阻塞</option>
+      <option value="mutex">Mutex 竞争</option>
+      <option value="timer">time.Sleep</option>
+    </select>
+    <span style="margin-left:auto;font-size:12px;color:#64748b" id="goparkStepN">步骤 0/0</span>
+  </div>
+  <div class="narr" id="goparkNarr">选择阻塞类型后点击「自动演示」，观看 G 被 gopark 后离开运行队列、被数据结构收养、最终被 goready 唤醒的全过程。</div>
+  <div class="canvas" id="goparkCanvas"></div>
+  <div class="log-box" id="goparkLog"></div>
+</div>
+
+<!-- Panel 1: entersyscall -->
+<div class="panel" id="p1">
+  <div class="ctrl-bar">
+    <button class="btn btn-play" id="sysAuto" onclick="sysAutoPlay()">自动演示</button>
+    <button class="btn btn-step" onclick="sysStepFwd()">下一步</button>
+    <button class="btn btn-reset" onclick="sysReset()">重置</button>
+    <select id="sysOutcome" style="padding:8px 12px;border:1px solid #475569;border-radius:7px;background:#1e293b;color:#e2e8f0;font-size:12px" onchange="sysReset()">
+      <option value="idleP">结局A：有空闲P</option>
+      <option value="noIdleP">结局B：无空闲P</option>
+    </select>
+    <span style="margin-left:auto;font-size:12px;color:#64748b" id="sysStepN">步骤 0/0</span>
+  </div>
+  <div class="narr" id="sysNarr">点击「自动演示」观看 G 执行阻塞系统调用 entersyscall → sysmon retake → handoffp → exitsyscall 全流程。</div>
+  <div class="canvas" id="sysCanvas"></div>
+  <div class="log-box" id="sysLog"></div>
+</div>
+
+<!-- Panel 2: Compare -->
+<div class="panel" id="p2">
+  <div class="card">
+    <div class="card-title">gopark vs entersyscall 核心对比</div>
+    <div class="cmp-grid">
+      <div class="cmp-col wait-col">
+        <div class="cmp-title">gopark() — _Gwaiting</div>
+        <div class="cmp-row"><span class="cmp-key">谁阻塞</span><span class="cmp-val">只有 G 阻塞</span></div>
+        <div class="cmp-row"><span class="cmp-key">M 状态</span><span class="cmp-val">释放，切 g0 继续调度</span></div>
+        <div class="cmp-row"><span class="cmp-key">P 状态</span><span class="cmp-val">_Prunning 不受影响</span></div>
+        <div class="cmp-row"><span class="cmp-key">G 在哪</span><span class="cmp-val">被数据结构收养（channel/Mutex/timer）</span></div>
+        <div class="cmp-row"><span class="cmp-key">谁唤醒</span><span class="cmp-val">收养结构调 goready()</span></div>
+        <div class="cmp-row"><span class="cmp-key">回到队列</span><span class="cmp-val">头部（next=true）优先执行</span></div>
+        <div class="cmp-row"><span class="cmp-key">sysmon</span><span class="cmp-val">不介入</span></div>
+        <div class="cmp-row"><span class="cmp-key">典型场景</span><span class="cmp-val">channel、Mutex、Sleep、WaitGroup、网络IO</span></div>
+      </div>
+      <div class="cmp-col sys-col">
+        <div class="cmp-title">entersyscall() — _Gsyscall</div>
+        <div class="cmp-row"><span class="cmp-key">谁阻塞</span><span class="cmp-val">G 和 M 一起进内核阻塞</span></div>
+        <div class="cmp-row"><span class="cmp-key">M 状态</span><span class="cmp-val">跟着 G 一起阻塞在内核态</span></div>
+        <div class="cmp-row"><span class="cmp-key">P 状态</span><span class="cmp-val">_Psyscall，可能被 sysmon 抢走</span></div>
+        <div class="cmp-row"><span class="cmp-key">G 在哪</span><span class="cmp-val">跟着阻塞的 M，不在任何队列</span></div>
+        <div class="cmp-row"><span class="cmp-key">谁唤醒</span><span class="cmp-val">系统调用返回 exitsyscall()</span></div>
+        <div class="cmp-row"><span class="cmp-key">回到队列</span><span class="cmp-val">找空闲P继续或放全局队列</span></div>
+        <div class="cmp-row"><span class="cmp-key">sysmon</span><span class="cmp-val">核心角色：retake → handoffp</span></div>
+        <div class="cmp-row"><span class="cmp-key">典型场景</span><span class="cmp-val">read()、write()、accept()、同步文件IO</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">所有 gopark 场景 — G 被谁收养？</div>
+    <div class="scenario-grid">
+      <div class="scenario-card"><div class="sc-card-icon">📡</div><div class="sc-card-title">channel 满/空</div><div class="sc-card-adopt">收养：channel.sendq / recvq</div><div class="sc-card-wake">唤醒：对端读写时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">🔒</div><div class="sc-card-title">Mutex 竞争</div><div class="sc-card-adopt">收养：Mutex.waiters</div><div class="sc-card-wake">唤醒：Unlock() 时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">⏱</div><div class="sc-card-title">time.Sleep</div><div class="sc-card-adopt">收养：timer 堆（四叉堆）</div><div class="sc-card-wake">唤醒：定时器触发时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">🌐</div><div class="sc-card-title">网络 IO (netpoll)</div><div class="sc-card-adopt">收养：pollDesc (epoll)</div><div class="sc-card-wake">唤醒：IO 就绪时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">🚧</div><div class="sc-card-title">WaitGroup.Wait</div><div class="sc-card-adopt">收养：WaitGroup.waiters</div><div class="sc-card-wake">唤醒：计数器归零时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">📣</div><div class="sc-card-title">Cond.Wait</div><div class="sc-card-adopt">收养：Cond.notifyList</div><div class="sc-card-wake">唤醒：Signal/Broadcast 时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">1️⃣</div><div class="sc-card-title">sync.Once</div><div class="sc-card-adopt">收养：Once 内部等待者</div><div class="sc-card-wake">唤醒：首次执行完成时 goready()</div></div>
+      <div class="scenario-card"><div class="sc-card-icon">🗑</div><div class="sc-card-title">GC STW</div><div class="sc-card-adopt">收养：GC 等待机制</div><div class="sc-card-wake">唤醒：GC 完成时 goready()</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">goready 放回队列的位置</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center">
+      <div style="text-align:center;padding:16px 24px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:10px;min-width:180px">
+        <div style="font-size:14px;font-weight:700;color:#6ee7b7;margin-bottom:6px">goready() 唤醒</div>
+        <div style="font-size:24px;margin:8px 0">→ 头部</div>
+        <div style="font-size:11px;color:#94a3b8">runqput(next=true)<br>优先执行，刚醒不能等</div>
+      </div>
+      <div style="text-align:center;padding:16px 24px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);border-radius:10px;min-width:180px">
+        <div style="font-size:14px;font-weight:700;color:#93c5fd;margin-bottom:6px">go func() 新建</div>
+        <div style="font-size:24px;margin:8px 0">→ 尾部</div>
+        <div style="font-size:11px;color:#94a3b8">runqput(next=false)<br>新 G 排队等候</div>
+      </div>
+      <div style="text-align:center;padding:16px 24px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:10px;min-width:180px">
+        <div style="font-size:14px;font-weight:700;color:#fcd34d;margin-bottom:6px">时间片抢占</div>
+        <div style="font-size:24px;margin:8px 0">→ 尾部</div>
+        <div style="font-size:11px;color:#94a3b8">用完了重新排队<br>公平调度</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+function switchP(i){document.querySelectorAll('.panel').forEach(function(p,j){p.classList.toggle('active',j===i)});document.querySelectorAll('.tab').forEach(function(t,j){t.classList.toggle('active',j===i)})}
+
+// ============================
+// gopark animation
+// ============================
+var GP={
+  playing:false,timer:null,step:0,steps:[],
+  p:{id:0,state:'running',localQ:[],runningG:null},
+  m:{id:0,state:'running'},
+  dsWaiters:[],
+  dsType:'channel',
+  gq:[]
+};
+
+function mkG(n,s){return{name:n,state:s||'runnable'}}
+function goparkInitSteps(){
+  var type=document.getElementById('goparkType').value;
+  GP.dsType=type;
+  var dsLabel=type==='channel'?'channel.sendq':type==='mutex'?'Mutex.waiters':'Timer 堆';
+  var actLabel=type==='channel'?'ch <- value':type==='mutex'?'mu.Lock()':'time.Sleep(5s)';
+  var wakeLabel=type==='channel'?'<- ch 接收':type==='mutex'?'mu.Unlock()':'5s 定时器触发';
+  GP.steps=[
+    {n:'G1 正常运行',d:'G1 在 M0 上运行，即将执行 <span class="code">'+actLabel+'</span>',act:function(){goparkInit();}},
+    {n:'gopark() 调用',d:'G1 调用 <span class="key">gopark()</span>，状态 → <span class="code">_Gwaiting</span>，<span class="key">离开运行队列！</span>被 '+dsLabel+' 收养',act:function(){goparkPark();}},
+    {n:'M0 继续调度',d:'<span class="key">M0 切到 g0 栈执行 schedule()</span>，从本地队列取 G2 运行，CPU 不闲着',act:function(){goparkSchedNext();}},
+    {n:'条件满足',d:wakeLabel+'，收养 G1 的数据结构调用 <span class="key">goready(G1)</span>',act:function(){goparkReady();}},
+    {n:'G1 回到队列头部',d:'G1 状态 _Gwaiting → _Grunnable，<span class="key">runqput(next=true) 放到队列头部</span>，优先执行',act:function(){goparkRequeue();}},
+  ];
+}
+
+function goparkInit(){
+  GP.p={id:0,state:'running',localQ:[mkG('G2'),mkG('G3')],runningG:mkG('G1','running')};
+  GP.m={id:0,state:'running'};
+  GP.dsWaiters=[];
+  GP.gq=[];
+  goparkRender();
+  goparkLog('G1 在 M0 上运行，P0 本地队列有 G2、G3','li');
+}
+
+function goparkPark(){
+  var g1=GP.p.runningG;
+  g1.state='waiting';
+  GP.dsWaiters.push(g1);
+  GP.p.runningG=null;
+  goparkRender();
+  goparkLog('G1 gopark() → _Gwaiting，离开运行队列，被 '+GP.dsType+' 收养','lw');
+}
+
+function goparkSchedNext(){
+  if(GP.p.localQ.length>0){
+    var g=GP.p.localQ.shift();
+    g.state='running';
+    GP.p.runningG=g;
+  }
+  goparkRender();
+  goparkLog('M0 schedule() → 取 G2 运行，P0 继续干活','lo');
+}
+
+function goparkReady(){
+  var g1=GP.dsWaiters.shift();
+  if(g1) g1.state='runnable';
+  // will be added to queue in next step
+  GP._readyG=g1;
+  goparkRender();
+  goparkLog('goready(G1)：G1 从 '+GP.dsType+' 等待队列取出，准备放回运行队列','lo');
+}
+
+function goparkRequeue(){
+  var g1=GP._readyG;
+  if(g1){
+    g1.state='runnable';
+    GP.p.localQ.unshift(g1); // 头部！
+  }
+  goparkRender();
+  goparkLog('runqput(next=true)：G1 放到 P0 本地队列头部，下次优先执行','lo');
+}
+
+function goparkRender(){
+  var c=document.getElementById('goparkCanvas');
+  var type=GP.dsType;
+  var dsLabel=type==='channel'?'channel.sendq (等待发送)':type==='mutex'?'Mutex.waiters (等待锁)':'Timer 堆 (等待定时)';
+  var dsCls=type==='channel'?'channel-ds':type==='mutex'?'mutex-ds':'timer-ds';
+  var dsIcon=type==='channel'?'📡':type==='mutex'?'🔒':'⏱';
+
+  var h='';
+  h+='<div class="p-row">';
+  // M
+  h+='<div class="m-block '+GP.m.state+'">M0<small>M</small><div class="m-state">'+(GP.m.state==='running'?'运行中':'空闲')+'</div></div>';
+  h+='<div class="bind on"></div>';
+  // P
+  h+='<div class="p-block '+GP.p.state+'">P0<small>P</small><div class="p-state">_'+(GP.p.state==='running'?'Prunning':'Pidle')+'</div></div>';
+  h+='<div style="width:8px"></div>';
+  // Queue
+  h+='<div class="queue-area">';
+  h+='<div class="queue-row"><span class="queue-label">运行队列:</span>';
+  if(GP.p.runningG) h+=gHTML(GP.p.runningG);
+  GP.p.localQ.forEach(function(g){h+=gHTML(g)});
+  if(!GP.p.runningG&&GP.p.localQ.length===0) h+='<span style="color:#475569;font-size:11px">空 — G1 被 gopark 拿走了！</span>';
+  h+='</div></div>';
+  h+='</div>';
+
+  // Data structure box
+  var dsActive=GP.dsWaiters.length>0?'active':'';
+  h+='<div class="ds-box '+dsCls+' '+dsActive+'">';
+  h+='<div class="ds-arrow '+(GP.dsWaiters.length>0?'show':'')+'">↑ gopark() 后 G 来这里</div>';
+  h+='<div class="ds-title">'+dsIcon+' '+dsLabel+'</div>';
+  h+='<div class="ds-waiters">';
+  GP.dsWaiters.forEach(function(g){h+=gHTML(g)});
+  h+='</div></div>';
+
+  c.innerHTML=h;
+  document.getElementById('goparkStepN').textContent='步骤 '+GP.step+'/'+GP.steps.length;
+}
+
+function gHTML(g){
+  return '<div class="g '+g.state+' anim-in"><span class="gn">'+g.name+'</span><span class="gs">'+g.state+'</span></div>';
+}
+
+function goparkLog(msg,cls){
+  var b=document.getElementById('goparkLog');
+  var d=document.createElement('div');d.className='ll l'+(cls||'i');
+  d.innerHTML='<span class="ts">'+new Date().toLocaleTimeString()+'</span>'+msg;
+  b.insertBefore(d,b.firstChild);
+  while(b.children.length>50)b.removeChild(b.lastChild);
+}
+
+function goparkNarrate(html,cls){
+  var n=document.getElementById('goparkNarr');
+  n.innerHTML=html;
+  n.className='narr'+(cls?' '+cls:'');
+}
+
+function goparkAutoPlay(){
+  if(GP.playing){goparkStopPlay();return}
+  GP.playing=true;GP.step=0;
+  goparkInitSteps();
+  document.getElementById('goparkLog').innerHTML='';
+  var btn=document.getElementById('goparkAuto');btn.textContent='暂停';btn.className='btn btn-reset';
+  goparkAdvance();
+}
+function goparkStep(){
+  if(GP.playing)goparkStopPlay();
+  if(GP.step===0){goparkInitSteps();document.getElementById('goparkLog').innerHTML='';}
+  if(GP.step>=GP.steps.length)return;
+  var s=GP.steps[GP.step];
+  s.act();
+  goparkNarrate('<span class="tag w">步骤 '+(GP.step+1)+'</span> '+s.n+'：'+s.d,'highlight-wait');
+  GP.step++;
+}
+function goparkAdvance(){
+  if(!GP.playing||GP.step>=GP.steps.length){goparkStopPlay();if(GP.step>=GP.steps.length)goparkNarrate('<span class="tag ok">完成</span> G1 完成了 gopark → 被收养 → goready → 回到队列头部的全过程','highlight-wait');return}
+  var s=GP.steps[GP.step];s.act();
+  goparkNarrate('<span class="tag w">步骤 '+(GP.step+1)+'</span> '+s.n+'：'+s.d,'highlight-wait');
+  GP.step++;
+  GP.timer=setTimeout(goparkAdvance,1800);
+}
+function goparkStopPlay(){GP.playing=false;if(GP.timer){clearTimeout(GP.timer);GP.timer=null}var btn=document.getElementById('goparkAuto');btn.textContent='自动演示';btn.className='btn btn-play'}
+function goparkReset(){goparkStopPlay();GP.step=0;GP.dsWaiters=[];GP._readyG=null;document.getElementById('goparkLog').innerHTML='';goparkInitSteps();goparkInit();goparkNarrate('选择阻塞类型后点击「自动演示」')}
+
+// ============================
+// entersyscall animation
+// ============================
+var SYS={
+  playing:false,timer:null,step:0,steps:[],
+  ps:[{id:0,state:'running',localQ:[],runningG:null,m:null},{id:1,state:'running',localQ:[],runningG:null,m:null}],
+  ms:[{id:0,state:'running',p:null,curg:null}],
+  gq:[],
+  orphanM:null
+};
+
+function sysInitSteps(){
+  var outcome=document.getElementById('sysOutcome').value;
+
+  // Shared steps 1-6
+  SYS.steps=[
+    {n:'G1 正常运行',d:'G1 在 M0 上运行，即将执行 <span class="code">read(fd, buf)</span> 阻塞系统调用',act:function(){sysInit();}},
+    {n:'entersyscall()',d:'G1 状态 → <span class="code">_Gsyscall</span>，P0 → <span class="code">_Psyscall</span>，<span class="key">G1 和 M0 一起进入内核阻塞</span>',act:function(){sysEnter();}},
+    {n:'sysmon 检测',d:'sysmon 发现 P0 在 _Psyscall 超 20us，执行 <span class="key">retake() → handoffp()</span>',act:function(){sysRetake();}},
+    {n:'P 解绑 handoff',d:'<span class="key">P0 从 M0 解绑！</span>找空闲 M2 接管 P0',act:function(){sysHandoff();}},
+    {n:'M2 继续运行',d:'新 M2 绑定 P0，从队列取 G2 执行，<span class="key">CPU 继续干活</span>',act:function(){sysNewMRun();}},
+    {n:'系统调用返回',d:'M0 的 read() 返回，调用 <span class="code">exitsyscall()</span>，尝试拿回 P0 → <span class="key">失败！P0 在 M2 上跑着，不抢！</span>',act:function(){sysExit();}},
+  ];
+
+  if(outcome==='idleP'){
+    // 结局A：P1 空闲，M0 拿到 P1
+    SYS.steps.push(
+      {n:'pidleget() 成功',d:'<span class="key">有空闲 P1！</span> M0 绑定 P1，G1 直接在 M0+P1 上继续运行，延迟最低 ✅',act:function(){sysExitGetIdleP();}},
+      {n:'M0+P1 继续跑 G1',d:'G1 在 M0+P1 上恢复执行，M2+P0 继续跑 G2，<span class="key">两条线都在干活，CPU 利用率拉满</span> ✅',act:function(){sysExitIdlePRun();}}
+    );
+  } else {
+    // 结局B：没有空闲 P，G1 放全局队列
+    SYS.steps.push(
+      {n:'pidleget() 失败',d:'<span class="key">没有空闲 P！</span> exitsyscallfast() 失败，pidleget() 也失败',act:function(){sysExitNoIdleP();}},
+      {n:'G1 放全局队列',d:'G1 放入全局队列，M0 休眠 <span class="code">stopm()</span>，等新 G 来了再被唤醒',act:function(){sysExitGlobalQ();}}
+    );
+  }
+}
+
+function sysInit(){
+  var outcome=document.getElementById('sysOutcome').value;
+  if(outcome==='idleP'){
+    // 结局A：P1 空闲（M1 休眠了），方便后面 M0 拿到 P1
+    SYS.ps=[
+      {id:0,state:'running',localQ:[mkG('G2'),mkG('G3')],runningG:mkG('G1','running'),m:null},
+      {id:1,state:'idle',localQ:[],runningG:null,m:null}
+    ];
+    SYS.ms=[{id:0,state:'running',p:null,curg:null}];
+    SYS.ms[0].p=SYS.ps[0];SYS.ps[0].m=SYS.ms[0];SYS.ms[0].curg=SYS.ps[0].runningG;
+  } else {
+    // 结局B：两个 P 都在忙，没有空闲 P
+    SYS.ps=[
+      {id:0,state:'running',localQ:[mkG('G2'),mkG('G3')],runningG:mkG('G1','running'),m:null},
+      {id:1,state:'running',localQ:[mkG('G4'),mkG('G5')],runningG:mkG('G4','running'),m:null}
+    ];
+    SYS.ms=[{id:0,state:'running',p:null,curg:null},{id:1,state:'running',p:null,curg:null}];
+    SYS.ms[0].p=SYS.ps[0];SYS.ps[0].m=SYS.ms[0];SYS.ms[0].curg=SYS.ps[0].runningG;
+    SYS.ms[1].p=SYS.ps[1];SYS.ps[1].m=SYS.ms[1];SYS.ms[1].curg=SYS.ps[1].runningG;
+  }
+  SYS.gq=[];SYS.orphanM=null;
+  sysRender();
+  sysLog('G1 在 M0 上运行，准备执行 read()','li');
+}
+
+function sysEnter(){
+  var p0=SYS.ps[0];
+  p0.runningG.state='syscall';
+  p0.state='psyscall';
+  SYS.ms[0].state='blocked';
+  sysRender();
+  sysLog('G1 entersyscall() → _Gsyscall，P0 → _Psyscall，M0 进入内核阻塞','ls');
+}
+
+function sysRetake(){
+  sysRender();
+  sysLog('sysmon：P0 _Psyscall 超 20us! retake() → handoffp()','ls');
+}
+
+function sysHandoff(){
+  var p0=SYS.ps[0];
+  var oldM=SYS.ms[0];
+  SYS.orphanM={m:oldM,g:p0.runningG};
+  oldM.p=null;oldM.state='blocked';oldM.curg=p0.runningG;
+  var newM={id:2,state:'running',p:p0,curg:null};
+  SYS.ms.push(newM);
+  p0.m=newM;
+  p0.state='running';
+  p0.runningG=null;
+  sysRender();
+  sysLog('handoffp：P0 从 M0 解绑 → 绑定 M2，M0 带着 G1 阻塞在内核','ls');
+}
+
+function sysNewMRun(){
+  var p0=SYS.ps[0];
+  if(p0.localQ.length>0){
+    var g=p0.localQ.shift();
+    g.state='running';
+    p0.runningG=g;
+    if(p0.m)p0.m.curg=g;
+  }
+  sysRender();
+  sysLog('M2 从 P0 队列取 G2 运行，CPU 继续干活','lo');
+}
+
+function sysExit(){
+  if(SYS.orphanM){
+    SYS.orphanM.g.state='runnable';
+  }
+  sysRender();
+  sysLog('M0 read() 返回 → exitsyscall()，exitsyscallfast() 尝试拿 P0 → P0 在 M2 上，不抢！','ls');
+}
+
+// ===== 结局A：有空闲 P =====
+function sysExitGetIdleP(){
+  var m0=SYS.ms[0];
+  var p1=SYS.ps[1];
+  // M0 binds to idle P1
+  m0.state='running';
+  m0.p=p1;
+  p1.m=m0;
+  p1.state='running';
+  // G1 runs on M0+P1
+  var g1=SYS.orphanM.g;
+  g1.state='running';
+  p1.runningG=g1;
+  m0.curg=g1;
+  SYS.orphanM=null;
+  sysRender();
+  sysLog('pidleget() 成功！M0 绑定空闲 P1，G1 直接继续运行，延迟最低','lo');
+}
+
+function sysExitIdlePRun(){
+  sysRender();
+  sysLog('M0+P1 跑 G1，M2+P0 跑 G2，两条线并行！','lo');
+}
+
+// ===== 结局B：无空闲 P =====
+function sysExitNoIdleP(){
+  sysRender();
+  sysLog('pidleget() 失败，没有空闲 P 可用','ls');
+}
+
+function sysExitGlobalQ(){
+  if(SYS.orphanM){
+    var g=SYS.orphanM.g;
+    g.state='runnable';
+    SYS.gq.push(g);
+    SYS.orphanM.m.state='sleeping';
+    SYS.orphanM.m.curg=null;
+    SYS.orphanM=null;
+  }
+  sysRender();
+  sysLog('G1 放入全局队列，M0 休眠 stopm()','lo');
+}
+
+function sysRender(){
+  var c=document.getElementById('sysCanvas');
+  var h='';
+
+  // P rows
+  SYS.ps.forEach(function(p,idx){
+    var m=p.m;
+    h+='<div class="p-row">';
+    if(m){
+      h+='<div class="m-block '+m.state+'">M'+m.id+'<small>M</small><div class="m-state">'+(m.state==='running'?'运行中':m.state==='blocked'?'内核阻塞':'休眠')+'</div></div>';
+      h+='<div class="bind '+(p.state!=='idle'?'on':'')+'"></div>';
+    } else {
+      h+='<div class="m-block idle">?<small>M</small></div>';
+      h+='<div class="bind"></div>';
+    }
+    h+='<div class="p-block '+p.state+'">P'+p.id+'<small>P</small><div class="p-state">_'+(p.state==='running'?'Prunning':p.state==='psyscall'?'Psyscall':'Pidle')+'</div></div>';
+    h+='<div style="width:8px"></div>';
+    h+='<div class="queue-area"><div class="queue-row"><span class="queue-label">运行队列:</span>';
+    if(p.runningG) h+=gHTML(p.runningG);
+    p.localQ.forEach(function(g){h+=gHTML(g)});
+    if(!p.runningG&&p.localQ.length===0) h+='<span style="color:#475569;font-size:11px">空</span>';
+    h+='</div></div></div>';
+  });
+
+  // Orphan M (blocked in syscall)
+  h+='<div class="orphan-area '+(SYS.orphanM?'visible':'')+'">';
+  h+='<div class="orphan-label">被阻塞的 M（G 跟着 M 一起在内核，不在任何运行队列！）</div>';
+  h+='<div class="orphan-content">';
+  if(SYS.orphanM){
+    h+='<div class="m-block blocked">M'+SYS.orphanM.m.id+'<small>阻塞</small></div>';
+    h+='<span style="color:#64748b;margin:0 4px">+</span>';
+    if(SYS.orphanM.g) h+=gHTML(SYS.orphanM.g);
+    h+='<span style="color:#fca5a5;font-size:11px;margin-left:8px">read() 内核阻塞中...</span>';
+  }
+  h+='</div></div>';
+
+  // Kernel box
+  var hasBlocked=SYS.orphanM||SYS.ms.some(function(m){return m.state==='blocked'&&m.p});
+  h+='<div class="kernel-box '+(hasBlocked&&!SYS.orphanM?'visible':'')+'">';
+  h+='<div class="kernel-label">内核态（M0 + G1 一起阻塞在系统调用）</div>';
+  h+='<div class="kernel-content">';
+  if(hasBlocked&&!SYS.orphanM){
+    var bm=SYS.ms.find(function(m){return m.state==='blocked'&&m.p});
+    if(bm){
+      h+='<div class="m-block blocked" style="width:44px;height:44px;font-size:12px">M'+bm.id+'<small>阻塞</small></div>';
+      if(bm.curg) h+=gHTML(bm.curg);
+      h+='<span style="margin-left:8px">read(fd, buf) 内核阻塞...</span>';
+    }
+  }
+  h+='</div></div>';
+
+  // Global queue
+  if(SYS.gq.length>0){
+    h+='<div style="margin-top:10px;background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.2);border-radius:8px;padding:10px">';
+    h+='<div style="font-size:11px;color:#38bdf8;font-weight:700;margin-bottom:6px">Global Queue</div>';
+    h+='<div style="display:flex;gap:6px">';
+    SYS.gq.forEach(function(g){h+=gHTML(g)});
+    h+='</div></div>';
+  }
+
+  c.innerHTML=h;
+  document.getElementById('sysStepN').textContent='步骤 '+SYS.step+'/'+SYS.steps.length;
+}
+
+function sysLog(msg,cls){
+  var b=document.getElementById('sysLog');
+  var d=document.createElement('div');d.className='ll l'+(cls||'i');
+  d.innerHTML='<span class="ts">'+new Date().toLocaleTimeString()+'</span>'+msg;
+  b.insertBefore(d,b.firstChild);
+  while(b.children.length>50)b.removeChild(b.lastChild);
+}
+
+function sysNarrate(html,cls){
+  var n=document.getElementById('sysNarr');
+  n.innerHTML=html;n.className='narr'+(cls?' '+cls:'');
+}
+
+function sysAutoPlay(){
+  if(SYS.playing){sysStopPlay();return}
+  SYS.playing=true;SYS.step=0;
+  sysInitSteps();
+  document.getElementById('sysLog').innerHTML='';
+  var btn=document.getElementById('sysAuto');btn.textContent='暂停';btn.className='btn btn-reset';
+  sysAdvance();
+}
+function sysStepFwd(){
+  if(SYS.playing)sysStopPlay();
+  if(SYS.step===0){sysInitSteps();document.getElementById('sysLog').innerHTML='';}
+  if(SYS.step>=SYS.steps.length)return;
+  var s=SYS.steps[SYS.step];s.act();
+  sysNarrate('<span class="tag s">步骤 '+(SYS.step+1)+'</span> '+s.n+'：'+s.d,'highlight-sys');
+  SYS.step++;
+}
+function sysAdvance(){
+  if(!SYS.playing||SYS.step>=SYS.steps.length){
+    sysStopPlay();
+    if(SYS.step>=SYS.steps.length){
+      var outcome=document.getElementById('sysOutcome').value;
+      if(outcome==='idleP'){
+        sysNarrate('<span class="tag ok">结局A 完成</span> M0 拿到空闲 P1，G1 直接继续运行，延迟最低 ✅<br><span style="font-size:11px;color:#64748b">切换「结局B」查看没有空闲 P 时的不同走向</span>','highlight-sys');
+      } else {
+        sysNarrate('<span class="tag ok">结局B 完成</span> 没有空闲 P，G1 放全局队列，M0 休眠等待被唤醒<br><span style="font-size:11px;color:#64748b">切换「结局A」查看有空闲 P 时的不同走向</span>','highlight-sys');
+      }
+    }
+    return;
+  }
+  var s=SYS.steps[SYS.step];s.act();
+  sysNarrate('<span class="tag s">步骤 '+(SYS.step+1)+'</span> '+s.n+'：'+s.d,'highlight-sys');
+  SYS.step++;
+  SYS.timer=setTimeout(sysAdvance,1800);
+}
+function sysStopPlay(){SYS.playing=false;if(SYS.timer){clearTimeout(SYS.timer);SYS.timer=null}var btn=document.getElementById('sysAuto');btn.textContent='自动演示';btn.className='btn btn-play'}
+function sysReset(){sysStopPlay();SYS.step=0;SYS.orphanM=null;document.getElementById('sysLog').innerHTML='';sysInitSteps();sysInit();sysNarrate('选择结局后点击「自动演示」。结局A：M0 拿到空闲P继续跑G1；结局B：没空闲P，G1放全局队列，M0休眠')}
+
+// Init
+goparkInitSteps();goparkInit();goparkRender();
+sysInitSteps();sysInit();sysRender();
+</script>
+</body>
+</html>
