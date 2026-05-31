@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Mutex × GMP 调度交互可视化</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+        .container { max-width: 1300px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; margin-bottom: 18px; }
+        .header h1 { font-size: 26px; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #ef4444, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #94a3b8; margin-top: 4px; font-size: 13px; }
+
+        /* Controls */
+        .controls { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+        .btn-lock { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+        .btn-unlock { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+        .btn-newg { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+        .btn-auto { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+        .btn-reset { background: #334155; color: #cbd5e1; }
+
+        /* Action Bar */
+        .action-bar { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 10px 16px; font-size: 13px; text-align: center; margin-bottom: 16px; min-height: 36px; display: flex; align-items: center; justify-content: center; line-height: 1.5; }
+        .hl-lock { color: #f87171; font-weight: 700; }
+        .hl-unlock { color: #4ade80; font-weight: 700; }
+        .hl-park { color: #f59e0b; font-weight: 700; }
+        .hl-ready { color: #38bdf8; font-weight: 700; }
+        .hl-spin { color: #fb923c; font-weight: 700; }
+        .hl-steal { color: #f472b6; font-weight: 700; }
+        .hl-gmp { color: #c084fc; font-weight: 700; }
+
+        /* Main Layout */
+        .main-grid { display: grid; grid-template-columns: 1fr 260px; gap: 14px; margin-bottom: 16px; }
+        @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
+
+        /* GMP Canvas */
+        .gmp-canvas { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 18px; position: relative; min-height: 440px; }
+
+        /* P Column */
+        .p-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+        .p-col { background: #0f172a; border: 2px solid #334155; border-radius: 10px; padding: 10px; transition: border-color 0.3s; }
+        .p-col.active { border-color: #f59e0b; box-shadow: 0 0 10px rgba(245,158,11,0.15); }
+
+        .p-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        .p-badge { background: #78350f; color: #fcd34d; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'SF Mono', monospace; }
+        .p-col.active .p-badge { background: #92400e; color: #fbbf24; }
+        .m-label { font-size: 10px; color: #64748b; font-family: 'SF Mono', monospace; }
+        .p-col.active .m-label { color: #fbbf24; }
+
+        .m-box { background: #1c1917; border: 1px solid #57534e; border-radius: 6px; padding: 6px; margin-bottom: 6px; min-height: 36px; display: flex; align-items: center; gap: 4px; }
+        .m-box.running { border-color: #22c55e; }
+        .m-box.spinning { border-color: #f59e0b; animation: m-glow 0.8s infinite; }
+        @keyframes m-glow { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 8px rgba(245,158,11,0.3); } }
+        .m-label-inner { font-size: 9px; color: #a8a29e; font-weight: 600; }
+
+        .runq-label { font-size: 9px; color: #475569; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 3px; }
+        .runq { display: flex; gap: 3px; flex-wrap: wrap; min-height: 26px; padding: 4px; background: #1e293b; border-radius: 5px; border: 1px dashed #334155; }
+        .runq.has-g { border-style: solid; border-color: #3b82f6; }
+
+        /* G Chip */
+        .g-chip {
+            display: inline-flex; align-items: center; gap: 2px; padding: 2px 7px; border-radius: 4px;
+            font-size: 10px; font-weight: 700; font-family: 'SF Mono', monospace; transition: all 0.3s; white-space: nowrap;
+        }
+        .g-chip.running { background: #166534; color: #bbf7d0; border: 1px solid #22c55e; }
+        .g-chip.spinning { background: #78350f; color: #fde68a; border: 1px solid #f59e0b; }
+        .g-chip.queued { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f6; }
+        .g-chip.sleeping { background: #1c1917; color: #78716c; border: 1px solid #57534e; }
+        .g-chip.waking { background: #083344; color: #67e8f9; border: 1px solid #06b6d4; animation: wake-flash 0.4s ease 2; }
+        .g-chip.starving { background: #581c87; color: #e9d5ff; border: 1px solid #a855f7; animation: starve-pulse 1.2s infinite; }
+        .g-chip.lock-owner { background: #991b1b; color: #fecaca; border: 1px solid #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.3); }
+        .g-chip.lock-waiting { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f6; }
+        @keyframes wake-flash { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+        @keyframes starve-pulse { 0%,100% { box-shadow: none; } 50% { box-shadow: 0 0 6px rgba(168,85,247,0.4); } }
+
+        /* Mutex Wait Queue */
+        .mutex-section { margin-top: 10px; }
+        .mutex-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .mutex-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.3s; }
+        .mutex-icon.free { background: #0f172a; border: 2px solid #475569; }
+        .mutex-icon.locked { background: #450a0a; border: 2px solid #ef4444; box-shadow: 0 0 12px rgba(239,68,68,0.3); }
+        .mutex-state-text { font-size: 12px; font-weight: 600; }
+        .mutex-state-text.free { color: #475569; }
+        .mutex-state-text.locked { color: #f87171; }
+
+        .waitq-label { font-size: 10px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+        .waitq { display: flex; gap: 4px; flex-wrap: wrap; min-height: 30px; padding: 6px; background: #0f172a; border-radius: 8px; border: 1px dashed #334155; }
+        .waitq.has-g { border-style: solid; border-color: #8b5cf6; }
+        .waitq-empty { color: #334155; font-size: 11px; font-style: italic; }
+
+        /* State bits row */
+        .state-bits-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+        .sbit { display: flex; align-items: center; gap: 3px; padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; font-family: 'SF Mono', monospace; background: #1e293b; border: 1px solid #334155; }
+        .sbit.on-locked { background: #450a0a; color: #f87171; border-color: #ef4444; }
+        .sbit.on-woken { background: #78350f; color: #fde68a; border-color: #f59e0b; }
+        .sbit.on-starving { background: #3b1764; color: #d8b4fe; border-color: #a855f7; }
+        .sbit.off { color: #475569; }
+
+        /* Right Panel */
+        .right-panel { display: flex; flex-direction: column; gap: 12px; }
+
+        /* Mutex State Detail */
+        .state-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; }
+        .state-panel-title { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; margin-bottom: 8px; }
+        .field-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; }
+        .field-name { font-size: 12px; color: #94a3b8; font-family: 'SF Mono', monospace; }
+        .field-val { font-size: 16px; font-weight: 800; font-family: 'SF Mono', monospace; }
+        .field-val.on { color: #f87171; }
+        .field-val.off { color: #475569; }
+
+        .mode-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 16px; font-size: 11px; font-weight: 700; margin-top: 6px; }
+        .mode-badge.normal { background: #1e3a5f; color: #60a5fa; border: 1px solid #2563eb; }
+        .mode-badge.starving { background: #3b1764; color: #c084fc; border: 1px solid #7c3aed; animation: starve-pulse 1.2s infinite; }
+
+        /* Spin Check */
+        .spin-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; }
+        .spin-check { display: flex; flex-direction: column; gap: 4px; }
+        .spin-item { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px 6px; border-radius: 5px; }
+        .spin-item.pass { background: #052e16; color: #4ade80; }
+        .spin-item.fail { background: #450a0a; color: #f87171; }
+        .spin-item.idle { background: transparent; color: #475569; }
+        .spin-icon { width: 16px; text-align: center; }
+
+        /* Event Log */
+        .log-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 12px; flex: 1; max-height: 300px; overflow-y: auto; }
+        .log-title { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; margin-bottom: 6px; }
+        .log-entry { font-size: 10px; font-family: 'SF Mono','Fira Code',monospace; padding: 2px 0; display: flex; gap: 5px; align-items: baseline; }
+        .log-time { color: #475569; flex-shrink: 0; }
+        .log-tag { font-size: 8px; font-weight: 700; padding: 1px 4px; border-radius: 2px; flex-shrink: 0; }
+        .log-tag.cas { background: #1e293b; color: #f87171; }
+        .log-tag.spin { background: #78350f; color: #fde68a; }
+        .log-tag.park { background: #1e3a5f; color: #93c5fd; }
+        .log-tag.ready { background: #052e16; color: #4ade80; }
+        .log-tag.starve { background: #3b1764; color: #d8b4fe; }
+        .log-tag.lock { background: #450a0a; color: #fca5a5; }
+        .log-tag.unlock { background: #052e16; color: #86efac; }
+        .log-tag.gmp { background: #0c4a6e; color: #7dd3fc; }
+        .log-msg { color: #cbd5e1; }
+
+        /* Flow Section */
+        .flow-section { margin-bottom: 16px; }
+        .flow-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; }
+        .flow-steps { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+        .flow-step { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 8px; background: #0f172a; border: 1px solid #334155; transition: all 0.3s; min-width: 120px; text-align: center; }
+        .flow-step.active { border-color: #f59e0b; background: #451a03; }
+        .flow-step.done { border-color: #22c55e; opacity: 0.5; }
+        .flow-step .fs-icon { font-size: 18px; }
+        .flow-step .fs-title { font-size: 11px; font-weight: 700; }
+        .flow-step .fs-gmp { font-size: 9px; color: #7dd3fc; background: #0c4a6e; padding: 1px 5px; border-radius: 3px; }
+        .flow-step .fs-detail { font-size: 9px; color: #64748b; }
+        .flow-arrow { color: #475569; font-size: 16px; flex-shrink: 0; display: flex; align-items: center; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Go Mutex × GMP 调度交互可视化</h1>
+        <p>自旋依赖 P 状态 | gopark 让出 P | goready 回到运行队列 | 饥饿 = 调度时差</p>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-lock" onclick="doLock()" id="btnLock">Goroutine Lock()</button>
+        <button class="btn btn-unlock" onclick="doUnlock()" id="btnUnlock" disabled>持有者 Unlock()</button>
+        <button class="btn btn-newg" onclick="addG()">+ 新 Goroutine</button>
+        <button class="btn btn-auto" onclick="autoDemo()">自动演示</button>
+        <button class="btn btn-reset" onclick="resetAll()">重置</button>
+    </div>
+
+    <div class="action-bar" id="actionBar">空闲 — 等待操作</div>
+
+    <div class="main-grid">
+        <!-- GMP Canvas -->
+        <div class="gmp-canvas">
+            <div class="p-columns" id="pColumns"></div>
+            <div class="mutex-section">
+                <div class="mutex-header">
+                    <div class="mutex-icon free" id="mutexIcon">&#128275;</div>
+                    <div>
+                        <div class="mutex-state-text free" id="mutexStateText">Mutex: 空闲</div>
+                        <div class="state-bits-row" id="stateBits"></div>
+                    </div>
+                </div>
+                <div class="waitq-label">等待队列 (sudog) — gopark() 休眠中</div>
+                <div class="waitq" id="waitQueue"><span class="waitq-empty">空</span></div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div class="right-panel">
+            <div class="state-panel">
+                <div class="state-panel-title">Mutex State</div>
+                <div class="field-row"><span class="field-name">locked</span><span class="field-val off" id="fLocked">0</span></div>
+                <div class="field-row"><span class="field-name">woken</span><span class="field-val off" id="fWoken">0</span></div>
+                <div class="field-row"><span class="field-name">starving</span><span class="field-val off" id="fStarving">0</span></div>
+                <div class="field-row"><span class="field-name">waiters</span><span class="field-val off" id="fWaiters">0</span></div>
+                <div style="text-align:center"><div class="mode-badge normal" id="modeBadge">正常模式</div></div>
+            </div>
+            <div class="spin-panel">
+                <div class="state-panel-title">自旋条件检查</div>
+                <div class="spin-check" id="spinCheck">
+                    <div class="spin-item idle"><span class="spin-icon">-</span>多核 CPU</div>
+                    <div class="spin-item idle"><span class="spin-icon">-</span>GOMAXPROCS &gt; 1</div>
+                    <div class="spin-item idle"><span class="spin-icon">-</span>P 本地队列空</div>
+                    <div class="spin-item idle"><span class="spin-icon">-</span>次数 &lt; 4</div>
+                </div>
+            </div>
+            <div class="log-panel">
+                <div class="log-title">事件日志</div>
+                <div id="logContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flow -->
+    <div class="flow-section">
+        <div class="flow-panel">
+            <div class="flow-steps" id="flowSteps"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const NUM_P = 3;
+let S = {
+    processors: [],   // [{m: gid|null, runq: [gid,...]}]
+    mutex: { locked:0, woken:0, starving:0, waiters:0, owner:null },
+    waitQueue: [],    // [{gid, waitTime, starving}]
+    gs: {},           // gid -> {state:'running'|'spinning'|'queued'|'sleeping'|'waking'|'starving', type:'lock-owner'|'lock-waiting'|''}
+    nextGid: 1,
+    animating: false,
+    flowSteps: [],
+    flowIdx: -1,
+};
+
+function resetAll() {
+    S = { processors:[], mutex:{locked:0,woken:0,starving:0,waiters:0,owner:null}, waitQueue:[], gs:{}, nextGid:1, animating:false, flowSteps:[], flowIdx:-1 };
+    for (let i = 0; i < NUM_P; i++) S.processors.push({m:null, runq:[]});
+    render();
+    clearLog();
+    setFlow([]);
+}
+
+// ===== G management =====
+function addGInternal() {
+    const gid = S.nextGid++;
+    // Find a P with room
+    let bestP = 0;
+    let bestLen = Infinity;
+    S.processors.forEach((p, i) => { if (p.runq.length < bestLen) { bestLen = p.runq.length; bestP = i; } });
+    const p = S.processors[bestP];
+    if (p.m === null) {
+        p.m = gid;
+        S.gs[gid] = {state:'running', type:''};
+    } else {
+        p.runq.push(gid);
+        S.gs[gid] = {state:'queued', type:''};
+    }
+    return {gid, p: bestP};
+}
+
+function addG() {
+    if (S.animating) return;
+    const {gid, p} = addGInternal();
+    addLog('gmp', `G${gid} 创建 → P${p}${S.gs[gid].state === 'running' ? ' M 上执行' : ' 运行队列'}`);
+    render();
+}
+
+// Find which P a G is on
+function findG(gid) {
+    for (let i = 0; i < NUM_P; i++) {
+        if (S.processors[i].m === gid) return {p: i, slot: 'm'};
+        const idx = S.processors[i].runq.indexOf(gid);
+        if (idx >= 0) return {p: i, slot: 'runq', idx};
+    }
+    // Check wait queue
+    const widx = S.waitQueue.findIndex(w => w.gid === gid);
+    if (widx >= 0) return {p: -1, slot: 'waitq', idx: widx};
+    return null;
+}
+
+function parkG(gid) {
+    const loc = findG(gid);
+    if (!loc) return;
+    if (loc.slot === 'm') {
+        const p = S.processors[loc.p];
+        p.m = null;
+        // Schedule next G from runq
+        if (p.runq.length > 0) {
+            const next = p.runq.shift();
+            p.m = next;
+            S.gs[next].state = 'running';
+        }
+    } else if (loc.slot === 'runq') {
+        S.processors[loc.p].runq.splice(loc.idx, 1);
+    }
+    S.gs[gid].state = 'sleeping';
+    S.gs[gid].type = 'lock-waiting';
+}
+
+function readyG(gid) {
+    S.gs[gid].state = 'waking';
+    // Find a P to put it on
+    let bestP = 0;
+    let bestLen = Infinity;
+    S.processors.forEach((p, i) => { if (p.runq.length < bestLen) { bestLen = p.runq.length; bestP = i; } });
+    S.processors[bestP].runq.push(gid);
+    addLog('gmp', `goready(G${gid}) → P${bestP} 运行队列 (等待调度)`);
+}
+
+// ===== Lock =====
+async function doLock() {
+    if (S.animating) return;
+    S.animating = true;
+    const {gid, p} = addGInternal();
+
+    // Phase 1: CAS try
+    setFlow([
+        {icon:'⚡', title:'CAS 抢锁', gmp:'G 在 M 上执行', detail:'CompareAndSwap'},
+        {icon:'🔄', title:'自旋等待', gmp:'G 占着 P 不放', detail:'PAUSE 指令'},
+        {icon:'📋', title:'更新 state', gmp:'G 在 M 上执行', detail:'waiters++ / woken=1'},
+        {icon:'😴', title:'gopark()', gmp:'G 从 P 摘下', detail:'让出 P 给其他 G'},
+        {icon:'🔔', title:'goready()', gmp:'G 回到 P 队列', detail:'等待被调度'},
+        {icon:'⚖️', title:'模式判断', gmp:'调度时差关键', detail:'饥饿/正常'},
+    ]);
+    setFlowActive(0);
+    setAction(`G${gid}: <span class="hl-lock">CAS(state, 0→1)</span> — 在 P${p} 的 M 上执行`);
+    addLog('cas', `G${gid}: CAS 尝试抢锁 (P${p}/M)`);
+    render();
+    await sleep(500);
+
+    if (!S.mutex.locked) {
+        // Fast path
+        S.mutex.locked = 1;
+        S.mutex.owner = gid;
+        S.gs[gid].type = 'lock-owner';
+        setAction(`G${gid}: <span class="hl-lock">CAS 成功！获得锁</span> — fast path，无 GMP 调度开销`);
+        addLog('cas', `G${gid}: ✅ 抢锁成功 (fast path)`);
+        S.animating = false;
+        render();
+        return;
+    }
+
+    // CAS failed
+    addLog('cas', `G${gid}: ❌ CAS 失败，G${S.mutex.owner} 持有锁`);
+    setAction(`G${gid}: CAS 失败，锁被 G${S.mutex.owner} 持有`);
+    render();
+    await sleep(400);
+
+    // Phase 2: Spin check
+    setFlowActive(1);
+    const canSpin = !S.mutex.starving && S.mutex.waiters < 4;
+    updateSpinCheck(canSpin, S.mutex.starving);
+
+    if (canSpin) {
+        S.gs[gid].state = 'spinning';
+        setAction(`G${gid}: <span class="hl-spin">自旋中</span> — <span class="hl-gmp">G 占着 P${p} 和 M 不放</span>，执行 PAUSE`);
+        addLog('spin', `G${gid}: 开始自旋 (占着 P${p}/M，PAUSE 指令)`);
+        render();
+
+        for (let i = 0; i < 4; i++) {
+            await sleep(350);
+            if (!S.mutex.locked) {
+                S.mutex.locked = 1;
+                S.mutex.owner = gid;
+                S.gs[gid].state = 'running';
+                S.gs[gid].type = 'lock-owner';
+                setAction(`G${gid}: <span class="hl-spin">自旋第${i+1}次发现锁释放</span>，CAS 抢到！无需 gopark`);
+                addLog('spin', `G${gid}: ✅ 自旋${i+1}次后抢锁成功 (省了一次 gopark+goready)`);
+                S.animating = false;
+                render();
+                return;
+            }
+            addLog('spin', `G${gid}: 自旋第${i+1}次，锁还没释放 (PAUSE ~30ns)`);
+        }
+        S.gs[gid].state = 'running';
+        addLog('spin', `G${gid}: 自旋4次结束，未获得锁 → 准备 gopark`);
+    } else {
+        setAction(`G${gid}: 饥饿模式下不自旋，直接 gopark`);
+        addLog('spin', `G${gid}: 跳过自旋 (饥饿模式)`);
+    }
+    render();
+    await sleep(400);
+
+    // Phase 3: Update state
+    setFlowActive(2);
+    S.mutex.waiters++;
+    S.mutex.woken = 1;
+    setAction(`G${gid}: waiters=${S.mutex.waiters}, woken=1 — 准备 gopark`);
+    addLog('lock', `G${gid}: state 更新 waiters=${S.mutex.waiters}, woken=1`);
+    render();
+    await sleep(400);
+
+    // Phase 4: gopark
+    setFlowActive(3);
+    setAction(`G${gid}: <span class="hl-park">gopark()</span> — <span class="hl-gmp">G 从 P${p} 摘下，P 空出来给其他 G</span>`);
+    addLog('park', `G${gid}: gopark() → 从 P${p} 摘下，进入 sudog 等待队列`);
+    addLog('gmp', `P${p} 空出 M → 调度器放下一个 G 上去执行`);
+    S.waitQueue.push({gid, waitTime: 0, starving: !!S.mutex.starving});
+    parkG(gid);
+    render();
+    await sleep(500);
+
+    // Show what happens to the freed P
+    const freedP = S.processors[p];
+    if (freedP.m !== null) {
+        addLog('gmp', `P${p} M 上现在运行 G${freedP.m} (从运行队列调度)`);
+    } else {
+        addLog('gmp', `P${p} 运行队列为空，M 空闲`);
+    }
+    render();
+
+    S.animating = false;
+    render();
+}
+
+// ===== Unlock =====
+async function doUnlock() {
+    if (S.animating || !S.mutex.locked) return;
+    S.animating = true;
+    const ownerGid = S.mutex.owner;
+
+    setFlow([
+        {icon:'🔓', title:'Unlock', gmp:'G 在 M 上执行', detail:'locked 1→0'},
+        {icon:'🔔', title:'goready()', gmp:'唤醒 G → P 队列', detail:'信号量释放'},
+        {icon:'⏱️', title:'调度时差', gmp:'新 G vs 唤醒 G', detail:'竞争 P/M'},
+    ]);
+
+    // Step 1: Unlock
+    setFlowActive(0);
+    S.mutex.locked = 0;
+    S.mutex.owner = null;
+    S.gs[ownerGid].type = '';
+    setAction(`G${ownerGid}: <span class="hl-unlock">Unlock()</span> — locked 1→0`);
+    addLog('unlock', `G${ownerGid}: Unlock() → locked=0`);
+    render();
+    await sleep(400);
+
+    if (S.waitQueue.length === 0 && !S.mutex.starving) {
+        setAction('无等待者，锁释放完成');
+        addLog('unlock', '无等待者，直接返回');
+        S.animating = false;
+        render();
+        return;
+    }
+
+    // Step 2: goready
+    setFlowActive(1);
+    if (S.mutex.starving) {
+        const first = S.waitQueue.shift();
+        S.mutex.waiters = S.waitQueue.length;
+        S.mutex.locked = 1;
+        S.mutex.owner = first.gid;
+        S.mutex.woken = 0;
+        if (S.mutex.waiters === 0) S.mutex.starving = 0;
+        S.gs[first.gid].state = 'running';
+        S.gs[first.gid].type = 'lock-owner';
+        setAction(`饥饿模式: 锁直接给 G${first.gid}，<span class="hl-ready">goready(G${first.gid})</span> → P 运行队列`);
+        addLog('starve', `✅ 饥饿模式: 锁直接移交 G${first.gid} (FIFO)`);
+        addLog('ready', `goready(G${first.gid}) → 进入 P 运行队列`);
+    } else {
+        const first = S.waitQueue.shift();
+        S.mutex.waiters = S.waitQueue.length;
+        S.mutex.woken = 0;
+        // Increment wait times
+        S.waitQueue.forEach(w => {
+            w.waitTime++;
+            if (w.waitTime >= 3) {
+                w.starving = true;
+                S.mutex.starving = 1;
+                addLog('starve', `G${w.gid} 等待超过阈值 → 切换饥饿模式!`);
+            }
+        });
+        setAction(`正常模式: <span class="hl-ready">goready(G${first.gid})</span> — <span class="hl-gmp">G 进入 P 运行队列，等调度到 M 才能抢锁</span>`);
+        addLog('ready', `goready(G${first.gid}) → 进入 P 运行队列 (正常模式，与新 G 竞争)`);
+        readyG(first.gid);
+    }
+    render();
+    await sleep(600);
+
+    // Step 3: Show the scheduling time gap
+    setFlowActive(2);
+    if (!S.mutex.starving && S.mutex.waiters === 0) {
+        // Try to show the time gap: a new G might grab the lock before the woken G
+        const newGid = S.nextGid;
+        setAction(`<span class="hl-gmp">调度时差关键！</span>新来的 G${newGid} 已在 M 上，唤醒的 G 还在等 P 调度 → G${newGid} 先执行 CAS`);
+        addLog('gmp', `⚠️ 新 G 可能在 M 上直接 CAS，唤醒的 G 还在等调度 → 饥饿根源`);
+    } else {
+        setAction(`饥饿模式消除了调度时差：锁直接交给等待最久的 G`);
+    }
+    render();
+
+    S.animating = false;
+    render();
+}
+
+// ===== Spin Check UI =====
+function updateSpinCheck(canSpin, isStarving) {
+    const el = document.getElementById('spinCheck');
+    const checks = [
+        {label: '多核 CPU', pass: true},
+        {label: 'GOMAXPROCS > 1', pass: true},
+        {label: 'P 本地队列空', pass: true}, // simplified
+        {label: '次数 < 4', pass: true},
+    ];
+    if (isStarving) {
+        el.innerHTML = checks.map(c => `<div class="spin-item fail"><span class="spin-icon">✗</span>${c.label}</div>`).join('') +
+            `<div style="margin-top:4px;font-size:10px;color:#c084fc">饥饿模式下不自旋！直接 gopark</div>`;
+    } else if (canSpin) {
+        el.innerHTML = checks.map(c => `<div class="spin-item pass"><span class="spin-icon">✓</span>${c.label}</div>`).join('') +
+            `<div style="margin-top:4px;font-size:10px;color:#4ade80">全部满足 → 可以自旋 (G 占着 P 不放)</div>`;
+    } else {
+        el.innerHTML = checks.map(c => `<div class="spin-item fail"><span class="spin-icon">✗</span>${c.label}</div>`).join('');
+    }
+}
+
+// ===== Flow =====
+function setFlow(steps) {
+    S.flowSteps = steps;
+    S.flowIdx = -1;
+    renderFlow();
+}
+function setFlowActive(idx) {
+    S.flowIdx = idx;
+    renderFlow();
+}
+function renderFlow() {
+    const el = document.getElementById('flowSteps');
+    el.innerHTML = S.flowSteps.map((s, i) => {
+        const cls = i === S.flowIdx ? 'active' : (i < S.flowIdx ? 'done' : '');
+        return `<div class="flow-step ${cls}"><div class="fs-icon">${s.icon}</div><div class="fs-title">${s.title}</div><div class="fs-gmp">${s.gmp}</div><div class="fs-detail">${s.detail}</div></div>` +
+            (i < S.flowSteps.length - 1 ? '<div class="flow-arrow">→</div>' : '');
+    }).join('');
+}
+
+// ===== Render =====
+function render() {
+    // P columns
+    const pCol = document.getElementById('pColumns');
+    pCol.innerHTML = '';
+    S.processors.forEach((p, i) => {
+        const isActive = p.m !== null;
+        const col = document.createElement('div');
+        col.className = 'p-col' + (isActive ? ' active' : '');
+
+        // M box
+        let mHTML;
+        if (p.m !== null) {
+            const g = S.gs[p.m];
+            const cls = g ? g.state : 'running';
+            const extra = g && g.type === 'lock-owner' ? ' lock-owner' : '';
+            mHTML = `<div class="m-box ${cls === 'spinning' ? 'spinning' : 'running'}"><span class="m-label-inner">M:</span><span class="g-chip ${cls}${extra}">G${p.m}</span></div>`;
+        } else {
+            mHTML = `<div class="m-box"><span class="m-label-inner">M:</span><span style="color:#57534e;font-size:10px">空闲</span></div>`;
+        }
+
+        // Run queue
+        const hasG = p.runq.length > 0;
+        let rqHTML = '<div class="runq-label">运行队列</div><div class="runq' + (hasG ? ' has-g' : '') + '">';
+        if (hasG) {
+            p.runq.forEach(gid => {
+                const g = S.gs[gid];
+                const cls = g ? g.state : 'queued';
+                const extra = g && g.type === 'lock-owner' ? ' lock-owner' : (g && g.type === 'lock-waiting' ? ' lock-waiting' : '');
+                rqHTML += `<span class="g-chip ${cls}${extra}">G${gid}</span>`;
+            });
+        } else {
+            rqHTML += '<span style="color:#334155;font-size:10px;font-style:italic">空</span>';
+        }
+        rqHTML += '</div>';
+
+        col.innerHTML = `<div class="p-header"><span class="p-badge">P${i}</span><span class="m-label">线程</span></div>${mHTML}${rqHTML}`;
+        pCol.appendChild(col);
+    });
+
+    // Mutex
+    const mi = document.getElementById('mutexIcon');
+    const mt = document.getElementById('mutexStateText');
+    if (S.mutex.locked) {
+        mi.className = 'mutex-icon locked'; mi.innerHTML = '&#128274;';
+        mt.className = 'mutex-state-text locked'; mt.textContent = `Mutex: G${S.mutex.owner} 持有`;
+    } else {
+        mi.className = 'mutex-icon free'; mi.innerHTML = '&#128275;';
+        mt.className = 'mutex-state-text free'; mt.textContent = 'Mutex: 空闲';
+    }
+
+    // State bits
+    const sb = document.getElementById('stateBits');
+    sb.innerHTML =
+        `<span class="sbit ${S.mutex.locked?'on-locked':'off'}">L=${S.mutex.locked}</span>` +
+        `<span class="sbit ${S.mutex.woken?'on-woken':'off'}">W=${S.mutex.woken}</span>` +
+        `<span class="sbit ${S.mutex.starving?'on-starving':'off'}">S=${S.mutex.starving}</span>` +
+        `<span class="sbit ${S.mutex.waiters?'on-locked':'off'}">waiters=${S.mutex.waiters}</span>`;
+
+    // Right panel fields
+    document.getElementById('fLocked').textContent = S.mutex.locked;
+    document.getElementById('fLocked').className = 'field-val ' + (S.mutex.locked ? 'on' : 'off');
+    document.getElementById('fWoken').textContent = S.mutex.woken;
+    document.getElementById('fWoken').className = 'field-val ' + (S.mutex.woken ? 'on' : 'off');
+    document.getElementById('fStarving').textContent = S.mutex.starving;
+    document.getElementById('fStarving').className = 'field-val ' + (S.mutex.starving ? 'on' : 'off');
+    document.getElementById('fWaiters').textContent = S.mutex.waiters;
+    document.getElementById('fWaiters').className = 'field-val ' + (S.mutex.waiters ? 'on' : 'off');
+    const mb = document.getElementById('modeBadge');
+    mb.className = 'mode-badge ' + (S.mutex.starving ? 'starving' : 'normal');
+    mb.textContent = S.mutex.starving ? '饥饿模式' : '正常模式';
+
+    // Wait queue
+    const wq = document.getElementById('waitQueue');
+    if (S.waitQueue.length === 0) {
+        wq.innerHTML = '<span class="waitq-empty">空</span>';
+        wq.className = 'waitq';
+    } else {
+        wq.className = 'waitq has-g';
+        wq.innerHTML = S.waitQueue.map(w => {
+            const cls = w.starving ? 'starving' : 'sleeping';
+            return `<span class="g-chip ${cls}">G${w.gid}</span>`;
+        }).join('');
+    }
+
+    // Buttons
+    document.getElementById('btnLock').disabled = S.animating;
+    document.getElementById('btnUnlock').disabled = !S.mutex.locked || S.animating;
+}
+
+// ===== Logging =====
+function addLog(tag, msg) {
+    const lc = document.getElementById('logContent');
+    const now = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const d = document.createElement('div');
+    d.className = 'log-entry';
+    d.innerHTML = `<span class="log-time">${now}</span><span class="log-tag ${tag}">${tag.toUpperCase()}</span><span class="log-msg">${msg}</span>`;
+    lc.prepend(d);
+    while(lc.children.length > 50) lc.removeChild(lc.lastChild);
+}
+function clearLog() { document.getElementById('logContent').innerHTML = ''; }
+function setAction(html) { document.getElementById('actionBar').innerHTML = html; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ===== Auto Demo =====
+async function autoDemo() {
+    if (S.animating) return;
+    resetAll();
+    addLog('lock', '=== 自动演示开始 ===');
+
+    // Phase 1: G1 locks (fast path)
+    setAction('阶段1: G1 CAS 快速抢锁 (fast path)');
+    await sleep(500);
+    await doLock();
+    await sleep(600);
+
+    // Phase 2: G2 tries to lock → spin → park
+    setAction('阶段2: G2 抢锁失败 → 自旋 → gopark');
+    await sleep(500);
+    await doLock();
+    await sleep(600);
+
+    // Phase 3: G3 tries → also parks
+    setAction('阶段3: G3 也来抢锁 → 加入等待队列');
+    await doLock();
+    await sleep(800);
+
+    // Phase 4: G1 unlocks → goready G2 → show scheduling gap
+    setAction('阶段4: G1 Unlock → goready G2 → <span class="hl-gmp">调度时差！</span>');
+    await sleep(500);
+    await doUnlock();
+    await sleep(1000);
+
+    // Phase 5: Show starvation trigger
+    setAction('阶段5: 等待时间过长 → 切换饥饿模式');
+    S.waitQueue.forEach(w => { w.waitTime = 3; w.starving = true; });
+    S.mutex.starving = 1;
+    addLog('starve', 'G3 等待超过 1ms → 切换饥饿模式！');
+    render();
+    await sleep(800);
+
+    // Phase 6: Unlock in starvation mode → direct handoff
+    setAction('阶段6: 饥饿模式 Unlock → <span class="hl-gmp">锁直接交给 G3，无需竞争</span>');
+    // First G2 (current owner) unlocks
+    S.mutex.owner = 2;
+    S.gs[2].type = 'lock-owner';
+    S.mutex.locked = 1;
+    render();
+    await sleep(400);
+    await doUnlock();
+    await sleep(800);
+
+    setAction('演示完成: fast path → 自旋 → gopark → goready → 调度时差 → 饥饿模式');
+    addLog('lock', '=== 自动演示结束 ===');
+}
+
+resetAll();
+</script>
+
+<!-- 关键说明 -->
+<div style="max-width:1300px;margin:0 auto;padding:0 24px 32px">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:24px">
+        <h3 style="font-size:16px;font-weight:700;color:#94a3b8;margin-bottom:14px">关键说明 — Mutex 与 GMP 的三个绑定关系</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;font-size:13px;color:#cbd5e1;line-height:1.8">
+            <div>
+                <div style="color:#f59e0b;font-weight:700;margin-bottom:4px">1. 自旋依赖 P 状态</div>
+                <div>自旋 = G 占着 P 和 M 执行 PAUSE，不释放</div>
+                <div>要求 P 本地队列为空：否则应让出 P 给其他 G</div>
+                <div>要求 GOMAXPROCS &gt; 1：只有一个 P 时自旋无意义</div>
+                <div>自旋期间 G 没有"离开"GMP 调度，原地等锁释放</div>
+                <div style="margin-top:6px;color:#f59e0b">一次自旋 ~30ns，省一次上下文切换 ~1000ns</div>
+            </div>
+            <div>
+                <div style="color:#38bdf8;font-weight:700;margin-bottom:4px">2. 信号量驱动调度器</div>
+                <div>Lock 抢不到 → <code style="color:#f59e0b">gopark()</code>：G 从 P 摘下，放入等待队列</div>
+                <div>P 空出来 → 调度器把其他 G 放上去执行</div>
+                <div>Unlock 释放 → <code style="color:#4ade80">goready()</code>：唤醒等待 G</div>
+                <div>G 重新放入 P 运行队列，等调度到 M 上执行</div>
+                <div style="margin-top:6px;color:#38bdf8">Mutex 数据结构不引用 P/M/G，但运行时深度绑定调度器</div>
+            </div>
+            <div>
+                <div style="color:#c084fc;font-weight:700;margin-bottom:4px">3. 饥饿 = 调度时差</div>
+                <div>正常模式：新 G 已在 M 上，CAS 立刻执行</div>
+                <div>唤醒 G 还在等 P 调度，有时间差 → 新 G 抢赢 → 饥饿</div>
+                <div>饥饿模式：锁直接交给等待最久的 G，消除竞争</div>
+                <div>Woken 位 = 有 G 正在从休眠到被调度的"路上"</div>
+                <div style="margin-top:6px;color:#c084fc">等待超过 1ms → 切饥饿；最后一个等待者 → 切回正常</div>
+            </div>
+        </div>
+        <div style="margin-top:12px;font-size:12px;color:#94a3b8;padding:8px 12px;background:#0f172a;border-radius:8px;text-align:center">
+            一句话：Mutex 和 GMP 是"结构上解耦、运行时深度绑定"的关系 — 自旋依赖 P、gopark/goready 驱动调度、饥饿本质是调度时差
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #334155;font-size:11px;color:#475569;text-align:center">
+            来源：Go 1.22 sync.Mutex 源码 + runtime 调度器 · 对应文档 02-go-concurrency/06-mutex.md + 03-go-runtime/
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

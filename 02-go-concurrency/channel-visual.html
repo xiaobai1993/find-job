@@ -542,8 +542,44 @@ func noLeak() {
             </div>
         </div>
 
-        <!-- 底部 -->
-        <footer class="text-center text-gray-500 text-sm mt-8">
+        <!-- 底部关键说明 -->
+        <div class="mt-8 bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+            <h3 class="text-lg font-bold text-gray-700 mb-4">关键说明</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-700 leading-relaxed">
+                <div>
+                    <div class="font-bold text-blue-600 mb-1">Channel 底层结构 (hchan)</div>
+                    <div>环形队列 <code>buf</code> + 元素大小 <code>elemsize</code> + 容量 <code>dataqsiz</code></div>
+                    <div>双向等待队列 <code>sendq</code> / <code>recvq</code>（sudog 链表）</div>
+                    <div>互斥锁 <code>mu</code>：保护 hchan 所有字段，每次 send/recv 都加锁</div>
+                    <div class="mt-1 text-gray-500">无缓冲 channel：sendq/recvq 直接在 G 之间拷贝数据，不经 buf</div>
+                </div>
+                <div>
+                    <div class="font-bold text-green-600 mb-1">发送/接收的核心规则</div>
+                    <div>发送：buf 有空位 → 放入 buf；buf 满且有等接收的 G → 直接拷贝给接收 G 并 goready</div>
+                    <div>接收：buf 有数据 → 从 buf 取；buf 空且有等发送的 G → 直接从发送 G 拷贝并 goready</div>
+                    <div class="mt-1 text-gray-500">发送 happens-before 对应的接收完成（内存模型保证）</div>
+                </div>
+                <div>
+                    <div class="font-bold text-amber-600 mb-1">Channel 与 GMP 调度</div>
+                    <div>发送/接收阻塞时 → <code>gopark()</code> 让出 P，G 进入 sudog 等待队列</div>
+                    <div>匹配成功时 → <code>goready()</code> 唤醒等待 G，放入 P 运行队列</div>
+                    <div>close(ch) → 唤醒所有等待的 sudog（sendq 的 panic，recvq 返回零值）</div>
+                </div>
+                <div>
+                    <div class="font-bold text-red-600 mb-1">常见坑</div>
+                    <div>❌ 向已关闭的 channel 发送 → panic</div>
+                    <div>❌ 关闭 nil channel → panic</div>
+                    <div>❌ 重复关闭 channel → panic</div>
+                    <div>❌ goroutine 泄漏：channel 没人读/写，goroutine 永远阻塞</div>
+                    <div>✅ 用 select + context 优雅退出，用 defer close() 保证关闭</div>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-gray-200 text-center text-xs text-gray-400">
+                来源：Go 1.22 runtime/chan.go 源码 · 对应文档 02-go-concurrency/02-channel.md
+            </div>
+        </div>
+
+        <footer class="text-center text-gray-500 text-sm mt-6">
             <p>来源：《Go 专家编程》+ 源码分析 + 面试高频考点整理</p>
         </footer>
     </div>

@@ -317,6 +317,36 @@ func or(channels ...<-chan struct{}) <-chan struct{} {
 
 只要任意一个 channel 关闭，返回的 channel 就会关闭。这是非常经典的并发模式。
 
+**orDone 为什么不能省略？**
+
+很多人觉得 `orDone := make(chan struct{})` + `defer close(orDone)` 是"自己关自己"的冗余操作，其实不是。orDone 有两个关键作用：
+
+| 作用 | 说明 |
+|------|------|
+| 通知调用者 | 返回给调用者，任意 channel 关闭时调用者能感知 |
+| 通知递归 goroutine | 传入递归调用，让深层 goroutine 能跟着退出，防止泄漏 |
+
+假设有 4 个 channel，递归展开后：
+
+```
+or(ch0, ch1, ch2, ch3)
+├── select 监听: ch0, ch1, or(ch2, ch3, orDone)
+│                              ├── select 监听: ch2, ch3, orDone
+```
+
+如果 `ch0` 先关闭：
+
+- **有 orDone（正确）**：顶层 select 命中 `<-ch0`，goroutine 退出，`defer close(orDone)` 执行 → 递归的 `or(ch2, ch3, orDone)` 监听到了 orDone 关闭 → 递归 goroutine 也退出 → 没有泄漏
+- **没有 orDone（泄漏）**：顶层 select 命中 `<-ch0`，退出 → 但递归的 `or(ch2, ch3)` 还在阻塞等待 ch2、ch3 → **没有人通知它该停了** → goroutine 永远挂着 → 泄漏
+
+```go
+// ❌ 如果去掉 orDone，改成这样
+case <-or(channels[2:]...):  // 不传 orDone
+// 递归 goroutine 变成孤儿，永远无法退出！
+```
+
+**一句话：orDone 不是"自己关自己"的冗余操作，它是向上通知调用者、向下通知子 goroutine 的桥梁。去掉它，递归创建的 goroutine 就成了孤儿，永远无法退出。**
+
 ***
 
 ### 场景 5：限流

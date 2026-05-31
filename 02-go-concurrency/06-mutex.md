@@ -360,6 +360,143 @@ IO 太耗时了，持有锁期间做 IO，其他 goroutine 都在等，吞吐量
 
 ---
 
-## 十、一句话总结
+## 十、Runtime 信号量 vs Channel 信号量（面试加分项）
+
+Mutex 的 `sema` 字段用的是 runtime 级别的信号量，很多面试官会追问：它和自己用 channel 实现的信号量有什么区别？
+
+---
+
+### 1. Runtime 信号量（Mutex 内部用的）
+
+```go
+// sync/mutex.go 内部
+func (m *Mutex) Lock() {
+    // 快速路径：CAS 抢锁
+    if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
+        return
+    }
+    // 慢速路径：抢不到就调用 runtime 信号量
+    mutex.Lock(m)  // → runtime_SemacquireMutex
+}
+
+func (m *Mutex) Unlock() {
+    // ...
+    mutex.Unlock(m)  // → runtime_Semrelease
+}
+```
+
+`runtime_Semacquire` / `runtime_Semrelease` 是编译器内置函数，直接操作调度器：
+
+```
+goroutine 调用 Semacquire
+    ↓
+没有令牌 → 把自己挂到等待队列（sudog 链表）
+    ↓
+调用 gopark() → 让出 P，切换到其他 goroutine
+    ↓
+被唤醒 → goready() → 重新进入运行队列
+```
+
+**特点**：直接操作调度器，不经过 channel，没有中间层。等待队列是 sudog 链表，大致 FIFO。goroutine 挂起时直接让出 P，零开销。唤醒时精确投递到特定 goroutine，不会惊群。
+
+---
+
+### 2. Channel 实现的信号量（用户层用的）
+
+```go
+// 用 buffered channel 做信号量，控制并发数
+type Semaphore chan struct{}
+
+func NewSemaphore(n int) Semaphore {
+    return make(chan struct{}, n)
+}
+
+func (s Semaphore) Acquire() { s <- struct{}{} }
+func (s Semaphore) Release() { <-s }
+
+// 使用：最多 3 个并发
+sem := NewSemaphore(3)
+for i := 0; i < 10; i++ {
+    go func() {
+        sem.Acquire()
+        defer sem.Release()
+        doWork()
+    }()
+}
+```
+
+**特点**：通过 channel 的 buffer 机制实现，本质是 hchan 结构。支持 `select` + 超时、`context` 取消，可以广播（close channel）。
+
+---
+
+### 3. 核心区别
+
+| | Runtime 信号量 | Channel 信号量 |
+|---|---|---|
+| **实现层级** | 编译器内置，直接操作调度器 | 基于 channel，经过完整的发送/接收流程 |
+| **唤醒方式** | 精确投递：直接 `goready()` 唤醒目标 goroutine | 竞争获取：发送数据到 channel，接收方竞争调度 |
+| **公平性** | FIFO 等待队列，大致公平 | FIFO 等待队列，但唤醒后要竞争 P，可能被插队 |
+| **上下文切换** | 挂起时直接让出 P，1 次切换 | 经过 channel 收发 + 调度器，多次切换 |
+| **性能** | 极快，纳秒级 | 较慢，比 runtime 信号量慢 5-10 倍 |
+| **功能** | 只能获取/释放 | 支持 select、超时、context 取消 |
+| **用途** | 锁的内部实现原语 | 用户层的并发控制 |
+
+---
+
+### 4. 性能差距的原因
+
+```
+Runtime 信号量获取流程：
+goroutine → Semacquire → gopark() → 让出 P
+                                        ↓ 唤醒
+                            goready() → 进入运行队列
+
+Channel 信号量获取流程：
+goroutine → ch <- struct{} → hchan 加锁 → 入等待队列 → gopark()
+                                                          ↓ 唤醒
+                    hchan 解锁 → 数据拷贝 → goready() → 进入运行队列
+```
+
+Channel 多了：hchan 加锁/解锁、数据拷贝、更多的函数调用栈。
+
+---
+
+### 5. 什么时候用哪个
+
+**用 Channel 信号量**：控制并发数（最多 N 个同时执行）
+
+```go
+sem := make(chan struct{}, 10)  // 最多 10 个并发
+sem <- struct{}{}               // 获取
+<-sem                           // 释放
+```
+
+这是 channel 的正确用途，语义清晰，支持超时和取消。
+
+**用 Mutex/RWMutex**：保护共享资源（同时只有一个能访问）
+
+```go
+mu.Lock()
+balance -= amount  // 临界区
+mu.Unlock()
+```
+
+底层用 runtime 信号量，性能最优。
+
+**不要**用 Mutex 来控制并发数，也**不要**用 channel 来保护临界区 — 工具用错地方才会觉得别扭。
+
+---
+
+### 6. 补充：Go 1.21 的 semweight
+
+Go 1.21 给 runtime 信号量加了 `semweight`（信号量权重），支持一次获取/释放多个令牌。这是 `sync.WaitGroup` 底层优化的基础，但这个 API 是 runtime 内部的，用户层用不到。
+
+---
+
+**面试一句话总结**：Runtime 信号量是调度器级别的原语，精确唤醒、极快、只能获取/释放；Channel 信号量是用户层的抽象，更灵活、支持超时取消、但性能差一个量级。两者不是替代关系，各自干各自的活。
+
+---
+
+## 十一、一句话总结
 
 > Mutex 用一个 int32 存了所有状态，正常模式自旋抢锁追求性能，等太久了就切换到饥饿模式保证公平；记住：绝对不要拷贝锁，加锁之后立刻 defer 解锁，锁的粒度越小越好。

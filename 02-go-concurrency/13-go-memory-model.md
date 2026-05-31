@@ -53,9 +53,9 @@ Happens-Before 是理解内存模型的唯一核心概念，非常简单：
 
 ## 三、Go 语言保证的 Happens-Before 规则
 
-Go 官方定义了 6 种一定会产生 happens-before 关系的场景。
+Go 官方定义了 7 种一定会产生 happens-before 关系的场景。
 
-**这 6 条是 Go 并发的根基，必须背下来！**
+**这 7 条是 Go 并发的根基，必须背下来！**
 
 ---
 
@@ -177,6 +177,32 @@ func main() {
 
 ---
 
+### 规则 7：Atomic 操作（Go 1.19 明确）
+
+```go
+var a int
+var done atomic.Bool  // Go 1.19 类型化原子操作
+
+// goroutine A
+a = 42            // A
+done.Store(true)  // 原子写
+
+// goroutine B
+if done.Load() {  // 原子读，B
+    print(a)      // 一定打印 42 ✅
+}
+```
+
+**Go 1.19 明确：`sync/atomic` 操作提供与锁相同的 happens-before 保证。**
+
+`Store` happens-before 对应的 `Load`。同一 goroutine 中 `a = 42` 排在 `Store` 前面，所以 `a = 42` 也 happens-before `Load`。
+
+**为什么 Go 1.19 要更新？**
+
+Go 1.19 之前，`sync/atomic` 的 happens-before 关系是隐含的，文档没写清楚。1.19 把内存模型正式对齐 C++/Rust 等语言，明确声明 atomic 操作提供完整的同步保证。这意味着用 `atomic` 做同步和用 `mutex` 一样可靠，只是写法更轻量。
+
+---
+
 ### 规则 6：Once
 
 ```go
@@ -270,22 +296,86 @@ func GetConfig() *Config {
 
 **Java 里用 volatile 可以修，Go 里根本没有 volatile！**
 
-**正确做法：不要搞什么双检查锁，老老实实每次加锁，或者用 sync.Once！**
+**正确做法有以下三种：**
+
+#### 方案 1：sync.Once（最推荐）
 
 ```go
-// ✅ 正确，用 Once
+// ✅ 正确，用 Once — 内存模型保证，100% 安全
 var once sync.Once
 var config *Config
 
 func GetConfig() *Config {
     once.Do(func() {
-        config = &Config{}
+        config = &Config{Host: "localhost", Port: 8080}
     })
     return config
 }
 ```
 
-Once 是内存模型保证的，100% 安全。
+Once 是内存模型保证的，100% 安全。Once.Do 中 f 的返回 happens-before 任何 Once.Do 调用返回。
+
+#### 方案 2：Mutex（每次加锁，简单粗暴）
+
+```go
+// ✅ 正确，每次加锁 — 逻辑简单，不容易出错
+var mu sync.Mutex
+var config *Config
+
+func GetConfig() *Config {
+    mu.Lock()
+    defer mu.Unlock()
+    if config == nil {
+        config = &Config{Host: "localhost", Port: 8080}
+    }
+    return config
+}
+```
+
+开销比 Once 大一点（每次调用都加锁），但 Unlock happens-before 下一次 Lock，内存模型保证可见性。大多数场景这点开销完全可以忽略。
+
+#### 方案 3：包级别初始化（最简单，初始化不依赖参数时用）
+
+```go
+// ✅ 正确，包级别变量 — 天然线程安全，连锁都不需要
+var config = &Config{Host: "localhost", Port: 8080}
+
+func GetConfig() *Config {
+    return config
+}
+```
+
+包级别变量在 `init` 之前就初始化好了，所有 goroutine 启动时一定能看到完整的值。
+
+#### 为什么双检查锁在 Go 里无解
+
+```go
+// ❌ 回顾问题所在
+if config == nil {          // ① 无锁检查：另一个 goroutine 可能正在执行 ③
+    mu.Lock()
+    defer mu.Unlock()
+    if config == nil {      // ② 加锁后再检查
+        config = &Config{}  // ③ 赋值：可能被重排！
+    }
+}
+return config               // ④ 可能拿到未初始化完的对象
+```
+
+关键问题在 ③ → ④：`config = &Config{}` 不是原子操作，实际是：
+1. 分配内存，得到指针
+2. 把指针赋给 `config`
+3. 初始化字段
+
+编译器/CPU 可能重排为 1 → 2 → 3 或 1 → 3 → 2，另一个 goroutine 在 ① 处看到 `config != nil` 就直接返回了，但字段可能还没初始化完。Go 没有 volatile，无法阻止这种重排，所以双检查锁无解。
+
+#### 方案选型
+
+| 方案 | 性能 | 复杂度 | 适用场景 |
+|------|------|--------|----------|
+| 包级别初始化 | 最好 | 最低 | 初始化不依赖参数时首选 |
+| `sync.Once` | 好 | 低 | 需要延迟初始化时首选 |
+| 每次加锁 | 稍差 | 低 | 简单场景，性能不敏感 |
+| 双检查锁 | - | - | Go 里永远不要用 |
 
 ---
 
@@ -407,7 +497,7 @@ Go 的内存模型里，只有上面列的 6 种场景有 happens-before 保证�
 |------|------|
 | 什么是内存模型？ | 内存模型定义了多线程环境下内存操作的可见性和顺序保证，告诉你一个 goroutine 的写什么时候能被另一个 goroutine 看到。 |
 | 什么是 Happens-Before？ | 如果 A happens before B，那么 A 对内存的所有写操作对 B 是 100% 可见的。没有 happens-before 关系的话，可见性完全不确定。 |
-| Go 有哪些保证 happens-before 的场景？ | 6 种：1. goroutine 启动；2. goroutine 退出；3. channel 发送；4. channel 关闭；5. Mutex Unlock；6. Once.Do。 |
+| Go 有哪些保证 happens-before 的场景？ | 7 种：1. goroutine 启动；2. goroutine 退出；3. channel 发送；4. channel 关闭；5. Mutex Unlock；6. Once.Do；7. atomic 操作（Go 1.19 明确）。 |
 | 双检查锁（Double-Checked Locking）在 Go 里是对的吗？ | 绝对错误！Go 没有 volatile，赋值可能被重排，可能拿到非 nil 但未初始化的指针。用 sync.Once。 |
 | 用 bool 变量控制 goroutine 退出是对的吗？ | 错误！没有同步的话，CPU 可能缓存变量，永远看不到更新，或者编译器直接优化掉。用 channel 或者 atomic。 |
 | Go 有 volatile 关键字吗？ | 没有。Go 的内存模型不依赖 volatile，要用 channel、Mutex、atomic 来保证可见性。 |
@@ -422,4 +512,4 @@ Go 的内存模型里，只有上面列的 6 种场景有 happens-before 保证�
 
 ## 八、一句话总结
 
-> Go 内存模型的核心就是 6 条 happens-before 规则，只有这 6 种场景能保证可见性；不要写双检查锁，不要用 flag 控制 goroutine，不要瞎搞无锁编程，老老实实⽤ channel 和 Mutex，99% 的并发 bug 都能避免。
+> Go 内存模型的核心就是 7 条 happens-before 规则，只有这 7 种场景能保证可见性；不要写双检查锁，不要用 flag 控制 goroutine，不要瞎搞无锁编程，老老实实⽤ channel 和 Mutex，99% 的并发 bug 都能避免。

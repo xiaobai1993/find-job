@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go sync.Pool 对象池动态可视化</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+        .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+        .header { text-align: center; margin-bottom: 22px; }
+        .header h1 { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+
+        /* Legend */
+        .legend { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #94a3b8; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+        /* Controls */
+        .controls { display: flex; gap: 8px; justify-content: center; margin-bottom: 18px; flex-wrap: wrap; }
+        .btn { padding: 9px 18px; border: none; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+        .btn-get { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+        .btn-put { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+        .btn-gc { background: linear-gradient(135deg, #f59e0b, #d97706); color: #1a1a1a; }
+        .btn-auto { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+        .btn-reset { background: #334155; color: #cbd5e1; }
+
+        /* Stats */
+        .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+        .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px; text-align: center; }
+        .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }
+        .stat-value { font-size: 24px; font-weight: 800; font-family: 'SF Mono', monospace; }
+        .stat-sub { font-size: 10px; color: #475569; margin-top: 2px; }
+        .stat-cyan .stat-value { color: #22d3ee; }
+        .stat-green .stat-value { color: #4ade80; }
+        .stat-blue .stat-value { color: #60a5fa; }
+        .stat-yellow .stat-value { color: #facc15; }
+        .stat-pink .stat-value { color: #f472b6; }
+
+        /* Action Bar */
+        .action-bar { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 10px 16px; font-size: 13px; text-align: center; margin-bottom: 18px; min-height: 40px; display: flex; align-items: center; justify-content: center; }
+        .action-bar .hl { color: #22d3ee; font-weight: 700; }
+        .action-bar .hl-gc { color: #f59e0b; font-weight: 700; }
+        .action-bar .hl-get { color: #4ade80; font-weight: 700; }
+        .action-bar .hl-put { color: #60a5fa; font-weight: 700; }
+        .action-bar .hl-steal { color: #f472b6; font-weight: 700; }
+        .action-bar .hl-new { color: #a78bfa; font-weight: 700; }
+
+        /* Main Visual */
+        .main-visual { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+
+        /* P Row */
+        .p-row { display: flex; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; justify-content: center; }
+        .p-card {
+            background: #0f172a; border: 2px solid #334155; border-radius: 12px; padding: 12px;
+            min-width: 200px; flex: 1; max-width: 300px; transition: border-color 0.3s;
+        }
+        .p-card.active-p { border-color: #22d3ee; box-shadow: 0 0 12px rgba(34,211,238,0.15); }
+        .p-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .p-badge { background: #1e3a5f; color: #7dd3fc; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; font-family: 'SF Mono', monospace; }
+        .p-card.active-p .p-badge { background: #083344; color: #22d3ee; }
+
+        /* Private Slot */
+        .private-slot {
+            background: #0c4a6e; border: 1px solid #0ea5e9; border-radius: 8px;
+            padding: 6px 10px; margin-bottom: 8px; min-height: 32px;
+            display: flex; align-items: center; gap: 6px; font-size: 12px;
+        }
+        .private-slot.empty { border-color: #334155; background: #1e293b; }
+        .private-label { font-size: 10px; color: #7dd3fc; font-weight: 600; text-transform: uppercase; }
+        .private-slot.empty .private-label { color: #475569; }
+
+        /* Shared Chain */
+        .shared-section { margin-top: 4px; }
+        .shared-label { font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+        .shared-chain {
+            display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 30px;
+            padding: 4px 6px; background: #1e293b; border-radius: 6px; border: 1px dashed #334155;
+        }
+        .shared-chain.has-items { border-style: solid; border-color: #3b82f6; }
+
+        /* Object chip */
+        .obj-chip {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 3px 8px; border-radius: 5px; font-size: 11px; font-weight: 700;
+            font-family: 'SF Mono', monospace; transition: all 0.3s;
+        }
+        .obj-chip.in-private { background: #083344; color: #22d3ee; border: 1px solid #0ea5e9; }
+        .obj-chip.in-shared { background: #1e3a5f; color: #7dd3fc; border: 1px solid #2563eb; }
+        .obj-chip.in-victim { background: #3b1764; color: #d8b4fe; border: 1px solid #7c3aed; opacity: 0.7; }
+        .obj-chip.new-obj { background: #052e16; color: #4ade80; border: 1px solid #22c55e; animation: pop-in 0.3s ease; }
+        .obj-chip.stolen { background: #4a1d6e; color: #f0abfc; border: 1px solid #c026d3; }
+        .obj-chip.empty-slot { background: transparent; color: #334155; border: 1px dashed #334155; min-width: 30px; }
+
+        @keyframes pop-in { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+        .chain-arrow { color: #475569; font-size: 14px; }
+
+        /* Victim Section */
+        .victim-section {
+            margin-top: 16px; padding: 14px; background: #1a0f2e; border: 2px dashed #7c3aed;
+            border-radius: 12px; transition: all 0.4s;
+        }
+        .victim-section.empty-victim { border-color: #334155; background: #0f172a; }
+        .victim-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .victim-badge { background: #3b1764; color: #d8b4fe; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+        .victim-section.empty-victim .victim-badge { background: #1e293b; color: #475569; }
+        .victim-desc { font-size: 10px; color: #64748b; }
+        .victim-items { display: flex; gap: 4px; flex-wrap: wrap; min-height: 28px; }
+        .victim-empty { color: #475569; font-size: 12px; font-style: italic; }
+
+        /* GC Timer */
+        .gc-timer {
+            margin-top: 14px; padding: 10px 14px; background: #1e293b; border: 1px solid #334155;
+            border-radius: 8px; display: flex; align-items: center; gap: 10px;
+        }
+        .gc-timer-label { font-size: 11px; color: #64748b; font-weight: 600; }
+        .gc-timer-bar { flex: 1; height: 8px; background: #0f172a; border-radius: 4px; overflow: hidden; }
+        .gc-timer-fill { height: 100%; border-radius: 4px; transition: width 0.3s; background: #f59e0b; }
+        .gc-timer-fill.danger { background: #ef4444; }
+        .gc-round { font-size: 11px; color: #94a3b8; font-family: 'SF Mono', monospace; }
+
+        /* Flow Steps */
+        .flow-section { margin-bottom: 18px; }
+        .flow-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+        .flow-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+        .flow-tab { padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid #334155; background: #0f172a; color: #64748b; transition: all 0.2s; }
+        .flow-tab.active-get { background: #052e16; color: #4ade80; border-color: #22c55e; }
+        .flow-tab.active-put { background: #1e3a5f; color: #7dd3fc; border-color: #3b82f6; }
+        .flow-tab.active-gc { background: #451a03; color: #fbbf24; border-color: #f59e0b; }
+        .flow-steps { display: flex; flex-direction: column; gap: 5px; }
+        .flow-step { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 7px; background: #0f172a; border: 1px solid #334155; transition: all 0.3s; font-size: 12px; }
+        .flow-step.active-get { border-color: #22c55e; background: #052e16; }
+        .flow-step.active-put { border-color: #3b82f6; background: #1e3a5f; }
+        .flow-step.active-gc { border-color: #f59e0b; background: #451a03; }
+        .flow-step.done { opacity: 0.45; }
+        .flow-step .fi { width: 20px; height: 20px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; background: #334155; color: #94a3b8; flex-shrink: 0; }
+        .flow-step.active-get .fi { background: #22c55e; color: #052e16; }
+        .flow-step.active-put .fi { background: #3b82f6; color: white; }
+        .flow-step.active-gc .fi { background: #f59e0b; color: #451a03; }
+
+        /* Log */
+        .log-section { margin-bottom: 18px; }
+        .log-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; max-height: 170px; overflow-y: auto; }
+        .log-title { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600; }
+        .log-entry { font-size: 11px; font-family: 'SF Mono','Fira Code',monospace; padding: 2px 0; display: flex; gap: 6px; align-items: baseline; }
+        .log-time { color: #475569; flex-shrink: 0; }
+        .log-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+        .log-tag.get { background: #052e16; color: #4ade80; }
+        .log-tag.put { background: #1e3a5f; color: #7dd3fc; }
+        .log-tag.gc { background: #451a03; color: #fbbf24; }
+        .log-tag.steal { background: #3b1764; color: #d8b4fe; }
+        .log-tag.new { background: #052e16; color: #86efac; }
+        .log-tag.victim { background: #3b1764; color: #c084fc; }
+        .log-msg { color: #cbd5e1; }
+
+        @media (max-width: 900px) {
+            .stats { grid-template-columns: repeat(3, 1fr); }
+            .p-row { flex-direction: column; align-items: stretch; }
+            .p-card { max-width: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Go sync.Pool 对象池动态可视化</h1>
+        <p>本地池 private + shared | 跨 P 窃取 | 两轮 GC 清理 local → victim → 清空</p>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#22d3ee"></div>Private 专属</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Shared 共享链</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div>Victim 缓存</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>New 新建</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#c026d3"></div>跨 P 窃取</div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-get" onclick="doGet()" id="btnGet">Get() 取对象</button>
+        <button class="btn btn-put" onclick="doPut()" id="btnPut">Put() 放对象</button>
+        <button class="btn btn-gc" onclick="doGC()" id="btnGC">触发 GC</button>
+        <button class="btn btn-auto" onclick="autoDemo()">自动演示</button>
+        <button class="btn btn-reset" onclick="resetAll()">重置</button>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card stat-cyan"><div class="stat-label">Local 对象</div><div class="stat-value" id="stLocal">0</div><div class="stat-sub">当前 P 本地池</div></div>
+        <div class="stat-card stat-green"><div class="stat-label">Get 次数</div><div class="stat-value" id="stGet">0</div><div class="stat-sub">其中命中本地</div></div>
+        <div class="stat-card stat-blue"><div class="stat-label">Put 次数</div><div class="stat-value" id="stPut">0</div><div class="stat-sub">放回池中</div></div>
+        <div class="stat-card stat-yellow"><div class="stat-label">GC 轮次</div><div class="stat-value" id="stGC">0</div><div class="stat-sub">两轮清理周期</div></div>
+        <div class="stat-card stat-pink"><div class="stat-label">New 调用</div><div class="stat-value" id="stNew">0</div><div class="stat-sub">池空时新建</div></div>
+    </div>
+
+    <div class="action-bar" id="actionBar">空闲 — 等待操作</div>
+
+    <div class="main-visual">
+        <!-- P Cards -->
+        <div class="p-row" id="pRow"></div>
+
+        <!-- Victim -->
+        <div class="victim-section empty-victim" id="victimSection">
+            <div class="victim-header">
+                <span class="victim-badge" id="victimBadge">Victim 缓存</span>
+                <span class="victim-desc" id="victimDesc">上一轮 GC 的冷备份，下一轮 GC 清空</span>
+            </div>
+            <div class="victim-items" id="victimItems">
+                <span class="victim-empty">空</span>
+            </div>
+        </div>
+
+        <!-- GC Timer -->
+        <div class="gc-timer">
+            <span class="gc-timer-label">GC 计时</span>
+            <div class="gc-timer-bar"><div class="gc-timer-fill" id="gcFill" style="width:0%"></div></div>
+            <span class="gc-round" id="gcRound">第 0 轮 GC</span>
+        </div>
+    </div>
+
+    <!-- Flow -->
+    <div class="flow-section">
+        <div class="flow-panel">
+            <div class="flow-tabs">
+                <div class="flow-tab active-get" id="ftabGet" onclick="showFlow('get')">Get()</div>
+                <div class="flow-tab" id="ftabPut" onclick="showFlow('put')">Put()</div>
+                <div class="flow-tab" id="ftabGC" onclick="showFlow('gc')">GC 清理</div>
+            </div>
+            <div class="flow-steps" id="flowSteps"></div>
+        </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-section">
+        <div class="log-panel">
+            <div class="log-title">操作日志</div>
+            <div id="logContent"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const NUM_P = 3;
+const MAX_SHARED = 4;
+
+const flowDefs = {
+    get: [
+        {t:'检查 private', d:'当前 P 的 private 字段，完全无锁'},
+        {t:'检查 shared 头部', d:'当前 P 的 shared poolChain 头部弹出一个'},
+        {t:'窃取其他 P shared 尾部', d:'从其他 P 的 shared 尾部偷一个（跨 P 加锁）'},
+        {t:'检查 victim', d:'去 victim 缓存找（上一轮 GC 的对象）'},
+        {t:'调用 New()', d:'全部空了，调用 New 创建新对象'},
+    ],
+    put: [
+        {t:'检查 private', d:'private 为空？直接放入 private，无锁'},
+        {t:'放入 shared 头部', d:'private 已满，放入 shared poolChain 头部'},
+    ],
+    gc: [
+        {t:'local → victim', d:'把整个 local 移到 victim，old victim 被丢弃'},
+        {t:'清空 local', d:'新的 local 为空，开始积累新对象'},
+        {t:'效果', d:'对象至少活过一轮 GC，最多两轮 GC'},
+    ],
+};
+
+let S = {
+    processors: [],  // [{private: obj|null, shared: [obj,...]}]
+    victim: [],      // [obj,...]
+    currentP: 0,
+    nextObjId: 1,
+    gcCount: 0,
+    getOps: 0,
+    putOps: 0,
+    newOps: 0,
+    localHits: 0,
+    animating: false,
+    flowTab: 'get',
+    flowIdx: -1,
+    gcProgress: 0,
+};
+
+function mkObj(id) { return { id: id || S.nextObjId++, tag: 'Buf' }; }
+
+function resetAll() {
+    S = { processors:[], victim:[], currentP:0, nextObjId:1, gcCount:0, getOps:0, putOps:0, newOps:0, localHits:0, animating:false, flowTab:'get', flowIdx:-1, gcProgress:0 };
+    for (let i = 0; i < NUM_P; i++) S.processors.push({private:null, shared:[]});
+    render();
+    clearLog();
+    showFlow('get');
+}
+
+// ===== Rendering =====
+function render() {
+    // P Cards
+    const row = document.getElementById('pRow');
+    row.innerHTML = '';
+    S.processors.forEach((p, i) => {
+        const isActive = i === S.currentP;
+        const card = document.createElement('div');
+        card.className = 'p-card' + (isActive ? ' active-p' : '');
+        card.onclick = () => { S.currentP = i; render(); };
+
+        // Private
+        const privEmpty = !p.private;
+        let privHTML;
+        if (privEmpty) {
+            privHTML = '<div class="private-slot empty"><span class="private-label">Private</span><span style="color:#334155;font-size:11px">空</span></div>';
+        } else {
+            privHTML = `<div class="private-slot"><span class="private-label">Private</span><span class="obj-chip in-private">${p.private.tag}${p.private.id}</span></div>`;
+        }
+
+        // Shared
+        const sharedHasItems = p.shared.length > 0;
+        let sharedHTML = '<div class="shared-section"><div class="shared-label">Shared chain (头← 尾→)</div><div class="shared-chain' + (sharedHasItems ? ' has-items' : '') + '">';
+        if (sharedHasItems) {
+            p.shared.forEach((obj, j) => {
+                if (j > 0) sharedHTML += '<span class="chain-arrow">→</span>';
+                sharedHTML += `<span class="obj-chip in-shared">${obj.tag}${obj.id}</span>`;
+            });
+        } else {
+            sharedHTML += '<span style="color:#334155;font-size:11px;font-style:italic">空</span>';
+        }
+        sharedHTML += '</div></div>';
+
+        card.innerHTML = `<div class="p-card-header"><span class="p-badge">P${i}</span>${isActive ? '<span style="font-size:10px;color:#22d3ee">当前</span>' : ''}</div>${privHTML}${sharedHTML}`;
+        row.appendChild(card);
+    });
+
+    // Victim
+    const vs = document.getElementById('victimSection');
+    const vi = document.getElementById('victimItems');
+    const vb = document.getElementById('victimBadge');
+    const vd = document.getElementById('victimDesc');
+    if (S.victim.length > 0) {
+        vs.className = 'victim-section';
+        vb.textContent = `Victim 缓存 (${S.victim.length} 个对象)`;
+        vd.textContent = '下一轮 GC 将清空这些对象';
+        vi.innerHTML = S.victim.map(o => `<span class="obj-chip in-victim">${o.tag}${o.id}</span>`).join('');
+    } else {
+        vs.className = 'victim-section empty-victim';
+        vb.textContent = 'Victim 缓存';
+        vd.textContent = S.gcCount === 0 ? '尚未触发 GC，无 victim' : 'victim 已被清空';
+        vi.innerHTML = '<span class="victim-empty">空</span>';
+    }
+
+    // Stats
+    let totalLocal = 0;
+    S.processors.forEach(p => { if(p.private) totalLocal++; totalLocal += p.shared.length; });
+    document.getElementById('stLocal').textContent = totalLocal;
+    document.getElementById('stGet').textContent = S.getOps;
+    document.getElementById('stPut').textContent = S.putOps;
+    document.getElementById('stGC').textContent = S.gcCount;
+    document.getElementById('stNew').textContent = S.newOps;
+
+    // GC timer
+    document.getElementById('gcFill').style.width = Math.min(S.gcProgress, 100) + '%';
+    document.getElementById('gcFill').className = 'gc-timer-fill' + (S.gcProgress > 70 ? ' danger' : '');
+    document.getElementById('gcRound').textContent = `第 ${S.gcCount} 轮 GC`;
+
+    // Buttons
+    document.getElementById('btnGet').disabled = S.animating;
+    document.getElementById('btnPut').disabled = S.animating;
+    document.getElementById('btnGC').disabled = S.animating;
+}
+
+function setAction(html) { document.getElementById('actionBar').innerHTML = html; }
+
+// ===== Flow =====
+function showFlow(tab) {
+    S.flowTab = tab;
+    S.flowIdx = -1;
+    document.querySelectorAll('.flow-tab').forEach(t => t.className = 'flow-tab');
+    const map = {get:'ftabGet', put:'ftabPut', gc:'ftabGC'};
+    const clsMap = {get:'active-get', put:'active-put', gc:'active-gc'};
+    const el = document.getElementById(map[tab]);
+    if (el) el.className = 'flow-tab ' + clsMap[tab];
+    renderFlow();
+}
+
+function setFlowActive(tab, idx) {
+    S.flowTab = tab;
+    S.flowIdx = idx;
+    showFlow(tab);
+    S.flowIdx = idx;
+    renderFlow();
+}
+
+function renderFlow() {
+    const steps = flowDefs[S.flowTab];
+    const clsMap = {get:'active-get', put:'active-put', gc:'active-gc'};
+    const cls = clsMap[S.flowTab];
+    const c = document.getElementById('flowSteps');
+    c.innerHTML = steps.map((s, i) => {
+        const act = i === S.flowIdx ? cls : (i < S.flowIdx ? 'done' : '');
+        return `<div class="flow-step ${act}"><div class="fi">${i}</div><div><div>${s.t}</div><div style="font-size:10px;color:#64748b">${s.d}</div></div></div>`;
+    }).join('');
+}
+
+// ===== Log =====
+function addLog(tag, msg) {
+    const lc = document.getElementById('logContent');
+    const now = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const d = document.createElement('div');
+    d.className = 'log-entry';
+    d.innerHTML = `<span class="log-time">${now}</span><span class="log-tag ${tag}">${tag.toUpperCase()}</span><span class="log-msg">${msg}</span>`;
+    lc.prepend(d);
+    while(lc.children.length > 60) lc.removeChild(lc.lastChild);
+}
+function clearLog() { document.getElementById('logContent').innerHTML = ''; }
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ===== Get =====
+async function doGet() {
+    if (S.animating) return;
+    S.animating = true;
+    S.getOps++;
+    const p = S.processors[S.currentP];
+
+    // Step 1: Check private
+    setFlowActive('get', 0);
+    if (p.private) {
+        const obj = p.private;
+        p.private = null;
+        setAction(`P${S.currentP}: <span class="hl-get">从 private 取出 ${obj.tag}${obj.id}</span> — 完全无锁！`);
+        addLog('get', `P${S.currentP}: ✅ 命中 private → ${obj.tag}${obj.id} (无锁)`);
+        S.localHits++;
+        S.animating = false;
+        S.gcProgress = Math.min(S.gcProgress + 8, 100);
+        render();
+        return;
+    }
+    setAction(`P${S.currentP}: private 为空，继续查找...`);
+    addLog('get', `P${S.currentP}: private 空，查找 shared`);
+    render();
+    await sleep(400);
+
+    // Step 2: Check shared head
+    setFlowActive('get', 1);
+    if (p.shared.length > 0) {
+        const obj = p.shared.shift();
+        setAction(`P${S.currentP}: <span class="hl-get">从 shared 头部弹出 ${obj.tag}${obj.id}</span>`);
+        addLog('get', `P${S.currentP}: ✅ 命中 shared 头部 → ${obj.tag}${obj.id}`);
+        S.localHits++;
+        S.animating = false;
+        S.gcProgress = Math.min(S.gcProgress + 8, 100);
+        render();
+        return;
+    }
+    setAction(`P${S.currentP}: shared 为空，尝试窃取其他 P...`);
+    addLog('get', `P${S.currentP}: shared 空，尝试跨 P 窃取`);
+    render();
+    await sleep(400);
+
+    // Step 3: Steal from other P's shared tail
+    setFlowActive('get', 2);
+    let stolen = false;
+    for (let i = 0; i < NUM_P; i++) {
+        if (i === S.currentP) continue;
+        const other = S.processors[i];
+        if (other.shared.length > 0) {
+            const obj = other.shared.pop(); // steal from tail
+            setAction(`P${S.currentP}: <span class="hl-steal">从 P${i} shared 尾部窃取 ${obj.tag}${obj.id}</span> — 跨 P 加锁`);
+            addLog('steal', `P${S.currentP}: ✅ 窃取 P${i} shared 尾部 → ${obj.tag}${obj.id} (跨 P 加锁)`);
+            stolen = true;
+            break;
+        }
+    }
+    if (stolen) {
+        S.animating = false;
+        S.gcProgress = Math.min(S.gcProgress + 8, 100);
+        render();
+        return;
+    }
+    setAction(`P${S.currentP}: 其他 P 的 shared 也空了，检查 victim...`);
+    addLog('get', `P${S.currentP}: 其他 P shared 也空`);
+    render();
+    await sleep(400);
+
+    // Step 4: Check victim
+    setFlowActive('get', 3);
+    if (S.victim.length > 0) {
+        const obj = S.victim.shift();
+        setAction(`P${S.currentP}: <span class="hl">从 victim 缓存取出 ${obj.tag}${obj.id}</span> — 复活！`);
+        addLog('victim', `P${S.currentP}: ✅ 命中 victim → ${obj.tag}${obj.id} (对象复活)`);
+        S.animating = false;
+        S.gcProgress = Math.min(S.gcProgress + 8, 100);
+        render();
+        return;
+    }
+    setAction(`P${S.currentP}: victim 也空了，调用 New() 创建新对象`);
+    addLog('get', `P${S.currentP}: victim 空，需要 New()`);
+    render();
+    await sleep(400);
+
+    // Step 5: New()
+    setFlowActive('get', 4);
+    S.newOps++;
+    const newObj = mkObj();
+    setAction(`P${S.currentP}: <span class="hl-new">New() 创建 ${newObj.tag}${newObj.id}</span> — 池全空，必须新建`);
+    addLog('new', `P${S.currentP}: New() → ${newObj.tag}${newObj.id}`);
+    S.animating = false;
+    S.gcProgress = Math.min(S.gcProgress + 8, 100);
+    render();
+}
+
+// ===== Put =====
+async function doPut() {
+    if (S.animating) return;
+    S.animating = true;
+    S.putOps++;
+    const p = S.processors[S.currentP];
+    const obj = mkObj();
+
+    // Step 1: Check private
+    setFlowActive('put', 0);
+    if (!p.private) {
+        p.private = obj;
+        setAction(`P${S.currentP}: <span class="hl-put">放入 private ${obj.tag}${obj.id}</span> — 完全无锁！`);
+        addLog('put', `P${S.currentP}: ✅ 放入 private → ${obj.tag}${obj.id} (无锁)`);
+        S.animating = false;
+        S.gcProgress = Math.min(S.gcProgress + 8, 100);
+        render();
+        return;
+    }
+    setAction(`P${S.currentP}: private 已满，放入 shared...`);
+    addLog('put', `P${S.currentP}: private 已占，放入 shared`);
+    render();
+    await sleep(400);
+
+    // Step 2: Put shared head
+    setFlowActive('put', 1);
+    if (p.shared.length < MAX_SHARED) {
+        p.shared.unshift(obj);
+        setAction(`P${S.currentP}: <span class="hl-put">放入 shared 头部 ${obj.tag}${obj.id}</span>`);
+        addLog('put', `P${S.currentP}: ✅ 放入 shared 头部 → ${obj.tag}${obj.id}`);
+    } else {
+        setAction(`P${S.currentP}: shared 已满 (${MAX_SHARED})，<span class="hl-gc">丢弃 ${obj.tag}${obj.id}</span>`);
+        addLog('put', `P${S.currentP}: shared 已满，丢弃 ${obj.tag}${obj.id}`);
+    }
+    S.animating = false;
+    S.gcProgress = Math.min(S.gcProgress + 8, 100);
+    render();
+}
+
+// ===== GC =====
+async function doGC() {
+    if (S.animating) return;
+    S.animating = true;
+    S.gcCount++;
+
+    // Step 1: local → victim
+    setFlowActive('gc', 0);
+    setAction(`<span class="hl-gc">GC 第 ${S.gcCount} 轮：local → victim</span>，旧 victim 被丢弃！`);
+    addLog('gc', `GC 第${S.gcCount}轮: local → victim, 旧 victim 被清空`);
+
+    // Collect all local objects
+    const allLocal = [];
+    S.processors.forEach(p => {
+        if (p.private) { allLocal.push(p.private); p.private = null; }
+        p.shared.forEach(o => allLocal.push(o));
+        p.shared = [];
+    });
+
+    // Old victim is discarded, new victim = old local
+    const oldVictimCount = S.victim.length;
+    S.victim = allLocal;
+    addLog('gc', `旧 victim ${oldVictimCount} 个对象被丢弃，新 victim ${S.victim.length} 个对象`);
+    render();
+    await sleep(600);
+
+    // Step 2: local cleared
+    setFlowActive('gc', 1);
+    setAction(`<span class="hl-gc">local 已清空</span>，新对象将重新积累到 local`);
+    addLog('gc', `所有 P 的 local 已清空，开始新周期`);
+    render();
+    await sleep(400);
+
+    // Step 3: Effect
+    setFlowActive('gc', 2);
+    setAction(`对象至少活过一轮 GC，最多两轮 GC。victim 中 ${S.victim.length} 个对象等待下次 GC 清空`);
+    addLog('gc', `victim 缓存 ${S.victim.length} 个对象，下一轮 GC 清空`);
+    S.gcProgress = 0;
+    S.animating = false;
+    render();
+}
+
+// ===== Auto Demo =====
+async function autoDemo() {
+    if (S.animating) return;
+    resetAll();
+    addLog('get', '=== 自动演示开始 ===');
+
+    // Phase 1: Build up pool
+    setAction('阶段 1: 往池里 Put 对象，建立本地缓存');
+    await sleep(500);
+    await doPut(); await sleep(200);  // P0 private
+    await doPut(); await sleep(200);  // P0 shared
+    await doPut(); await sleep(200);  // P0 shared
+
+    S.currentP = 1; render(); await sleep(200);
+    await doPut(); await sleep(200);  // P1 private
+    await doPut(); await sleep(200);  // P1 shared
+
+    S.currentP = 2; render(); await sleep(200);
+    await doPut(); await sleep(200);  // P2 private
+
+    // Phase 2: Get from pool
+    await sleep(600);
+    setAction('阶段 2: 从池里 Get 对象 — 命中 private / shared');
+    S.currentP = 0; render(); await sleep(200);
+    await doGet(); await sleep(200);  // P0 private hit
+    await doGet(); await sleep(200);  // P0 shared hit
+
+    // Phase 3: Cross-P steal
+    await sleep(600);
+    setAction('阶段 3: P0 的 local 空了，<span class="hl-steal">窃取其他 P</span>');
+    await doGet(); await sleep(300);  // steal from P1 or P2
+
+    // Phase 4: GC
+    await sleep(600);
+    setAction('阶段 4: 触发 GC — local 移到 victim');
+    // Put some objects back first so GC has something to move
+    await doPut(); await sleep(100);
+    S.currentP = 1; render(); await sleep(100);
+    await doPut(); await sleep(200);
+    await doGC();
+
+    // Phase 5: Get from victim after GC
+    await sleep(600);
+    setAction('阶段 5: GC 后 Get — 对象从 victim 复活！');
+    S.currentP = 0; render(); await sleep(200);
+    await doGet(); await sleep(200);
+
+    // Phase 6: Second GC — victim cleared
+    await sleep(600);
+    setAction('阶段 6: 第二次 GC — <span class="hl-gc">victim 彻底清空</span>');
+    await doGC();
+
+    // Phase 7: New() when pool is empty
+    await sleep(600);
+    setAction('阶段 7: 池全空 — <span class="hl-new">调用 New() 创建新对象</span>');
+    await doGet();
+
+    setAction('演示完成: Put 积累 → Get 命中 → 跨 P 窃取 → GC local→victim → victim 复活 → 二次 GC 清空 → New() 新建');
+    addLog('get', '=== 自动演示结束 ===');
+}
+
+// ===== Init =====
+resetAll();
+</script>
+
+<!-- 关键说明 -->
+<div style="max-width:1280px;margin:0 auto;padding:0 24px 32px">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:24px">
+        <h3 style="font-size:16px;font-weight:700;color:#94a3b8;margin-bottom:14px">关键说明</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;color:#cbd5e1;line-height:1.8">
+            <div>
+                <div style="color:#22d3ee;font-weight:700;margin-bottom:4px">本地池 + 窃取</div>
+                <div><span style="color:#22d3ee">Private</span>：当前 P 专属，Get/Put 完全无锁，性能最高</div>
+                <div><span style="color:#60a5fa">Shared</span>：共享链表，本 P 从头部拿，其他 P 从尾部窃取（需加锁）</div>
+                <div>Get 查找顺序：private → shared 头部 → 其他 P shared 尾部 → victim → New()</div>
+                <div>99% 命中 private，跨 P 窃取概率极低</div>
+            </div>
+            <div>
+                <div style="color:#f59e0b;font-weight:700;margin-bottom:4px">两轮 GC 清理机制</div>
+                <div>第 1 次 GC：<span style="color:#60a5fa">local → victim</span>，清空 local，旧 victim 被丢弃</div>
+                <div>第 2 次 GC：<span style="color:#a78bfa">victim 被清空</span>，对象真正释放</div>
+                <div>效果：对象至少活过一轮 GC，最多两轮 GC</div>
+                <div>Victim 缓存是 Go 1.15 引入的重要优化，避免 GC 后瞬间大量分配</div>
+            </div>
+            <div>
+                <div style="color:#4ade80;font-weight:700;margin-bottom:4px">正确用法</div>
+                <div>✅ bytes.Buffer、JSON 序列化缓冲区、临时结构体</div>
+                <div>✅ 对象 &gt; 1KB 或分配开销大的才值得用 Pool</div>
+                <div>✅ Get 出来后<span style="color:#f87171;font-weight:700">必须 Reset</span>，否则携带旧数据</div>
+                <div>✅ Put 回去前也要确保对象状态干净</div>
+            </div>
+            <div>
+                <div style="color:#ef4444;font-weight:700;margin-bottom:4px">常见坑</div>
+                <div>❌ 存数据库连接/TCP 连接 → GC 清 Pool 不调 Close()，连接泄漏</div>
+                <div>❌ Get 后忘记 Reset → 上次金额、订单号带到下次请求，资金故障</div>
+                <div>❌ 存大对象 → 高并发下池里对象越来越多，内存飙升</div>
+                <div>❌ 太小的对象用 Pool → Pool 开销比对象分配还大</div>
+            </div>
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #334155;font-size:11px;color:#475569;text-align:center">
+            来源：Go 1.22 sync.Pool 源码 · 对应文档 02-go-concurrency/07-waitgroup-once-pool-atomic.md
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

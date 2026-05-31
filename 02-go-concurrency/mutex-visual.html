@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Mutex 加锁解锁动态可视化</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .header { text-align: center; margin-bottom: 28px; }
+        .header h1 { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+
+        /* Controls */
+        .controls { display: flex; gap: 10px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+        .btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-lock { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+        .btn-unlock { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+        .btn-new { background: linear-gradient(135deg, #f59e0b, #d97706); color: #1a1a1a; }
+        .btn-reset { background: #334155; color: #cbd5e1; }
+        .btn-auto { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+
+        /* State Display */
+        .state-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+        .panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+        .panel-title { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; font-weight: 600; }
+
+        /* Mutex State Bits */
+        .state-bits { display: flex; gap: 2px; justify-content: center; margin-bottom: 12px; }
+        .bit-group { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .bit-cells { display: flex; gap: 2px; }
+        .bit-cell {
+            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+            border-radius: 6px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px; font-weight: 700;
+            transition: all 0.3s ease; border: 1px solid #475569; background: #0f172a; color: #64748b;
+        }
+        .bit-cell.active-locked { background: #dc2626; color: white; border-color: #ef4444; box-shadow: 0 0 12px rgba(239,68,68,0.4); }
+        .bit-cell.active-woken { background: #f59e0b; color: #1a1a1a; border-color: #fbbf24; box-shadow: 0 0 12px rgba(251,191,36,0.4); }
+        .bit-cell.active-starving { background: #a855f7; color: white; border-color: #c084fc; box-shadow: 0 0 12px rgba(192,132,252,0.4); }
+        .bit-cell.has-waiters { background: #1e3a5f; color: #60a5fa; border-color: #3b82f6; }
+        .bit-label { font-size: 10px; color: #475569; text-align: center; }
+
+        .state-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+        .state-item { text-align: center; padding: 8px; border-radius: 8px; background: #0f172a; border: 1px solid #334155; }
+        .state-item-label { font-size: 10px; color: #64748b; margin-bottom: 2px; }
+        .state-item-value { font-size: 16px; font-weight: 800; font-family: 'SF Mono', monospace; }
+        .state-item-value.off { color: #475569; }
+        .state-item-value.on-locked { color: #ef4444; }
+        .state-item-value.on-woken { color: #fbbf24; }
+        .state-item-value.on-starving { color: #c084fc; }
+        .state-item-value.waiters { color: #60a5fa; }
+
+        /* Mode Badge */
+        .mode-badge {
+            display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 20px;
+            font-size: 13px; font-weight: 700; margin-top: 8px;
+        }
+        .mode-badge.normal { background: #1e3a5f; color: #60a5fa; border: 1px solid #2563eb; }
+        .mode-badge.starving { background: #3b1764; color: #c084fc; border: 1px solid #7c3aed; animation: pulse-purple 1.5s infinite; }
+        @keyframes pulse-purple { 0%, 100% { box-shadow: 0 0 0 0 rgba(192,132,252,0.4); } 50% { box-shadow: 0 0 12px 4px rgba(192,132,252,0.2); } }
+        .mode-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .mode-badge.normal .mode-dot { background: #60a5fa; }
+        .mode-badge.starving .mode-dot { background: #c084fc; }
+
+        /* Semaphore */
+        .sema-display { display: flex; align-items: center; gap: 12px; justify-content: center; margin-top: 12px; }
+        .sema-val { font-size: 32px; font-weight: 800; font-family: 'SF Mono', monospace; color: #60a5fa; }
+        .sema-label { font-size: 12px; color: #64748b; }
+
+        /* Visual Area */
+        .visual-area { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; margin-bottom: 24px; min-height: 320px; position: relative; }
+
+        /* Lock Icon */
+        .lock-visual { text-align: center; margin-bottom: 24px; }
+        .lock-icon {
+            width: 80px; height: 80px; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center;
+            font-size: 36px; transition: all 0.4s ease; position: relative;
+        }
+        .lock-icon.unlocked { background: #0f172a; border: 2px solid #475569; }
+        .lock-icon.locked { background: #1c1030; border: 2px solid #7c3aed; box-shadow: 0 0 20px rgba(124,58,237,0.3); }
+        .lock-owner {
+            font-size: 12px; margin-top: 8px; font-weight: 600; min-height: 20px;
+            font-family: 'SF Mono', monospace;
+        }
+        .lock-owner.has-owner { color: #c084fc; }
+
+        /* Goroutine Queue */
+        .queue-section { margin-top: 16px; }
+        .queue-header { font-size: 12px; color: #64748b; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+        .queue-track {
+            min-height: 80px; background: #0f172a; border: 2px dashed #334155; border-radius: 12px;
+            padding: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+            transition: border-color 0.3s;
+        }
+        .queue-track.has-items { border-color: #3b82f6; border-style: solid; }
+        .queue-empty { color: #475569; font-size: 13px; font-style: italic; width: 100%; text-align: center; }
+
+        .goroutine {
+            width: 64px; height: 64px; border-radius: 12px; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+            transition: all 0.4s ease; position: relative; cursor: default;
+        }
+        .goroutine .g-icon { font-size: 20px; margin-bottom: 2px; }
+        .goroutine .g-name { font-family: 'SF Mono', monospace; }
+
+        .goroutine.running { background: #22c55e; color: #052e16; border: 2px solid #4ade80; box-shadow: 0 0 16px rgba(34,197,94,0.3); }
+        .goroutine.spinning { background: #f59e0b; color: #451a03; border: 2px solid #fbbf24; animation: spin-pulse 0.6s infinite; }
+        .goroutine.waiting { background: #1e3a5f; color: #93c5fd; border: 2px solid #3b82f6; }
+        .goroutine.waking { background: #3b1f6e; color: #d8b4fe; border: 2px solid #8b5cf6; animation: wake-flash 0.5s ease 3; }
+        .goroutine.starving-g { background: #581c87; color: #e9d5ff; border: 2px solid #a855f7; animation: pulse-purple 1s infinite; }
+
+        @keyframes spin-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+        @keyframes wake-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* Step Indicator */
+        .step-indicator {
+            position: absolute; top: 12px; right: 16px; background: #0f172a; border: 1px solid #334155;
+            border-radius: 8px; padding: 6px 12px; font-size: 12px; font-family: 'SF Mono', monospace;
+        }
+        .step-indicator .step-num { color: #60a5fa; font-weight: 700; }
+
+        /* Flow Diagram */
+        .flow-section { margin-bottom: 24px; }
+        .flow-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+        .flow-steps { display: flex; flex-direction: column; gap: 8px; }
+        .flow-step {
+            display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px;
+            background: #0f172a; border: 1px solid #334155; transition: all 0.3s ease;
+            font-size: 13px;
+        }
+        .flow-step.active { border-color: #3b82f6; background: #1e3a5f; }
+        .flow-step.active-starving { border-color: #a855f7; background: #3b1764; }
+        .flow-step.done { border-color: #22c55e; background: #052e16; opacity: 0.6; }
+        .flow-step.skipped { opacity: 0.3; }
+        .flow-step .step-icon { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; background: #334155; color: #94a3b8; flex-shrink: 0; }
+        .flow-step.active .step-icon { background: #3b82f6; color: white; }
+        .flow-step.active-starving .step-icon { background: #a855f7; color: white; }
+        .flow-step.done .step-icon { background: #22c55e; color: white; }
+        .flow-step .step-text { flex: 1; }
+        .flow-step .step-detail { font-size: 11px; color: #64748b; }
+        .flow-step.active .step-detail { color: #93c5fd; }
+        .flow-step.active-starving .step-detail { color: #d8b4fe; }
+
+        /* Log */
+        .log-section { margin-bottom: 24px; }
+        .log-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; max-height: 200px; overflow-y: auto; }
+        .log-title { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 600; }
+        .log-entry { font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; padding: 3px 0; display: flex; gap: 8px; align-items: baseline; }
+        .log-time { color: #475569; flex-shrink: 0; }
+        .log-tag { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+        .log-tag.lock { background: #1e3a5f; color: #60a5fa; }
+        .log-tag.unlock { background: #052e16; color: #4ade80; }
+        .log-tag.spin { background: #451a03; color: #fbbf24; }
+        .log-tag.starve { background: #3b1764; color: #c084fc; }
+        .log-tag.cas { background: #1e293b; color: #f87171; }
+        .log-tag.sema { background: #1e293b; color: #38bdf8; }
+        .log-msg { color: #cbd5e1; }
+
+        /* Legend */
+        .legend { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 24px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 4px; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .state-section { grid-template-columns: 1fr; }
+            .state-summary { grid-template-columns: repeat(2, 1fr); }
+            .bit-cell { width: 28px; height: 28px; font-size: 11px; }
+            .goroutine { width: 52px; height: 52px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Go Mutex 加锁解锁动态可视化</h1>
+        <p>sync.Mutex — 正常模式 / 饥饿模式 / 自旋 / CAS / 信号量 完整流程演示</p>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>持有锁</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>自旋中</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>等待队列</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>饥饿等待</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Locked 位</div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-lock" onclick="doLock()" id="btnLock">Goroutine Lock()</button>
+        <button class="btn btn-unlock" onclick="doUnlock()" id="btnUnlock" disabled>持有者 Unlock()</button>
+        <button class="btn btn-new" onclick="addGoroutine()">+ 新 Goroutine</button>
+        <button class="btn btn-auto" onclick="autoDemo()">自动演示</button>
+        <button class="btn btn-reset" onclick="resetAll()">重置</button>
+    </div>
+
+    <!-- State Display -->
+    <div class="state-section">
+        <div class="panel">
+            <div class="panel-title">Mutex State (int32)</div>
+            <div class="state-bits" id="stateBits">
+                <!-- Waiters bits 3-7 for display -->
+                <div class="bit-group">
+                    <div class="bit-label">waiters</div>
+                    <div class="bit-cells" id="waitersBits"></div>
+                </div>
+                <div class="bit-group">
+                    <div class="bit-label">starving</div>
+                    <div class="bit-cells"><div class="bit-cell" id="bitStarving">0</div></div>
+                </div>
+                <div class="bit-group">
+                    <div class="bit-label">woken</div>
+                    <div class="bit-cells"><div class="bit-cell" id="bitWoken">0</div></div>
+                </div>
+                <div class="bit-group">
+                    <div class="bit-label">locked</div>
+                    <div class="bit-cells"><div class="bit-cell" id="bitLocked">0</div></div>
+                </div>
+            </div>
+            <div class="state-summary" id="stateSummary">
+                <div class="state-item"><div class="state-item-label">Locked</div><div class="state-item-value off" id="sumLocked">0</div></div>
+                <div class="state-item"><div class="state-item-label">Woken</div><div class="state-item-value off" id="sumWoken">0</div></div>
+                <div class="state-item"><div class="state-item-label">Starving</div><div class="state-item-value off" id="sumStarving">0</div></div>
+                <div class="state-item"><div class="state-item-label">Waiters</div><div class="state-item-value waiters" id="sumWaiters">0</div></div>
+            </div>
+            <div style="text-align:center">
+                <div class="mode-badge normal" id="modeBadge">
+                    <div class="mode-dot"></div>
+                    <span id="modeText">正常模式</span>
+                </div>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Semaphore (uint32)</div>
+            <div class="sema-display">
+                <div>
+                    <div class="sema-val" id="semaVal">1</div>
+                    <div class="sema-label">可用令牌数</div>
+                </div>
+            </div>
+            <div style="margin-top:16px">
+                <div class="panel-title" style="margin-bottom:8px">当前流程</div>
+                <div id="currentAction" style="font-size:14px;color:#94a3b8;text-align:center;min-height:40px;display:flex;align-items:center;justify-content:center;">
+                    空闲 — 等待操作
+                </div>
+            </div>
+            <div style="margin-top:12px">
+                <div class="panel-title" style="margin-bottom:8px">锁持有者</div>
+                <div id="ownerDisplay" style="font-size:14px;color:#475569;text-align:center;font-family:'SF Mono',monospace;">
+                    无
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visual Area -->
+    <div class="visual-area">
+        <div class="step-indicator">步骤: <span class="step-num" id="stepNum">0</span></div>
+        <div class="lock-visual">
+            <div class="lock-icon unlocked" id="lockIcon">&#128275;</div>
+            <div class="lock-owner" id="lockOwner"></div>
+        </div>
+        <div class="queue-section">
+            <div class="queue-header">等待队列 (sudog 链表)</div>
+            <div class="queue-track" id="queueTrack">
+                <div class="queue-empty">队列为空</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flow Diagram -->
+    <div class="flow-section">
+        <div class="flow-panel">
+            <div class="panel-title">流程图</div>
+            <div class="flow-steps" id="flowSteps">
+                <div class="flow-step" id="fs-idle"><div class="step-icon">0</div><div><div class="step-text">空闲状态</div><div class="step-detail">等待 Lock() 或 Unlock() 操作</div></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-section">
+        <div class="log-panel">
+            <div class="log-title">操作日志</div>
+            <div id="logContent"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== State =====
+let state = {
+    locked: 0,
+    woken: 0,
+    starving: 0,
+    waiters: 0,
+    sema: 1,
+    owner: null,      // goroutine id holding the lock
+    queue: [],         // {id, waitTime, starving}
+    nextGid: 1,
+    step: 0,
+    animating: false,
+    autoRunning: false,
+};
+
+function resetAll() {
+    state = { locked:0, woken:0, starving:0, waiters:0, sema:1, owner:null, queue:[], nextGid:1, step:0, animating:false, autoRunning:false };
+    render();
+    clearLog();
+    setFlowIdle();
+    document.getElementById('btnLock').disabled = false;
+    document.getElementById('btnUnlock').disabled = true;
+}
+
+// ===== Rendering =====
+function render() {
+    // State bits
+    const bitL = document.getElementById('bitLocked');
+    const bitW = document.getElementById('bitWoken');
+    const bitS = document.getElementById('bitStarving');
+    bitL.textContent = state.locked;
+    bitL.className = 'bit-cell' + (state.locked ? ' active-locked' : '');
+    bitW.textContent = state.woken;
+    bitW.className = 'bit-cell' + (state.woken ? ' active-woken' : '');
+    bitS.textContent = state.starving;
+    bitS.className = 'bit-cell' + (state.starving ? ' active-starving' : '');
+
+    // Waiters bits (show 5 bits for simplicity)
+    const wb = document.getElementById('waitersBits');
+    wb.innerHTML = '';
+    for (let i = 4; i >= 0; i--) {
+        const c = document.createElement('div');
+        c.className = 'bit-cell' + ((state.waiters >> i) & 1 ? ' has-waiters' : '');
+        c.textContent = (state.waiters >> i) & 1;
+        wb.appendChild(c);
+    }
+
+    // Summary
+    const sL = document.getElementById('sumLocked');
+    sL.textContent = state.locked; sL.className = 'state-item-value ' + (state.locked ? 'on-locked' : 'off');
+    const sW = document.getElementById('sumWoken');
+    sW.textContent = state.woken; sW.className = 'state-item-value ' + (state.woken ? 'on-woken' : 'off');
+    const sS = document.getElementById('sumStarving');
+    sS.textContent = state.starving; sS.className = 'state-item-value ' + (state.starving ? 'on-starving' : 'off');
+    const sWt = document.getElementById('sumWaiters');
+    sWt.textContent = state.waiters; sWt.className = 'state-item-value waiters';
+
+    // Mode badge
+    const mb = document.getElementById('modeBadge');
+    const mt = document.getElementById('modeText');
+    if (state.starving) { mb.className = 'mode-badge starving'; mt.textContent = '饥饿模式'; }
+    else { mb.className = 'mode-badge normal'; mt.textContent = '正常模式'; }
+
+    // Semaphore
+    document.getElementById('semaVal').textContent = state.sema;
+
+    // Lock icon
+    const li = document.getElementById('lockIcon');
+    const lo = document.getElementById('lockOwner');
+    if (state.locked) {
+        li.className = 'lock-icon locked'; li.innerHTML = '&#128274;';
+        lo.textContent = state.owner ? 'G' + state.owner + ' 持有' : ''; lo.className = 'lock-owner has-owner';
+    } else {
+        li.className = 'lock-icon unlocked'; li.innerHTML = '&#128275;';
+        lo.textContent = ''; lo.className = 'lock-owner';
+    }
+
+    // Owner display
+    const od = document.getElementById('ownerDisplay');
+    od.textContent = state.owner ? 'G' + state.owner : '无';
+    od.style.color = state.owner ? '#c084fc' : '#475569';
+
+    // Queue
+    const qt = document.getElementById('queueTrack');
+    if (state.queue.length === 0) {
+        qt.innerHTML = '<div class="queue-empty">队列为空</div>';
+        qt.className = 'queue-track';
+    } else {
+        qt.className = 'queue-track has-items';
+        qt.innerHTML = '';
+        state.queue.forEach((g, i) => {
+            const d = document.createElement('div');
+            const cls = g.starving ? 'goroutine starving-g' : 'goroutine waiting';
+            d.className = cls;
+            d.innerHTML = `<div class="g-icon">G</div><div class="g-name">${g.id}</div>`;
+            d.title = `G${g.id} | 等待时间: ${g.waitTime}ms` + (g.starving ? ' | 饥饿' : '');
+            qt.appendChild(d);
+            // Arrow between items
+            if (i < state.queue.length - 1) {
+                const arr = document.createElement('div');
+                arr.style.cssText = 'color:#475569;font-size:18px;display:flex;align-items:center;';
+                arr.textContent = '→';
+                qt.appendChild(arr);
+            }
+        });
+    }
+
+    // Step
+    document.getElementById('stepNum').textContent = state.step;
+
+    // Buttons
+    document.getElementById('btnLock').disabled = state.animating;
+    document.getElementById('btnUnlock').disabled = !state.locked || state.animating;
+}
+
+// ===== Flow Diagram =====
+function setFlowIdle() {
+    document.getElementById('flowSteps').innerHTML =
+        '<div class="flow-step active"><div class="step-icon">0</div><div><div class="step-text">空闲状态</div><div class="step-detail">等待 Lock() 或 Unlock() 操作</div></div></div>';
+}
+
+function setFlowSteps(steps, activeIdx) {
+    const container = document.getElementById('flowSteps');
+    container.innerHTML = '';
+    steps.forEach((s, i) => {
+        const cls = i === activeIdx ? (s.starving ? 'active-starving' : 'active') :
+                    i < activeIdx ? 'done' : '';
+        const d = document.createElement('div');
+        d.className = 'flow-step ' + cls;
+        d.innerHTML = `<div class="step-icon">${i}</div><div><div class="step-text">${s.title}</div><div class="step-detail">${s.detail}</div></div>`;
+        container.appendChild(d);
+    });
+}
+
+// ===== Logging =====
+function addLog(tag, msg) {
+    const lc = document.getElementById('logContent');
+    const now = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    const d = document.createElement('div');
+    d.className = 'log-entry';
+    d.innerHTML = `<span class="log-time">${now}</span><span class="log-tag ${tag}">${tag.toUpperCase()}</span><span class="log-msg">${msg}</span>`;
+    lc.prepend(d);
+    // Keep max 50 entries
+    while (lc.children.length > 50) lc.removeChild(lc.lastChild);
+}
+
+function clearLog() {
+    document.getElementById('logContent').innerHTML = '';
+}
+
+// ===== Animation Helper =====
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function setCurrentAction(text) {
+    document.getElementById('currentAction').textContent = text;
+}
+
+// ===== Add Goroutine =====
+function addGoroutine() {
+    if (state.animating) return;
+    const gid = state.nextGid++;
+    addLog('lock', `新增 Goroutine G${gid}`);
+    // If lock is free, try to acquire directly
+    if (!state.locked) {
+        doLockFor(gid);
+    } else {
+        // Add to waiting (will be picked up by next lock attempt)
+        state.queue.push({id: gid, waitTime: 0, starving: false});
+        state.waiters = state.queue.length;
+        state.sema = 0;
+        addLog('sema', `G${gid} → 等待队列 (sema-- → 0)`);
+        render();
+    }
+}
+
+// ===== Lock Operation =====
+function doLock() {
+    if (state.animating || state.locked) return;
+    // Create a new goroutine and try to lock
+    const gid = state.nextGid++;
+    doLockFor(gid);
+}
+
+async function doLockFor(gid) {
+    if (state.animating) return;
+    state.animating = true;
+    state.step++;
+    render();
+
+    // Step 1: CAS try
+    setCurrentAction(`G${gid}: CAS 尝试抢锁...`);
+    setFlowSteps([
+        {title: 'CAS 抢锁', detail: `atomic.CompareAndSwapInt32(&state, 0, mutexLocked)`},
+        {title: '自旋检查', detail: '四个条件：次数<4、多核、GOMAXPROCS>1、P队列为空'},
+        {title: '更新 state', detail: 'waiters++ / 设 starving 位 / 设 woken 位'},
+        {title: 'CAS 更新 + Semacquire', detail: '更新 state 成功后调用信号量阻塞'},
+        {title: '唤醒后判断模式', detail: '饥饿模式：直接获得锁 / 正常模式：CAS 竞争'},
+    ], 0);
+    addLog('cas', `G${gid}: CAS(state, 0 → 1) ...`);
+    await sleep(600);
+
+    if (!state.locked) {
+        // CAS success — fast path
+        state.locked = 1;
+        state.owner = gid;
+        state.sema = 0;
+        setCurrentAction(`G${gid}: CAS 成功，直接获得锁！`);
+        setFlowSteps([
+            {title: 'CAS 抢锁', detail: `✅ CAS 成功！state 0 → 1`},
+            {title: '自旋检查', detail: '不需要，已经拿到锁了'},
+            {title: '更新 state', detail: '不需要'},
+            {title: 'CAS 更新 + Semacquire', detail: '不需要'},
+            {title: '唤醒后判断模式', detail: '不需要'},
+        ], 0);
+        addLog('cas', `G${gid}: ✅ 抢锁成功 (fast path)`);
+        addLog('sema', `sema-- → 0 (获取令牌)`);
+        state.animating = false;
+        render();
+        return;
+    }
+
+    // CAS failed — lock is held by someone else
+    addLog('cas', `G${gid}: ❌ CAS 失败，锁已被占用`);
+    setCurrentAction(`G${gid}: CAS 失败，检查能否自旋...`);
+    setFlowSteps([
+        {title: 'CAS 抢锁', detail: `❌ CAS 失败，锁已被 G${state.owner} 持有`},
+        {title: '自旋检查', detail: '检查四个条件是否满足...'},
+        {title: '更新 state', detail: 'waiters++ / 设 starving 位 / 设 woken 位'},
+        {title: 'CAS 更新 + Semacquire', detail: '更新 state 成功后调用信号量阻塞'},
+        {title: '唤醒后判断模式', detail: '饥饿模式：直接获得锁 / 正常模式：CAS 竞争'},
+    ], 1);
+    await sleep(600);
+
+    // Step 2: Spin check
+    const canSpin = state.waiters < 4; // simplified: assume multi-core OK
+    if (canSpin && !state.starving) {
+        setCurrentAction(`G${gid}: 自旋中... (最多4次)`);
+        addLog('spin', `G${gid}: 开始自旋 (PAUSE 指令，~30ns/次)`);
+        for (let i = 0; i < 4; i++) {
+            await sleep(300);
+            if (!state.locked) {
+                // Lock released during spin!
+                state.locked = 1;
+                state.owner = gid;
+                state.sema = 0;
+                setCurrentAction(`G${gid}: 自旋期间锁释放了，CAS 抢到！`);
+                addLog('spin', `G${gid}: ✅ 自旋第${i+1}次发现锁释放，抢锁成功！`);
+                addLog('sema', `sema-- → 0 (获取令牌)`);
+                state.animating = false;
+                render();
+                return;
+            }
+            addLog('spin', `G${gid}: 自旋第${i+1}次，锁还没释放...`);
+        }
+        setCurrentAction(`G${gid}: 自旋4次后仍未获得锁，准备排队`);
+        addLog('spin', `G${gid}: 自旋结束，未获得锁`);
+    } else {
+        setCurrentAction(`G${gid}: 不满足自旋条件，直接排队`);
+        addLog('spin', `G${gid}: 跳过自旋 (饥饿模式下不自旋)`);
+    }
+
+    // Step 3: Update state — join queue
+    state.waiters++;
+    const waitEntry = {id: gid, waitTime: 0, starving: false};
+    state.queue.push(waitEntry);
+    state.woken = 1;
+
+    setCurrentAction(`G${gid}: waiters=${state.waiters}, woken=1, 准备阻塞`);
+    setFlowSteps([
+        {title: 'CAS 抢锁', detail: `❌ CAS 失败`},
+        {title: '自旋检查', detail: canSpin ? '自旋4次未获锁' : '跳过自旋'},
+        {title: '更新 state', detail: `waiters=${state.waiters}, woken=1`},
+        {title: 'CAS 更新 + Semacquire', detail: '调用 runtime_SemacquireMutex 阻塞'},
+        {title: '唤醒后判断模式', detail: '等待被唤醒...'},
+    ], 2);
+    addLog('lock', `G${gid}: 入等待队列 (waiters=${state.waiters})`);
+    await sleep(600);
+
+    // Step 4: Semacquire — block
+    state.sema = 0;
+    setCurrentAction(`G${gid}: runtime_SemacquireMutex → 阻塞等待`);
+    setFlowSteps([
+        {title: 'CAS 抢锁', detail: `❌ CAS 失败`},
+        {title: '自旋检查', detail: canSpin ? '自旋4次未获锁' : '跳过自旋'},
+        {title: '更新 state', detail: `waiters=${state.waiters}, woken=1`},
+        {title: 'CAS 更新 + Semacquire', detail: `✅ gopark() → G${gid} 休眠`},
+        {title: '唤醒后判断模式', detail: '等待被唤醒...'},
+    ], 3);
+    addLog('sema', `G${gid}: Semacquire → gopark() 休眠`);
+    render();
+    state.animating = false;
+    render();
+}
+
+// ===== Unlock Operation =====
+async function doUnlock() {
+    if (state.animating || !state.locked) return;
+    state.animating = true;
+    state.step++;
+    const oldOwner = state.owner;
+
+    // Step 1: Unlock — clear locked bit
+    setCurrentAction(`G${oldOwner}: Unlock() — locked 位 1→0`);
+    setFlowSteps([
+        {title: 'Locked 位 -1', detail: `atomic.AddInt32(&state, -mutexLocked)`},
+        {title: '检查等待者', detail: 'waiters > 0 或 starving == 1 ?'},
+        {title: '释放信号量', detail: '正常模式: Semrelease / 饥饿模式: 直接移交'},
+    ], 0);
+    addLog('unlock', `G${oldOwner}: Unlock() — locked 1→0`);
+    state.locked = 0;
+    state.owner = null;
+    render();
+    await sleep(600);
+
+    // Step 2: Check waiters
+    if (state.waiters === 0 && !state.starving) {
+        setCurrentAction('没有等待者，直接返回');
+        setFlowSteps([
+            {title: 'Locked 位 -1', detail: '✅ 锁释放了'},
+            {title: '检查等待者', detail: '❌ 没人等，不需要唤醒'},
+            {title: '释放信号量', detail: '不需要'},
+        ], 1);
+        addLog('unlock', '没有等待者，直接返回');
+        state.animating = false;
+        state.sema = 1;
+        render();
+        return;
+    }
+
+    // Has waiters
+    setCurrentAction(`有 ${state.waiters} 个等待者，检查模式...`);
+    setFlowSteps([
+        {title: 'Locked 位 -1', detail: '✅ 锁释放了'},
+        {title: '检查等待者', detail: `✅ waiters=${state.waiters}, starving=${state.starving}`},
+        {title: '释放信号量', detail: state.starving ? '饥饿模式: 直接移交给队列首部' : '正常模式: Semrelease 唤醒一个'},
+    ], 1);
+    addLog('unlock', `等待者=${state.waiters}, 饥饿模式=${!!state.starving}`);
+    await sleep(600);
+
+    // Step 3: Release semaphore
+    if (state.starving) {
+        // Starvation mode: hand lock directly to first waiter
+        const first = state.queue.shift();
+        state.waiters = state.queue.length;
+        state.locked = 1;
+        state.owner = first.id;
+        state.woken = 0;
+
+        // Increment wait time for remaining
+        state.queue.forEach(g => { g.waitTime += 1; });
+
+        // Check if should exit starvation
+        if (state.waiters === 0) {
+            state.starving = 0;
+            addLog('starve', '最后一个等待者获得锁，退出饥饿模式');
+        }
+
+        setCurrentAction(`饥饿模式: 直接把锁交给 G${first.id}`);
+        setFlowSteps([
+            {title: 'Locked 位 -1', detail: '✅ 锁释放了'},
+            {title: '检查等待者', detail: `✅ waiters=${state.waiters+1}, starving=1`},
+            {title: '释放信号量', detail: `✅ 饥饿模式: 锁直接交给 G${first.id} (FIFO)`, starving: true},
+        ], 2);
+        addLog('starve', `✅ 锁直接移交给 G${first.id} (饥饿模式 FIFO)`);
+        addLog('sema', `G${first.id}: goready() → 唤醒，直接获得锁`);
+        state.sema = 0;
+    } else {
+        // Normal mode: release semaphore, wake one waiter
+        const first = state.queue.shift();
+        state.waiters = state.queue.length;
+
+        // Increment wait time for remaining
+        state.queue.forEach(g => {
+            g.waitTime += 1;
+            // Check starvation threshold
+            if (g.waitTime >= 3) { // simplified: 3 turns = 1ms
+                g.starving = true;
+                state.starving = 1;
+                addLog('starve', `G${g.id} 等待超过阈值 → 进入饥饿模式!`);
+            }
+        });
+
+        // In normal mode, woken goroutine competes with new goroutines
+        // For visualization: woken goroutine gets the lock (simplified)
+        state.locked = 1;
+        state.owner = first.id;
+        state.woken = 0;
+
+        setCurrentAction(`正常模式: Semrelease 唤醒 G${first.id}`);
+        setFlowSteps([
+            {title: 'Locked 位 -1', detail: '✅ 锁释放了'},
+            {title: '检查等待者', detail: `✅ waiters=${state.waiters+1}, starving=0`},
+            {title: '释放信号量', detail: `✅ 正常模式: Semrelease → 唤醒 G${first.id}`, starving: false},
+        ], 2);
+        addLog('sema', `Semrelease → 唤醒 G${first.id} (正常模式，与新来者竞争)`);
+        addLog('lock', `G${first.id}: 被唤醒，CAS 抢锁成功`);
+        state.sema = 0;
+    }
+
+    state.animating = false;
+    render();
+
+    // If still have waiters and in starvation, update queue display
+    if (state.queue.length > 0) {
+        state.sema = 0;
+    } else {
+        // No more waiters
+        if (!state.starving) state.sema = 1;
+    }
+    render();
+}
+
+// ===== Auto Demo =====
+async function autoDemo() {
+    if (state.autoRunning) return;
+    state.autoRunning = true;
+    resetAll();
+
+    addLog('lock', '=== 自动演示开始 ===');
+    setCurrentAction('自动演示: 正常模式流程');
+
+    // G1 locks
+    await sleep(500);
+    await doLockFor(1);
+
+    // G2, G3, G4 try to lock
+    await sleep(800);
+    await doLockFor(2);
+    await sleep(400);
+    state.queue.push({id:3, waitTime:0, starving:false});
+    state.nextGid = 4;
+    state.waiters = state.queue.length;
+    addLog('lock', 'G3 加入等待队列');
+    render();
+    await sleep(400);
+    state.queue.push({id:4, waitTime:0, starving:false});
+    state.nextGid = 5;
+    state.waiters = state.queue.length;
+    addLog('lock', 'G4 加入等待队列');
+    render();
+
+    // G1 unlocks
+    await sleep(1000);
+    await doUnlock();
+
+    // New G5 tries (normal mode: competes with woken G2)
+    await sleep(800);
+    setCurrentAction('G5 新来，与被唤醒的 G2 竞争...');
+    addLog('lock', 'G5 新来尝试抢锁 (正常模式竞争)');
+    await sleep(600);
+    // G2 wins (woken first)
+    setCurrentAction('G2 抢锁成功 (被唤醒者优先)');
+    addLog('cas', 'G2: ✅ 抢锁成功');
+
+    // G1 unlocks again (for G3)
+    await sleep(800);
+    // Manually give lock to G3 to simulate queue progress
+    state.owner = 3;
+    state.queue.shift();
+    state.waiters = state.queue.length;
+    addLog('unlock', 'G2: Unlock()');
+    addLog('sema', 'Semrelease → 唤醒 G3');
+    render();
+    await sleep(600);
+
+    // Make waiters hungry
+    setCurrentAction('G4 等待超过 1ms → 进入饥饿模式!');
+    addLog('starve', 'G4 等待时间超过 1ms → 切换到饥饿模式!');
+    state.starving = 1;
+    state.queue.forEach(g => { g.starving = true; g.waitTime = 3; });
+    render();
+    await sleep(1000);
+
+    // G3 unlocks — starvation mode handoff
+    setCurrentAction('G3: Unlock() — 饥饿模式');
+    state.locked = 0;
+    state.owner = null;
+    render();
+    await sleep(400);
+    await doUnlock();
+
+    // G4 unlocks
+    await sleep(800);
+    setCurrentAction('G4: Unlock() — 队列清空，退出饥饿模式');
+    state.locked = 0;
+    state.owner = null;
+    state.queue = [];
+    state.waiters = 0;
+    state.starving = 0;
+    state.woken = 0;
+    state.sema = 1;
+    render();
+    addLog('starve', '最后一个等待者获得锁后释放 → 退出饥饿模式');
+    addLog('unlock', 'G4: Unlock() — 锁空闲');
+
+    setCurrentAction('演示完成: 正常模式 → 饥饿模式 → 退出饥饿模式');
+    addLog('lock', '=== 自动演示结束 ===');
+    state.autoRunning = false;
+    setFlowIdle();
+}
+
+// ===== Init =====
+function init() {
+    // Init waiters bits display
+    render();
+}
+
+init();
+</script>
+
+<!-- 关键说明 -->
+<div style="max-width:1200px;margin:0 auto;padding:0 24px 32px">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:24px">
+        <h3 style="font-size:16px;font-weight:700;color:#94a3b8;margin-bottom:14px">关键说明</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;color:#cbd5e1;line-height:1.8">
+            <div>
+                <div style="color:#f87171;font-weight:700;margin-bottom:4px">Mutex 两大模式</div>
+                <div><span style="color:#60a5fa">正常模式</span>：新来的 G 可以和被唤醒的 G 一起抢锁（CAS 竞争），性能高但可能不公平</div>
+                <div><span style="color:#c084fc">饥饿模式</span>：锁直接交给等待最久的 G（FIFO），公平但性能略低，等待超过 1ms 触发</div>
+            </div>
+            <div>
+                <div style="color:#fbbf24;font-weight:700;margin-bottom:4px">自旋的本质</div>
+                <div>自旋 = G 占着 <span style="color:#fbbf24">P 和 M 不放</span>，执行 PAUSE 指令空转等锁释放</div>
+                <div>4 个条件同时满足才自旋：多核、GOMAXPROCS&gt;1、P 本地队列空、次数&lt;4</div>
+                <div>自旋一次 ~30ns，省掉一次上下文切换 ~1000ns，非常划算</div>
+            </div>
+            <div>
+                <div style="color:#38bdf8;font-weight:700;margin-bottom:4px">信号量与调度器</div>
+                <div>Lock 抢不到 → <code style="color:#f59e0b">gopark()</code>：G 从 P 摘下，让出 P 给其他 G</div>
+                <div>Unlock 释放 → <code style="color:#4ade80">goready()</code>：唤醒等待 G，放入 P 运行队列</div>
+                <div>runtime 信号量精确唤醒目标 G，不会惊群</div>
+            </div>
+            <div>
+                <div style="color:#ef4444;font-weight:700;margin-bottom:4px">常见坑</div>
+                <div>❌ Unlock 未 Lock 的锁 → 直接 panic</div>
+                <div>❌ Mutex 值拷贝 → 变成两个锁，完全失效</div>
+                <div>❌ 双检查锁 → Go 无 volatile，赋值可重排，拿到未初始化对象</div>
+                <div>✅ 正确做法：加锁立刻 defer 解锁，用 sync.Once 做单例</div>
+            </div>
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #334155;font-size:11px;color:#475569;text-align:center">
+            来源：Go 1.22 sync.Mutex 源码 · 对应文档 02-go-concurrency/06-mutex.md
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

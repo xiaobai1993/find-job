@@ -4,418 +4,439 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Go Map 底层原理可视化</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .bucket {
-            transition: all 0.5s ease;
-        }
-        .bucket.highlight {
-            transform: scale(1.05);
-            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
-        }
-        .bucket.evacuating {
-            animation: pulse 1s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7); }
-            50% { box-shadow: 0 0 0 10px rgba(234, 179, 8, 0); }
-        }
-        .entry {
-            transition: all 0.3s ease;
-        }
-        .entry.new {
-            animation: fadeIn 0.5s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.8); }
-            to { opacity: 1; transform: scale(1); }
-        }
-        .overflow-bucket {
-            border-style: dashed;
-        }
-        .old-bucket {
-            opacity: 0.6;
-            border-color: #f59e0b;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+        /* Layout */
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .header { text-align: center; margin-bottom: 28px; }
+        .header h1 { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+
+        /* Controls */
+        .controls { display: flex; gap: 10px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+        .btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(0); }
+        .btn-reset { background: #334155; color: #cbd5e1; }
+        .btn-step { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+        .btn-auto { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+        .btn-grow { background: linear-gradient(135deg, #eab308, #ca8a04); color: #1a1a1a; }
+
+        /* Stats Bar */
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+        .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; text-align: center; }
+        .stat-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .stat-value { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .stat-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+        .stat-blue .stat-value { color: #60a5fa; }
+        .stat-green .stat-value { color: #4ade80; }
+        .stat-yellow .stat-value { color: #facc15; }
+        .stat-red .stat-value { color: #f87171; }
+
+        /* Load Bar */
+        .load-bar-wrap { margin-bottom: 24px; background: #1e293b; border-radius: 10px; padding: 12px 16px; border: 1px solid #334155; }
+        .load-bar-label { display: flex; justify-content: space-between; font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+        .load-bar-track { height: 8px; background: #334155; border-radius: 4px; overflow: hidden; }
+        .load-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease, background 0.5s ease; background: #22c55e; }
+        .load-bar-fill.warning { background: #eab308; }
+        .load-bar-fill.danger { background: #ef4444; }
+
+        /* Hash Explain */
+        .hash-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; display: none; }
+        .hash-panel.visible { display: block; }
+        .hash-flow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; font-size: 14px; }
+        .hash-box { background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 8px 14px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+        .hash-box.key { border-color: #60a5fa; color: #60a5fa; }
+        .hash-box.hash { border-color: #a78bfa; color: #a78bfa; }
+        .hash-box.bucket { border-color: #4ade80; color: #4ade80; font-weight: 700; }
+        .hash-box.top { border-color: #fb923c; color: #fb923c; }
+        .hash-arrow { color: #475569; font-size: 18px; }
+        .hash-label { font-size: 11px; color: #64748b; text-align: center; margin-top: 4px; }
+
+        /* Main Canvas Area */
+        .canvas { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; margin-bottom: 24px; overflow-x: auto; }
+
+        /* Bucket Array */
+        .bucket-section-title { font-size: 13px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+        .bucket-section-title.old { color: #fbbf24; }
+        .bucket-row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+
+        /* Single Bucket */
+        .bucket-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .bucket { background: #0f172a; border: 2px solid #334155; border-radius: 10px; padding: 10px; min-width: 130px; transition: all 0.3s ease; }
+        .bucket.highlight { border-color: #3b82f6; box-shadow: 0 0 24px rgba(59, 130, 246, 0.3); transform: scale(1.03); }
+        .bucket.evacuating { border-color: #eab308; animation: evacPulse 1.2s ease infinite; }
+        .bucket.old { opacity: 0.5; border-color: #ca8a04; }
+        .bucket.old.evacuated { opacity: 0.2; }
+        .bucket.overflow { border-style: dashed; border-color: #f97316; }
+        .bucket-header { text-align: center; font-size: 12px; font-weight: 700; color: #64748b; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #1e293b; }
+        .bucket.highlight .bucket-header { color: #93c5fd; }
+
+        /* Slot */
+        .slot { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; border-radius: 4px; margin-bottom: 2px; font-size: 11px; transition: all 0.3s ease; }
+        .slot.empty { background: #1e293b; color: #334155; }
+        .slot.filled { background: #064e3b; color: #6ee7b7; }
+        .slot.just-filled { background: #059669; color: white; animation: slotPop 0.6s ease; }
+        .slot .tophash { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; color: #fb923c; min-width: 36px; }
+        .slot .key-val { color: #e2e8f0; font-weight: 600; }
+        .slot.empty::after { content: '—'; color: #334155; }
+
+        /* Overflow Arrow */
+        .overflow-arrow { text-align: center; color: #f97316; font-size: 18px; line-height: 1; padding: 2px 0; }
+
+        /* Step Description */
+        .desc-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
+        .desc-title { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .desc-text { color: #cbd5e1; line-height: 1.6; font-size: 14px; white-space: pre-line; min-height: 22px; }
+
+        /* Key Points */
+        .keypoints { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+        .keypoints-title { font-size: 14px; font-weight: 700; color: #94a3b8; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .kp { padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; }
+        .kp:last-child { margin-bottom: 0; }
+        .kp-num { font-weight: 800; margin-right: 6px; }
+        .kp-1 { background: #172554; border-left: 3px solid #3b82f6; color: #93c5fd; }
+        .kp-2 { background: #052e16; border-left: 3px solid #22c55e; color: #86efac; }
+        .kp-3 { background: #422006; border-left: 3px solid #eab308; color: #fde047; }
+        .kp-4 { background: #450a0a; border-left: 3px solid #ef4444; color: #fca5a5; }
+        .kp-5 { background: #2e1065; border-left: 3px solid #a855f7; color: #d8b4fe; }
+
+        /* Animations */
+        @keyframes slotPop { 0% { transform: scale(0.7); opacity: 0; } 50% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes evacPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(234,179,8,0.5); } 50% { box-shadow: 0 0 20px 4px rgba(234,179,8,0.2); } }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stats { grid-template-columns: repeat(2, 1fr); }
+            .hash-flow { font-size: 12px; }
+            .bucket { min-width: 110px; padding: 8px; }
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div class="max-w-7xl mx-auto px-4 py-8">
-        <header class="text-center mb-8">
-            <h1 class="text-3xl font-bold text-gray-800 mb-2">Go Map 底层原理可视化</h1>
-            <p class="text-gray-600">分步动画展示 bucket 结构、写数据、增量扩容</p>
-        </header>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Go Map 底层原理可视化</h1>
+            <p>分步动画演示 hmap / bucket / tophash / 增量扩容</p>
+        </div>
 
-        <div class="bg-white rounded-xl shadow-lg p-4 mb-6">
-            <div class="flex flex-wrap gap-3 justify-center">
-                <button onclick="reset()" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">重置</button>
-                <button onclick="nextStep()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">下一步</button>
-                <button onclick="autoPlay()" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">自动播放</button>
-                <button onclick="triggerEvacuation()" class="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600">触发扩容</button>
+        <div class="controls">
+            <button class="btn btn-reset" onclick="reset()">重置</button>
+            <button class="btn btn-step" onclick="nextStep()">下一步</button>
+            <button class="btn btn-auto" onclick="autoPlay()">自动播放</button>
+            <button class="btn btn-grow" onclick="triggerEvacuation()">触发扩容</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card stat-blue">
+                <div class="stat-label">count</div>
+                <div class="stat-value" id="s-count">0</div>
+                <div class="stat-sub">元素数量</div>
+            </div>
+            <div class="stat-card stat-green">
+                <div class="stat-label">B</div>
+                <div class="stat-value" id="s-B">2</div>
+                <div class="stat-sub">2<sup>B</sup> = <span id="s-bn">4</span> buckets</div>
+            </div>
+            <div class="stat-card stat-yellow">
+                <div class="stat-label">loadFactor</div>
+                <div class="stat-value" id="s-lf">0.00</div>
+                <div class="stat-sub">阈值 6.5</div>
+            </div>
+            <div class="stat-card stat-red">
+                <div class="stat-label">扩容</div>
+                <div class="stat-value" id="s-evac" style="font-size:16px;">未扩容</div>
             </div>
         </div>
 
-        <div class="bg-white rounded-xl shadow-lg p-4 mb-6">
-            <h3 class="font-bold text-gray-700 mb-3">hmap 状态</h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                <div class="bg-blue-50 rounded p-3">
-                    <div class="text-sm text-gray-500">count (元素数)</div>
-                    <div class="text-2xl font-bold text-blue-600" id="state-count">0</div>
-                </div>
-                <div class="bg-green-50 rounded p-3">
-                    <div class="text-sm text-gray-500">B (bucket 幂)</div>
-                    <div class="text-2xl font-bold text-green-600" id="state-B">2</div>
-                    <div class="text-xs text-gray-500">共 2<sup>B</sup> = <span id="state-bucket-count">4</span> 个 bucket</div>
-                </div>
-                <div class="bg-yellow-50 rounded p-3">
-                    <div class="text-sm text-gray-500">load factor (负载)</div>
-                    <div class="text-2xl font-bold text-yellow-600" id="state-load">0.00</div>
-                    <div class="text-xs text-gray-500">阈值: 6.5</div>
-                </div>
-                <div class="bg-red-50 rounded p-3">
-                    <div class="text-sm text-gray-500">扩容状态</div>
-                    <div class="text-lg font-bold text-red-600" id="state-evacuate">未扩容</div>
-                </div>
+        <div class="load-bar-wrap">
+            <div class="load-bar-label">
+                <span>负载因子</span>
+                <span id="lf-text">0.00 / 6.5</span>
+            </div>
+            <div class="load-bar-track">
+                <div class="load-bar-fill" id="lf-bar" style="width:0%"></div>
             </div>
         </div>
 
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <div id="old-buckets-section" class="hidden mb-6">
-                <h3 class="font-bold text-yellow-700 mb-3">oldbuckets（正在搬迁中）</h3>
-                <div id="old-buckets-container" class="flex flex-wrap gap-4 mb-4"></div>
-            </div>
-
-            <h3 class="font-bold text-gray-700 mb-3">buckets 数组</h3>
-            <div id="buckets-container" class="flex flex-wrap gap-4 mb-6"></div>
-
-            <div id="hash-explain" class="bg-gray-50 rounded p-4 hidden">
-                <div class="text-sm text-gray-600">
-                    <div class="font-bold mb-2">哈希计算过程：</div>
-                    <div>key = <code id="hash-key" class="bg-gray-200 px-1 rounded"></code></div>
-                    <div>低 B 位 = <code id="hash-low" class="bg-blue-100 px-1 rounded"></code> → bucket #<span id="hash-bucket" class="bg-blue-100 px-1 rounded"></span></div>
-                    <div>高 8 位 = <code id="hash-top" class="bg-green-100 px-1 rounded"></code> → tophash</div>
-                </div>
+        <div class="hash-panel" id="hash-panel">
+            <div class="hash-flow">
+                <div style="text-align:center"><div class="hash-box key" id="hk">1</div><div class="hash-label">key</div></div>
+                <div class="hash-arrow">→</div>
+                <div style="text-align:center"><div class="hash-box hash" id="hh">0x1a2b...</div><div class="hash-label">hash(key)</div></div>
+                <div class="hash-arrow">→</div>
+                <div style="text-align:center"><div class="hash-box bucket" id="hbi">0</div><div class="hash-label">低 B 位 → bucket</div></div>
+                <div class="hash-arrow">+</div>
+                <div style="text-align:center"><div class="hash-box top" id="ht">0x1a</div><div class="hash-label">高 8 位 → tophash</div></div>
             </div>
         </div>
 
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h3 class="font-bold text-gray-700 mb-3">当前步骤说明</h3>
-            <div id="step-description" class="text-gray-600 leading-relaxed whitespace-pre-line">
-                点击「下一步」开始演示 map 的工作原理
+        <div class="canvas">
+            <div id="old-section" style="display:none; margin-bottom: 20px;">
+                <div class="bucket-section-title old">oldbuckets（搬迁中）</div>
+                <div class="bucket-row" id="old-row"></div>
             </div>
+            <div class="bucket-section-title">buckets 数组</div>
+            <div class="bucket-row" id="bucket-row"></div>
         </div>
 
-        <div class="bg-white rounded-xl shadow-lg p-6">
-            <h3 class="font-bold text-gray-700 mb-4">面试核心考点总结</h3>
-            <div class="space-y-3">
-                <div class="p-3 bg-blue-50 rounded border-l-4 border-blue-500">
-                    <div class="font-bold text-blue-800">1. map 是指针类型</div>
-                    <div class="text-sm text-blue-700">make(map) 返回的是 *hmap 指针，函数传参时拷贝指针，指向同一个对象，所以函数内修改外面 100% 能看到，和 slice 不一样！</div>
-                </div>
-                <div class="p-3 bg-green-50 rounded border-l-4 border-green-500">
-                    <div class="font-bold text-green-800">2. 一个 bucket 存 8 个键值对</div>
-                    <div class="text-sm text-green-700">满了就挂溢出桶，tophash 存哈希高 8 位，用来快速过滤，不用真比较整个 key。</div>
-                </div>
-                <div class="p-3 bg-yellow-50 rounded border-l-4 border-yellow-500">
-                    <div class="font-bold text-yellow-800">3. 两种扩容策略</div>
-                    <div class="text-sm text-yellow-700">
-                        <ul class="list-disc list-inside">
-                            <li>负载 > 6.5 → 翻倍扩容（增量搬迁，防止卡顿）</li>
-                            <li>溢出桶太多 → 等量扩容（不翻倍，整理溢出桶，释放内存）</li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="p-3 bg-red-50 rounded border-l-4 border-red-500">
-                    <div class="font-bold text-red-800">4. 三大坑</div>
-                    <div class="text-sm text-red-700">
-                        <ul class="list-disc list-inside">
-                            <li>写 nil map 直接 panic，读不会</li>
-                            <li>并发读写直接 fatal error</li>
-                            <li>delete 不会释放内存，只是标记为空</li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="p-3 bg-purple-50 rounded border-l-4 border-purple-500">
-                    <div class="font-bold text-purple-800">5. 遍历是随机的</div>
-                    <div class="text-sm text-purple-700">故意设计的，防止用户依赖遍历顺序。</div>
-                </div>
-            </div>
+        <div class="desc-panel">
+            <div class="desc-title">当前步骤</div>
+            <div class="desc-text" id="desc">点击「下一步」开始演示 map 的工作原理</div>
+        </div>
+
+        <div class="keypoints">
+            <div class="keypoints-title">面试核心考点</div>
+            <div class="kp kp-1"><span class="kp-num">1.</span>map 是指针类型 — make(map) 返回 *hmap，传参拷贝指针，函数内修改外面能看到</div>
+            <div class="kp kp-2"><span class="kp-num">2.</span>一个 bucket 存 8 个 KV — tophash 存哈希高 8 位做快速过滤，满了挂溢出桶</div>
+            <div class="kp kp-3"><span class="kp-num">3.</span>两种扩容 — 负载 >6.5 翻倍扩容（增量搬迁防卡顿）；溢出桶太多等量扩容（整理碎片）</div>
+            <div class="kp kp-4"><span class="kp-num">4.</span>三大坑 — 写 nil map panic；并发读写 fatal；delete 不释放内存只标记空</div>
+            <div class="kp kp-5"><span class="kp-num">5.</span>遍历随机 — 故意设计，防止依赖顺序</div>
         </div>
     </div>
 
     <script>
-        let state = {
-            B: 2,
-            count: 0,
-            buckets: [],
-            oldBuckets: null,
-            evacuateProgress: 0,
-            step: 0,
-            autoPlaying: false
-        };
+    const S = { B:2, count:0, buckets:[], oldBuckets:null, evacProg:0, step:0, autoPlaying:false, lastInserted:{bucketIdx:-1,chainIdx:-1,slot:-1} };
 
-        const demoSteps = [
-            { key: 1, desc: "插入 key = 1：计算哈希，低 2 位找 bucket，高 8 位存 tophash" },
-            { key: 2, desc: "插入 key = 2：不同的哈希值，落在另一个 bucket" },
-            { key: 3, desc: "插入 key = 3：继续填充 bucket" },
-            { key: 4, desc: "插入 key = 4：bucket 0 已经有 1 个元素，继续填" },
-            { key: 5, desc: "插入 key = 5" },
-            { key: 6, desc: "插入 key = 6" },
-            { key: 7, desc: "插入 key = 7" },
-            { key: 8, desc: "插入 key = 8：第一个 bucket 快满了" },
-            { key: 9, desc: "插入 key = 9：bucket 0 满了，挂溢出桶！" },
-            { key: 10, desc: "插入 key = 10：溢出桶也会存满" },
-            { key: 11, desc: "插入 key = 11" },
-            { key: 12, desc: "插入 key = 12：负载快到 6.5，即将触发扩容" },
-        ];
+    const STEPS = [
+        {k:1,  d:'插入 key=1：哈希后低 2 位决定落入哪个 bucket，高 8 位存入 tophash 数组做快速匹配'},
+        {k:2,  d:'插入 key=2：不同的哈希值，落入另一个 bucket'},
+        {k:3,  d:'插入 key=3：继续填充'},
+        {k:4,  d:'插入 key=4：同一个 bucket 可以存多个 key，靠 tophash 区分'},
+        {k:5,  d:'插入 key=5'},
+        {k:6,  d:'插入 key=6'},
+        {k:7,  d:'插入 key=7'},
+        {k:8,  d:'插入 key=8：bucket 快满了（8 个槽位）'},
+        {k:9,  d:'插入 key=9：bucket 已满！创建溢出桶（overflow bucket），用链表挂上去'},
+        {k:10, d:'插入 key=10：溢出桶也会逐渐填满'},
+        {k:11, d:'插入 key=11'},
+        {k:12, d:'插入 key=12：负载因子接近 6.5，即将触发扩容！'},
+    ];
 
-        function fakeHash(key) {
-            const hashes = {
-                1: 0x1a2b3c4d5e6f7a8bn,
-                2: 0x2b3c4d5e6f7a8b9cn,
-                3: 0x3c4d5e6f7a8b9c0dn,
-                4: 0x4d5e6f7a8b9c0d1en,
-                5: 0x5e6f7a8b9c0d1e2fn,
-                6: 0x6f7a8b9c0d1e2f3an,
-                7: 0x7a8b9c0d1e2f3a4bn,
-                8: 0x8b9c0d1e2f3a4b5cn,
-                9: 0x9c0d1e2f3a4b5c6dn,
-                10: 0xad1e2f3a4b5c6d7en,
-                11: 0xbe2f3a4b5c6d7e8fn,
-                12: 0xcf3a4b5c6d7e8f9an,
-            };
-            return hashes[key] || BigInt(key * 0x123456789abcdef);
-        }
+    function fakeHash(k) {
+        const H = {1:0x1a2b3c4d5e6f7a8bn,2:0x2b3c4d5e6f7a8b9cn,3:0x3c4d5e6f7a8b9c0dn,4:0x4d5e6f7a8b9c0d1en,5:0x5e6f7a8b9c0d1e2fn,6:0x6f7a8b9c0d1e2f3an,7:0x7a8b9c0d1e2f3a4bn,8:0x8b9c0d1e2f3a4b5cn,9:0x9c0d1e2f3a4b5c6dn,10:0xad1e2f3a4b5c6d7en,11:0xbe2f3a4b5c6d7e8fn,12:0xcf3a4b5c6d7e8f9an};
+        return H[k] || BigInt(k)*0x123456789abcdefn;
+    }
 
-        function createBucket() {
-            return {
-                tophash: new Array(8).fill(null),
-                keys: new Array(8).fill(null),
-                overflow: null
-            };
-        }
+    function mkBucket() { return {tophash:Array(8).fill(null), keys:Array(8).fill(null), overflow:null}; }
 
-        function reset() {
-            state.B = 2;
-            state.count = 0;
-            state.buckets = new Array(4).fill(null).map(() => createBucket());
-            state.oldBuckets = null;
-            state.evacuateProgress = 0;
-            state.step = 0;
-            state.autoPlaying = false;
-            renderBuckets();
-            updateState();
-            document.getElementById('step-description').textContent = "点击「下一步」开始演示 map 的工作原理";
-            document.getElementById('hash-explain').classList.add('hidden');
-            document.getElementById('old-buckets-section').classList.add('hidden');
-        }
+    function findSlot(b) {
+        for(let i=0;i<8;i++) if(b.tophash[i]===null) return i;
+        if(b.overflow) { const r=findSlot(b.overflow); return r===-1?-1:8+r; }
+        return -1;
+    }
 
-        function createBucketElement(bucket, idx, isOld) {
-            const div = document.createElement('div');
-            div.className = `bucket bg-white border-2 border-gray-300 rounded-lg p-3 w-40 ${isOld ? 'old-bucket' : ''}`;
-            div.id = `bucket-${isOld ? 'old-' : ''}${idx}`;
+    function insert(b, k, th) {
+        let slot=findSlot(b);
+        if(slot===-1) { b.overflow=mkBucket(); slot=8; }
+        let cur=b, s=slot;
+        while(s>=8&&cur.overflow) { s-=8; cur=cur.overflow; }
+        cur.tophash[s]=th; cur.keys[s]=k;
+        return {chainIdx:slot>=8?1:0, slot:slot%8};
+    }
 
-            const title = document.createElement('div');
-            title.className = 'text-sm font-bold text-gray-700 mb-2 text-center';
-            title.textContent = `bucket #${idx}`;
-            div.appendChild(title);
+    /* Render */
+    function renderBucket(b, idx, isOld, highlight, evacState) {
+        // evacState: 'active' | 'done' | null
+        let html = `<div class="bucket-wrap">`;
+        // Collect all chains
+        let chains = [b];
+        let c = b;
+        while(c.overflow) { chains.push(c.overflow); c=c.overflow; }
 
-            for (let i = 0; i < 8; i++) {
-                const entry = document.createElement('div');
-                entry.className = `entry h-6 flex items-center justify-between text-xs rounded px-2 mb-1 ${bucket.tophash[i] ? 'bg-green-100 border border-green-300' : 'bg-gray-100 border border-gray-200'}`;
-                entry.id = `bucket-${isOld ? 'old-' : ''}${idx}-entry-${i}`;
+        for(let ci=0; ci<chains.length; ci++) {
+            const chain = chains[ci];
+            const isOverflow = ci > 0;
+            const bid = isOld ? `ob-${idx}-${ci}` : `b-${idx}-${ci}`;
+            let cls = 'bucket';
+            if(isOld) cls += ' old';
+            if(evacState==='done') cls += ' evacuated';
+            if(evacState==='active') cls += ' evacuating';
+            if(highlight && !isOld) cls += ' highlight';
+            if(isOverflow) cls += ' overflow';
 
-                if (bucket.tophash[i]) {
-                    const tophashSpan = document.createElement('span');
-                    tophashSpan.className = 'font-mono text-green-700';
-                    tophashSpan.textContent = bucket.tophash[i];
-                    const keySpan = document.createElement('span');
-                    keySpan.className = 'text-gray-600';
-                    keySpan.textContent = `k=${bucket.keys[i]}`;
-                    entry.appendChild(tophashSpan);
-                    entry.appendChild(keySpan);
-                    entry.classList.add('new');
+            html += `<div class="${cls}" id="${bid}">`;
+            html += `<div class="bucket-header">${ci===0 ? '#'+idx : 'overflow'}</div>`;
+
+            for(let i=0;i<8;i++) {
+                const isJustFilled = S.lastInserted.bucketIdx===idx && S.lastInserted.chainIdx===ci && S.lastInserted.slot===i && !isOld;
+                if(chain.tophash[i]!==null) {
+                    const slotCls = isJustFilled ? 'slot just-filled' : 'slot filled';
+                    html += `<div class="${slotCls}"><span class="tophash">${chain.tophash[i]}</span><span class="key-val">k=${chain.keys[i]}</span></div>`;
                 } else {
-                    const emptySpan = document.createElement('span');
-                    emptySpan.className = 'text-gray-400';
-                    emptySpan.textContent = '空';
-                    entry.appendChild(emptySpan);
+                    html += `<div class="slot empty"></div>`;
                 }
-                div.appendChild(entry);
             }
+            html += `</div>`;
+            if(ci < chains.length-1) html += `<div class="overflow-arrow">↓</div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
 
-            if (bucket.overflow) {
-                const overflowLabel = document.createElement('div');
-                overflowLabel.className = 'text-xs text-orange-600 text-center mt-2 font-bold';
-                overflowLabel.textContent = '溢出桶';
-                div.appendChild(overflowLabel);
+    function render() {
+        const row = document.getElementById('bucket-row');
+        row.innerHTML = S.buckets.map((b,i) => renderBucket(b, i, false, false)).join('');
 
-                const overflowEl = createBucketElement(bucket.overflow, `${idx}-overflow`, isOld);
-                overflowEl.classList.add('overflow-bucket', 'ml-4', 'mt-2');
-                overflowEl.querySelector('.font-bold').textContent = 'overflow bucket';
-                div.appendChild(overflowEl);
-            }
-
-            return div;
+        if(S.oldBuckets) {
+            document.getElementById('old-section').style.display = 'block';
+            const or = document.getElementById('old-row');
+            or.innerHTML = S.oldBuckets.map((b,i) => {
+                const es = i < S.evacProg ? 'done' : (i === S.evacProg ? 'active' : null);
+                return renderBucket(b, i, true, false, es);
+            }).join('');
+        } else {
+            document.getElementById('old-section').style.display = 'none';
         }
 
-        function renderBuckets() {
-            const container = document.getElementById('buckets-container');
-            container.textContent = '';
-
-            state.buckets.forEach((bucket, idx) => {
-                const bucketEl = createBucketElement(bucket, idx, false);
-                container.appendChild(bucketEl);
-            });
-
-            if (state.oldBuckets) {
-                document.getElementById('old-buckets-section').classList.remove('hidden');
-                const oldContainer = document.getElementById('old-buckets-container');
-                oldContainer.textContent = '';
-                state.oldBuckets.forEach((bucket, idx) => {
-                    const bucketEl = createBucketElement(bucket, idx, true);
-                    if (idx < state.evacuateProgress) {
-                        bucketEl.style.opacity = '0.3';
-                    }
-                    oldContainer.appendChild(bucketEl);
-                });
-            }
+        // Highlight the just-inserted bucket
+        if(S.lastInserted.bucketIdx >= 0 && S.lastInserted.chainIdx === 0) {
+            const el = document.getElementById(`b-${S.lastInserted.bucketIdx}-0`);
+            if(el) el.classList.add('highlight');
         }
+    }
 
-        function updateState() {
-            const bucketCount = Math.pow(2, state.B);
-            const loadFactor = state.count / bucketCount / 8;
+    function updateStats() {
+        const bn = 1 << S.B;
+        const lf = S.count / bn / 8;
+        document.getElementById('s-count').textContent = S.count;
+        document.getElementById('s-B').textContent = S.B;
+        document.getElementById('s-bn').textContent = bn;
+        document.getElementById('s-lf').textContent = lf.toFixed(2);
+        document.getElementById('lf-text').textContent = `${lf.toFixed(2)} / 6.5`;
 
-            document.getElementById('state-count').textContent = state.count;
-            document.getElementById('state-B').textContent = state.B;
-            document.getElementById('state-bucket-count').textContent = bucketCount;
-            document.getElementById('state-load').textContent = loadFactor.toFixed(2);
+        const pct = Math.min(lf / 6.5 * 100, 100);
+        const bar = document.getElementById('lf-bar');
+        bar.style.width = pct + '%';
+        bar.className = 'load-bar-fill' + (pct > 85 ? ' danger' : pct > 60 ? ' warning' : '');
 
-            if (state.oldBuckets) {
-                document.getElementById('state-evacuate').textContent = `搬迁中 ${state.evacuateProgress}/${state.oldBuckets.length}`;
-            } else {
-                document.getElementById('state-evacuate').textContent = loadFactor > 5 ? '即将扩容' : '未扩容';
-            }
+        if(S.oldBuckets) {
+            document.getElementById('s-evac').textContent = `搬迁 ${S.evacProg}/${S.oldBuckets.length}`;
+        } else {
+            document.getElementById('s-evac').textContent = lf > 5 ? '即将扩容' : '未扩容';
         }
+    }
 
-        function findEmptySlot(bucket) {
-            for (let i = 0; i < 8; i++) {
-                if (bucket.tophash[i] === null) return i;
-            }
-            if (bucket.overflow) {
-                return 8 + findEmptySlot(bucket.overflow);
-            }
-            return -1;
+    function reset() {
+        S.B=2; S.count=0; S.buckets=Array.from({length:4},()=>mkBucket()); S.oldBuckets=null; S.evacProg=0; S.step=0; S.autoPlaying=false;
+        S.lastInserted = {bucketIdx:-1, chainIdx:-1, slot:-1};
+        render(); updateStats();
+        document.getElementById('desc').textContent = '点击「下一步」开始演示 map 的工作原理';
+        document.getElementById('hash-panel').classList.remove('visible');
+    }
+
+    function nextStep() {
+        if(S.step >= STEPS.length) {
+            document.getElementById('desc').textContent = '演示完成！点击「触发扩容」查看增量扩容，或「重置」重新开始。';
+            return;
         }
+        const cfg = STEPS[S.step];
+        const hash = fakeHash(cfg.k);
+        const bIdx = Number(hash & BigInt(S.buckets.length - 1));
+        const th = '0x' + Number(hash >> 56n).toString(16).padStart(2,'0');
 
-        function insertIntoBucket(bucket, key, tophash) {
-            let slot = findEmptySlot(bucket);
-            if (slot === -1) {
-                bucket.overflow = createBucket();
-                slot = 8;
-            }
+        S.lastInserted = { bucketIdx: bIdx, chainIdx: -1, slot: -1 };
+        const res = insert(S.buckets[bIdx], cfg.k, th);
+        S.lastInserted.chainIdx = res.chainIdx;
+        S.lastInserted.slot = res.slot;
+        S.count++;
 
-            let current = bucket;
-            let actualSlot = slot;
-            while (actualSlot >= 8 && current.overflow) {
-                actualSlot -= 8;
-                current = current.overflow;
-            }
+        // Update hash panel
+        const hp = document.getElementById('hash-panel');
+        hp.classList.add('visible');
+        document.getElementById('hk').textContent = cfg.k;
+        document.getElementById('hh').textContent = '0x' + hash.toString(16).slice(0,6) + '...';
+        document.getElementById('hbi').textContent = bIdx;
+        document.getElementById('ht').textContent = th;
 
-            current.tophash[actualSlot] = tophash;
-            current.keys[actualSlot] = key;
-            return slot;
-        }
+        document.getElementById('desc').textContent = cfg.d;
+        render(); updateStats();
+        S.step++;
+    }
 
-        function nextStep() {
-            if (state.step >= demoSteps.length) {
-                document.getElementById('step-description').textContent = "演示完成！可以点击「触发扩容」查看增量扩容过程，或者「重置」重新看。";
-                return;
-            }
-
-            const stepConfig = demoSteps[state.step];
-            const key = stepConfig.key;
-
-            const hash = fakeHash(key);
-            const bucketIdx = Number(hash & BigInt(state.buckets.length - 1));
-            const tophash = '0x' + Number(hash >> BigInt(56)).toString(16).padStart(2, '0');
-
-            document.getElementById('hash-explain').classList.remove('hidden');
-            document.getElementById('hash-key').textContent = key;
-            document.getElementById('hash-low').textContent = bucketIdx;
-            document.getElementById('hash-bucket').textContent = bucketIdx;
-            document.getElementById('hash-top').textContent = tophash;
-
-            const bucketEl = document.getElementById(`bucket-${bucketIdx}`);
-            if (bucketEl) bucketEl.classList.add('highlight');
-
-            insertIntoBucket(state.buckets[bucketIdx], key, tophash);
-            state.count++;
-
-            document.getElementById('step-description').textContent = stepConfig.desc;
-
-            setTimeout(() => {
-                renderBuckets();
-                updateState();
-                if (bucketEl) bucketEl.classList.remove('highlight');
-            }, 300);
-
-            state.step++;
-        }
-
-        function triggerEvacuation() {
-            if (state.oldBuckets) {
-                if (state.evacuateProgress < state.oldBuckets.length) {
-                    document.getElementById('step-description').textContent =
-                        `正在搬迁 old bucket #${state.evacuateProgress}：把旧 bucket 里的 key 重新哈希分配到新的 buckets\n这就是增量扩容，每次只搬 1-2 个 bucket，不会卡顿`;
-
-                    const oldBucketEl = document.getElementById(`bucket-old-${state.evacuateProgress}`);
-                    if (oldBucketEl) oldBucketEl.classList.add('evacuating');
-
-                    state.evacuateProgress++;
-
-                    if (state.evacuateProgress >= state.oldBuckets.length) {
-                        setTimeout(() => {
-                            state.oldBuckets = null;
-                            document.getElementById('step-description').textContent = "所有 bucket 搬迁完成！oldbuckets 被清空，扩容结束。";
-                            document.getElementById('old-buckets-section').classList.add('hidden');
-                            renderBuckets();
-                            updateState();
-                        }, 1000);
-                    }
-
-                    renderBuckets();
-                    updateState();
-                    return;
+    function triggerEvacuation() {
+        if(S.oldBuckets) {
+            if(S.evacProg < S.oldBuckets.length) {
+                document.getElementById('desc').textContent =
+                    `搬迁 old bucket #${S.evacProg}：把旧 bucket 中的 key 重新哈希分配到新 buckets\n增量扩容：每次写操作顺便搬 1-2 个，不会卡顿`;
+                S.evacProg++;
+                if(S.evacProg >= S.oldBuckets.length) {
+                    setTimeout(() => {
+                        S.oldBuckets = null;
+                        document.getElementById('desc').textContent = '所有 bucket 搬迁完成！oldbuckets 已释放，扩容结束。';
+                        render(); updateStats();
+                    }, 800);
                 }
-                return;
+                render(); updateStats();
             }
-
-            document.getElementById('step-description').textContent =
-                "负载超过 6.5，触发翻倍扩容！\n\n特点：\n1. B + 1，bucket 数量从 4 变成 8\n2. oldbuckets 指向旧的 4 个 bucket\n3. 不是一次性搬完，每次写操作顺便搬 1-2 个\n4. 搬迁期间读写都先找 oldbuckets";
-
-            state.oldBuckets = state.buckets;
-            state.B++;
-            state.buckets = new Array(Math.pow(2, state.B)).fill(null).map(() => createBucket());
-            state.evacuateProgress = 0;
-
-            renderBuckets();
-            updateState();
+            return;
         }
 
-        async function autoPlay() {
-            if (state.autoPlaying) return;
-            state.autoPlaying = true;
+        document.getElementById('desc').textContent =
+            '触发翻倍扩容！\n\n1. B+1，bucket 数量翻倍\n2. 旧 buckets 变成 oldbuckets\n3. 增量搬迁：每次写操作顺便搬 1-2 个\n4. 搬迁期间先查 oldbuckets';
 
-            while (state.step < demoSteps.length && state.autoPlaying) {
-                nextStep();
-                await new Promise(r => setTimeout(r, 1500));
-            }
+        S.oldBuckets = S.buckets;
+        S.B++;
+        S.buckets = Array.from({length: 1<<S.B}, ()=>mkBucket());
+        S.evacProg = 0;
+        S.lastInserted = {bucketIdx:-1, chainIdx:-1, slot:-1};
+        render(); updateStats();
+    }
 
-            state.autoPlaying = false;
+    async function autoPlay() {
+        if(S.autoPlaying) return;
+        S.autoPlaying = true;
+        while(S.step < STEPS.length && S.autoPlaying) {
+            nextStep();
+            await new Promise(r => setTimeout(r, 1200));
         }
+        S.autoPlaying = false;
+    }
 
-        reset();
+    reset();
     </script>
+
+<!-- 关键说明 -->
+<div style="max-width:1200px;margin:0 auto;padding:0 24px 32px">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:24px">
+        <h3 style="font-size:16px;font-weight:700;color:#94a3b8;margin-bottom:14px">关键说明</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;color:#cbd5e1;line-height:1.8">
+            <div>
+                <div style="color:#60a5fa;font-weight:700;margin-bottom:4px">Map 底层结构 (hmap)</div>
+                <div>桶数组 <code>buckets</code>：每个桶存 8 个键值对 + 溢出桶指针</div>
+                <div>哈希种子 <code>hash0</code>：随机化，防止 hash 攻击</div>
+                <div>负载因子阈值 = <span style="color:#fbbf24">6.5</span>（平均每个桶 6.5 个元素时扩容）</div>
+                <div>扩容策略：翻倍扩容（桶数 ×2）或等量扩容（整理溢出桶）</div>
+            </div>
+            <div>
+                <div style="color:#4ade80;font-weight:700;margin-bottom:4px">查找流程</div>
+                <div>1. hash(key) + hash0 计算哈希值</div>
+                <div>2. 低 B 位定位桶号，高 8 位（tophash）在桶内快速匹配</div>
+                <div>3. 逐个比较 tophash → 命中后比较完整 key</div>
+                <div>4. 当前桶未命中 → 查溢出桶链表</div>
+            </div>
+            <div>
+                <div style="color:#f87171;font-weight:700;margin-bottom:4px">并发安全</div>
+                <div>❌ 并发读写 Map → panic: concurrent map read and map write</div>
+                <div>❌ 并发写 Map → panic: concurrent map writes</div>
+                <div>✅ 方案 1：<code>sync.RWMutex</code> 保护，读多写少首选</div>
+                <div>✅ 方案 2：<code>sync.Map</code>：读多写少场景无锁读，写多场景反而更慢</div>
+            </div>
+            <div>
+                <div style="color:#a78bfa;font-weight:700;margin-bottom:4px">扩容细节</div>
+                <div>翻倍扩容：桶数翻倍，元素重新分配到新桶（渐进式，每次操作迁移 1-2 个桶）</div>
+                <div>等量扩容：桶数不变，整理溢出桶使其更紧凑（大量删除后触发）</div>
+                <div>扩容期间读写正常：先查旧桶，未完成迁移的桶会触发迁移再查</div>
+                <div>渐进式迁移避免一次性停顿，但扩容期间性能有轻微下降</div>
+            </div>
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #334155;font-size:11px;color:#475569;text-align:center">
+            来源：Go 1.22 runtime/map.go 源码 · 对应文档 01-go-basics/02-map-deep-dive.md
+        </div>
+    </div>
+</div>
+
 </body>
 </html>

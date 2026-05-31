@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go RWMutex 读写锁动态可视化</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+        .container { max-width: 1260px; margin: 0 auto; padding: 24px; }
+        .header { text-align: center; margin-bottom: 24px; }
+        .header h1 { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #94a3b8; margin-top: 6px; font-size: 14px; }
+
+        /* Legend */
+        .legend { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+        .legend-dot { width: 14px; height: 14px; border-radius: 4px; }
+        .rule-box { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .rule-tag { padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; }
+        .rule-tag.rr { background: #052e16; color: #4ade80; border: 1px solid #22c55e; }
+        .rule-tag.rw { background: #450a0a; color: #f87171; border: 1px solid #ef4444; }
+        .rule-tag.ww { background: #450a0a; color: #f87171; border: 1px solid #ef4444; }
+
+        /* Controls */
+        .controls { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .btn { padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-rlock { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; }
+        .btn-runlock { background: linear-gradient(135deg, #15803d, #166534); color: #bbf7d0; }
+        .btn-lock { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+        .btn-unlock { background: linear-gradient(135deg, #b91c1c, #991b1b); color: #fecaca; }
+        .btn-reset { background: #334155; color: #cbd5e1; }
+        .btn-auto { background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; }
+
+        /* State Section */
+        .state-section { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+        .panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+        .panel-title { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 600; }
+
+        /* Field Display */
+        .field-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1e293b; }
+        .field-row:last-child { border-bottom: none; }
+        .field-name { font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; color: #94a3b8; }
+        .field-val { font-size: 20px; font-weight: 800; font-family: 'SF Mono', monospace; min-width: 60px; text-align: right; transition: color 0.3s; }
+        .field-val.positive { color: #4ade80; }
+        .field-val.negative { color: #f87171; }
+        .field-val.zero { color: #475569; }
+        .field-val.sema { color: #38bdf8; }
+        .field-desc { font-size: 10px; color: #64748b; margin-left: 4px; }
+
+        /* readerCount bar */
+        .rc-bar-wrap { margin-top: 8px; }
+        .rc-bar-track { height: 10px; background: #0f172a; border-radius: 5px; overflow: hidden; position: relative; }
+        .rc-bar-fill { height: 100%; border-radius: 5px; transition: all 0.4s ease; position: absolute; left: 50%; }
+        .rc-bar-fill.pos { background: #22c55e; transform-origin: left; }
+        .rc-bar-fill.neg { background: #ef4444; transform-origin: right; }
+        .rc-bar-zero { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: #475569; }
+        .rc-bar-labels { display: flex; justify-content: space-between; font-size: 10px; color: #475569; margin-top: 2px; }
+
+        /* Visual Area */
+        .visual-area { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; margin-bottom: 20px; position: relative; min-height: 300px; }
+
+        /* Lock State Visual */
+        .lock-state { display: flex; justify-content: center; align-items: center; gap: 24px; margin-bottom: 20px; }
+        .lock-block { text-align: center; }
+        .lock-icon-wrap {
+            width: 72px; height: 72px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+            font-size: 30px; transition: all 0.4s ease; margin: 0 auto 6px;
+        }
+        .lock-icon-wrap.free { background: #0f172a; border: 2px solid #475569; }
+        .lock-icon-wrap.reading { background: #052e16; border: 2px solid #22c55e; box-shadow: 0 0 16px rgba(34,197,94,0.25); }
+        .lock-icon-wrap.writing { background: #450a0a; border: 2px solid #ef4444; box-shadow: 0 0 16px rgba(239,68,68,0.25); }
+        .lock-label { font-size: 12px; color: #64748b; font-weight: 600; }
+        .lock-sub { font-size: 11px; color: #475569; font-family: 'SF Mono', monospace; min-height: 16px; }
+
+        /* Arrow between lock blocks */
+        .lock-arrow { font-size: 20px; color: #475569; align-self: center; }
+
+        /* Goroutine Pools */
+        .pools { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .pool { background: #0f172a; border-radius: 12px; padding: 14px; min-height: 100px; }
+        .pool-header { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+        .pool-header .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .pool-header .dot.reader { background: #22c55e; }
+        .pool-header .dot.writer { background: #ef4444; }
+        .pool-items { display: flex; gap: 8px; flex-wrap: wrap; min-height: 52px; align-items: center; }
+        .pool-empty { color: #334155; font-size: 12px; font-style: italic; width: 100%; text-align: center; padding: 12px 0; }
+
+        /* Goroutine Chip */
+        .g-chip {
+            display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 8px;
+            font-size: 12px; font-weight: 700; font-family: 'SF Mono', monospace;
+            transition: all 0.3s ease;
+        }
+        .g-chip.reader-active { background: #166534; color: #bbf7d0; border: 1.5px solid #22c55e; }
+        .g-chip.reader-waiting { background: #1e3a5f; color: #93c5fd; border: 1.5px solid #3b82f6; }
+        .g-chip.writer-active { background: #991b1b; color: #fecaca; border: 1.5px solid #ef4444; box-shadow: 0 0 12px rgba(239,68,68,0.3); }
+        .g-chip.writer-waiting { background: #3b1764; color: #d8b4fe; border: 1.5px solid #8b5cf6; }
+        .g-chip .g-type { font-size: 10px; }
+
+        /* Current Action */
+        .action-bar { background: #0f172a; border-radius: 8px; padding: 8px 14px; font-size: 13px; text-align: center; margin-bottom: 16px; border: 1px solid #334155; min-height: 38px; display: flex; align-items: center; justify-content: center; }
+        .action-bar .highlight { color: #60a5fa; font-weight: 700; }
+
+        /* Flow Section */
+        .flow-section { margin-bottom: 20px; }
+        .flow-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+        .flow-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+        .flow-tab { padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; border: 1px solid #334155; background: #0f172a; color: #64748b; transition: all 0.2s; }
+        .flow-tab.active-r { background: #052e16; color: #4ade80; border-color: #22c55e; }
+        .flow-tab.active-w { background: #450a0a; color: #f87171; border-color: #ef4444; }
+        .flow-steps { display: flex; flex-direction: column; gap: 6px; }
+        .flow-step { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: #0f172a; border: 1px solid #334155; transition: all 0.3s; font-size: 13px; }
+        .flow-step.active-r { border-color: #22c55e; background: #052e16; }
+        .flow-step.active-w { border-color: #ef4444; background: #450a0a; }
+        .flow-step.done { border-color: #334155; opacity: 0.5; }
+        .flow-step .s-icon { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: #334155; color: #94a3b8; flex-shrink: 0; }
+        .flow-step.active-r .s-icon { background: #22c55e; color: #052e16; }
+        .flow-step.active-w .s-icon { background: #ef4444; color: white; }
+        .flow-step .s-text { flex: 1; }
+        .flow-step .s-detail { font-size: 11px; color: #64748b; }
+
+        /* Log */
+        .log-section { margin-bottom: 20px; }
+        .log-panel { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px; max-height: 180px; overflow-y: auto; }
+        .log-title { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600; }
+        .log-entry { font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; padding: 2px 0; display: flex; gap: 6px; align-items: baseline; }
+        .log-time { color: #475569; flex-shrink: 0; }
+        .log-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+        .log-tag.rlock { background: #052e16; color: #4ade80; }
+        .log-tag.runlock { background: #166534; color: #86efac; }
+        .log-tag.lock { background: #450a0a; color: #f87171; }
+        .log-tag.unlock { background: #991b1b; color: #fca5a5; }
+        .log-tag.sema { background: #0c4a6e; color: #38bdf8; }
+        .log-tag.neg { background: #3b1764; color: #c084fc; }
+        .log-msg { color: #cbd5e1; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .state-section { grid-template-columns: 1fr; }
+            .pools { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Go RWMutex 读写锁动态可视化</h1>
+        <p>sync.RWMutex — 读读共享 / 读写互斥 / 写写互斥 / readerCount 负数标记 / 写不被饿死</p>
+    </div>
+
+    <div class="rule-box">
+        <span class="rule-tag rr">读读共享</span>
+        <span class="rule-tag rw">读写互斥</span>
+        <span class="rule-tag ww">写写互斥</span>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>读者活跃</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>读者等待</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>写者活跃</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>写者等待</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div>readerCount &lt; 0</div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-rlock" onclick="doRLock()" id="btnRLock">RLock()</button>
+        <button class="btn btn-runlock" onclick="doRUnlock()" id="btnRUnlock" disabled>RUnlock()</button>
+        <button class="btn btn-lock" onclick="doLock()" id="btnLock">Lock() 写锁</button>
+        <button class="btn btn-unlock" onclick="doUnlock()" id="btnUnlock" disabled>Unlock() 写释放</button>
+        <button class="btn btn-auto" onclick="autoDemo()">自动演示</button>
+        <button class="btn btn-reset" onclick="resetAll()">重置</button>
+    </div>
+
+    <!-- State Display -->
+    <div class="state-section">
+        <div class="panel">
+            <div class="panel-title">RWMutex 结构体</div>
+            <div class="field-row">
+                <span class="field-name">readerCount</span>
+                <span class="field-val zero" id="fRC">0</span>
+            </div>
+            <div class="rc-bar-wrap">
+                <div class="rc-bar-track">
+                    <div class="rc-bar-zero"></div>
+                    <div class="rc-bar-fill pos" id="rcBarPos" style="width:0"></div>
+                    <div class="rc-bar-fill neg" id="rcBarNeg" style="width:0"></div>
+                </div>
+                <div class="rc-bar-labels"><span>-2^30</span><span>0</span><span>+</span></div>
+            </div>
+            <div class="field-row">
+                <span class="field-name">readerWait</span>
+                <span class="field-val zero" id="fRW">0</span>
+            </div>
+            <div class="field-row">
+                <span class="field-name">w (Mutex)</span>
+                <span class="field-val zero" id="fMutex">解锁</span>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">信号量</div>
+            <div class="field-row">
+                <span class="field-name">writerSem</span>
+                <span class="field-val sema" id="fWS">0</span>
+            </div>
+            <div style="font-size:10px;color:#475569;margin:-4px 0 4px">写者等待信号量，最后一个读者释放时唤醒</div>
+            <div class="field-row">
+                <span class="field-name">readerSem</span>
+                <span class="field-val sema" id="fRS">0</span>
+            </div>
+            <div style="font-size:10px;color:#475569;margin:-4px 0 4px">读者等待信号量，写者释放时批量唤醒</div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">当前状态</div>
+            <div id="statusDisplay" style="text-align:center;padding:16px 0">
+                <div style="font-size:18px;font-weight:800;color:#475569">空闲</div>
+                <div style="font-size:12px;color:#334155;margin-top:4px">无读者、无写者</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visual Area -->
+    <div class="visual-area">
+        <div class="action-bar" id="actionBar">空闲 — 等待操作</div>
+
+        <div class="lock-state">
+            <div class="lock-block">
+                <div class="lock-icon-wrap free" id="readLockIcon">&#128218;</div>
+                <div class="lock-label">读锁</div>
+                <div class="lock-sub" id="readLockSub">0 个读者</div>
+            </div>
+            <div class="lock-arrow">⇄</div>
+            <div class="lock-block">
+                <div class="lock-icon-wrap free" id="writeLockIcon">&#9997;</div>
+                <div class="lock-label">写锁</div>
+                <div class="lock-sub" id="writeLockSub">无写者</div>
+            </div>
+        </div>
+
+        <div class="pools">
+            <div class="pool">
+                <div class="pool-header"><div class="dot reader"></div>活跃读者</div>
+                <div class="pool-items" id="activeReaders">
+                    <div class="pool-empty">无活跃读者</div>
+                </div>
+            </div>
+            <div class="pool">
+                <div class="pool-header"><div class="dot" style="background:#8b5cf6"></div>等待写者</div>
+                <div class="pool-items" id="waitingWriters">
+                    <div class="pool-empty">无等待写者</div>
+                </div>
+            </div>
+            <div class="pool">
+                <div class="pool-header"><div class="dot" style="background:#3b82f6"></div>等待读者</div>
+                <div class="pool-items" id="waitingReaders">
+                    <div class="pool-empty">无等待读者</div>
+                </div>
+            </div>
+            <div class="pool">
+                <div class="pool-header"><div class="dot writer"></div>活跃写者</div>
+                <div class="pool-items" id="activeWriters">
+                    <div class="pool-empty">无活跃写者</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flow Diagram -->
+    <div class="flow-section">
+        <div class="flow-panel">
+            <div class="flow-tabs">
+                <div class="flow-tab active-r" id="tabRLock" onclick="showFlowTab('rlock')">RLock()</div>
+                <div class="flow-tab" id="tabRUnlock" onclick="showFlowTab('runlock')">RUnlock()</div>
+                <div class="flow-tab" id="tabLock" onclick="showFlowTab('lock')">Lock()</div>
+                <div class="flow-tab" id="tabUnlock" onclick="showFlowTab('unlock')">Unlock()</div>
+            </div>
+            <div class="flow-steps" id="flowSteps"></div>
+        </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-section">
+        <div class="log-panel">
+            <div class="log-title">操作日志</div>
+            <div id="logContent"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const MAX_READERS = 1 << 30;
+
+// ===== State =====
+let S = {
+    readerCount: 0,
+    readerWait: 0,
+    writerSem: 0,
+    readerSem: 0,
+    wLocked: false,
+    activeReaders: [],  // [{id}]
+    activeWriter: null,  // {id}
+    waitingReaders: [],  // [{id}]
+    waitingWriters: [],  // [{id}]
+    nextR: 1,
+    nextW: 1,
+    animating: false,
+    currentFlow: 'rlock',
+    flowActiveIdx: -1,
+};
+
+function resetAll() {
+    S = { readerCount:0, readerWait:0, writerSem:0, readerSem:0, wLocked:false, activeReaders:[], activeWriter:null, waitingReaders:[], waitingWriters:[], nextR:1, nextW:1, animating:false, currentFlow:'rlock', flowActiveIdx:-1 };
+    render();
+    clearLog();
+    showFlowTab('rlock');
+}
+
+// ===== Helpers =====
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function hasWriterWaiting() { return S.readerCount < 0; }
+function actualReaderCount() { return S.readerCount < 0 ? S.readerCount + MAX_READERS : S.readerCount; }
+
+// ===== Rendering =====
+function render() {
+    const rc = S.readerCount;
+    const arc = actualReaderCount();
+
+    // Fields
+    const fRC = document.getElementById('fRC');
+    fRC.textContent = rc;
+    fRC.className = 'field-val ' + (rc < 0 ? 'negative' : rc > 0 ? 'positive' : 'zero');
+
+    const fRW = document.getElementById('fRW');
+    fRW.textContent = S.readerWait;
+    fRW.className = 'field-val ' + (S.readerWait > 0 ? 'negative' : 'zero');
+
+    const fM = document.getElementById('fMutex');
+    fM.textContent = S.wLocked ? '锁定' : '解锁';
+    fM.className = 'field-val ' + (S.wLocked ? 'negative' : 'zero');
+
+    document.getElementById('fWS').textContent = S.writerSem;
+    document.getElementById('fRS').textContent = S.readerSem;
+
+    // readerCount bar
+    const posBar = document.getElementById('rcBarPos');
+    const negBar = document.getElementById('rcBarNeg');
+    if (rc >= 0) {
+        posBar.style.width = Math.min(rc / 10 * 50, 50) + '%';
+        posBar.style.left = '50%';
+        negBar.style.width = '0';
+    } else {
+        posBar.style.width = '0';
+        negBar.style.width = Math.min(Math.abs(rc + MAX_READERS) / MAX_READERS * 50, 50) + '%';
+        negBar.style.left = (50 - Math.min(Math.abs(rc + MAX_READERS) / MAX_READERS * 50, 50)) + '%';
+    }
+
+    // Status display
+    const sd = document.getElementById('statusDisplay');
+    if (S.activeWriter) {
+        sd.innerHTML = `<div style="font-size:18px;font-weight:800;color:#f87171">写锁持有中</div><div style="font-size:12px;color:#94a3b8;margin-top:4px">W${S.activeWriter.id} 正在写 · 读者等待: ${S.waitingReaders.length}</div>`;
+    } else if (arc > 0) {
+        sd.innerHTML = `<div style="font-size:18px;font-weight:800;color:#4ade80">读锁共享中</div><div style="font-size:12px;color:#94a3b8;margin-top:4px">${arc} 个读者活跃 · 写者等待: ${S.waitingWriters.length}</div>`;
+    } else {
+        sd.innerHTML = `<div style="font-size:18px;font-weight:800;color:#475569">空闲</div><div style="font-size:12px;color:#334155;margin-top:4px">无读者、无写者</div>`;
+    }
+
+    // Lock icons
+    const rli = document.getElementById('readLockIcon');
+    const wli = document.getElementById('writeLockIcon');
+    if (S.activeWriter) {
+        rli.className = 'lock-icon-wrap free';
+        wli.className = 'lock-icon-wrap writing';
+    } else if (arc > 0) {
+        rli.className = 'lock-icon-wrap reading';
+        wli.className = 'lock-icon-wrap free';
+    } else {
+        rli.className = 'lock-icon-wrap free';
+        wli.className = 'lock-icon-wrap free';
+    }
+    document.getElementById('readLockSub').textContent = arc > 0 ? arc + ' 个读者' : '无读者';
+    document.getElementById('writeLockSub').textContent = S.activeWriter ? 'W' + S.activeWriter.id : '无写者';
+
+    // Pools
+    renderPool('activeReaders', S.activeReaders.map(g => ({...g, cls:'reader-active'})));
+    renderPool('waitingWriters', S.waitingWriters.map(g => ({...g, cls:'writer-waiting'})));
+    renderPool('waitingReaders', S.waitingReaders.map(g => ({...g, cls:'reader-waiting'})));
+    renderPool('activeWriters', S.activeWriter ? [{id:S.activeWriter.id, cls:'writer-active'}] : []);
+
+    // Buttons
+    const canRLock = !S.animating;
+    const canRUnlock = S.activeReaders.length > 0 && !S.animating;
+    const canLock = !S.wLocked && !S.animating;
+    const canUnlock = !!S.activeWriter && !S.animating;
+    document.getElementById('btnRLock').disabled = !canRLock;
+    document.getElementById('btnRUnlock').disabled = !canRUnlock;
+    document.getElementById('btnLock').disabled = !canLock;
+    document.getElementById('btnUnlock').disabled = !canUnlock;
+}
+
+function renderPool(elId, items) {
+    const el = document.getElementById(elId);
+    if (items.length === 0) {
+        el.innerHTML = '<div class="pool-empty">空</div>';
+        return;
+    }
+    el.innerHTML = items.map(g =>
+        `<div class="g-chip ${g.cls}"><span class="g-type">${g.cls.includes('reader') ? 'R' : 'W'}</span>${g.id}</div>`
+    ).join('');
+}
+
+function setAction(html) {
+    document.getElementById('actionBar').innerHTML = html;
+}
+
+// ===== Flow Tabs =====
+const flowDefs = {
+    rlock: [
+        {title: 'readerCount++', detail: 'atomic.AddInt32(&readerCount, 1)'},
+        {title: 'readerCount < 0 ?', detail: '负数 = 有写锁在等待'},
+        {title: '阻塞 / 获得锁', detail: '负数 → Semacquire(readerSem) / 正数 → 直接返回'},
+    ],
+    runlock: [
+        {title: 'readerCount--', detail: 'atomic.AddInt32(&readerCount, -1)'},
+        {title: 'readerCount < 0 ?', detail: '负数 = 有写锁在等待'},
+        {title: 'readerWait--', detail: 'atomic.AddInt32(&readerWait, -1)'},
+        {title: 'readerWait == 0 ?', detail: '最后一个读者 → Semrelease(writerSem) 唤醒写'},
+    ],
+    lock: [
+        {title: '获取互斥锁 w', detail: 'rw.w.Lock() — 保证写写互斥'},
+        {title: 'readerCount -= 2^30', detail: '变负数，标记有写在等待，阻止新读者'},
+        {title: '有读者在读？', detail: 'readerCount(调整前) > 0 → 需要等待'},
+        {title: '设置 readerWait', detail: '把当前读者数拷贝到 readerWait'},
+        {title: '阻塞等写信号量', detail: 'Semacquire(writerSem) — 等最后一个读者唤醒'},
+    ],
+    unlock: [
+        {title: 'readerCount += 2^30', detail: '恢复正数，通知读者可以继续'},
+        {title: '唤醒等待读者', detail: '循环释放 readerSem — 唤醒所有等读的 goroutine'},
+        {title: '释放互斥锁 w', detail: 'rw.w.Unlock() — 允许下一个写进来'},
+    ],
+};
+
+function showFlowTab(tab) {
+    S.currentFlow = tab;
+    S.flowActiveIdx = -1;
+    const tabIdMap = { rlock: 'tabRLock', runlock: 'tabRUnlock', lock: 'tabLock', unlock: 'tabUnlock' };
+    document.querySelectorAll('.flow-tab').forEach(t => t.className = 'flow-tab');
+    const tabEl = document.getElementById(tabIdMap[tab]);
+    const cls = (tab === 'rlock' || tab === 'runlock') ? 'active-r' : 'active-w';
+    if (tabEl) tabEl.className = 'flow-tab ' + cls;
+    renderFlow();
+}
+
+function renderFlow() {
+    const steps = flowDefs[S.currentFlow];
+    const isR = S.currentFlow === 'rlock' || S.currentFlow === 'runlock';
+    const container = document.getElementById('flowSteps');
+    container.innerHTML = steps.map((s, i) => {
+        const actCls = i === S.flowActiveIdx ? (isR ? 'active-r' : 'active-w') : (i < S.flowActiveIdx ? 'done' : '');
+        return `<div class="flow-step ${actCls}"><div class="s-icon">${i}</div><div><div class="s-text">${s.title}</div><div class="s-detail">${s.detail}</div></div></div>`;
+    }).join('');
+}
+
+function setFlowActive(tab, idx) {
+    S.currentFlow = tab;
+    S.flowActiveIdx = idx;
+    const tabIdMap = { rlock: 'tabRLock', runlock: 'tabRUnlock', lock: 'tabLock', unlock: 'tabUnlock' };
+    document.querySelectorAll('.flow-tab').forEach(t => t.className = 'flow-tab');
+    const tabEl = document.getElementById(tabIdMap[tab]);
+    const cls = (tab === 'rlock' || tab === 'runlock') ? 'active-r' : 'active-w';
+    if (tabEl) tabEl.className = 'flow-tab ' + cls;
+    renderFlow();
+}
+
+// ===== Logging =====
+function addLog(tag, msg) {
+    const lc = document.getElementById('logContent');
+    const now = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const d = document.createElement('div');
+    d.className = 'log-entry';
+    d.innerHTML = `<span class="log-time">${now}</span><span class="log-tag ${tag}">${tag.toUpperCase()}</span><span class="log-msg">${msg}</span>`;
+    lc.prepend(d);
+    while(lc.children.length > 60) lc.removeChild(lc.lastChild);
+}
+function clearLog() { document.getElementById('logContent').innerHTML = ''; }
+
+// ===== RLock =====
+async function doRLock() {
+    if (S.animating) return;
+    S.animating = true;
+    const rid = S.nextR++;
+
+    // Step 1: readerCount++
+    setFlowActive('rlock', 0);
+    S.readerCount++;
+    setAction(`R${rid}: <span class="highlight">readerCount++</span> → ${S.readerCount}`);
+    addLog('rlock', `R${rid}: readerCount++ → ${S.readerCount}`);
+    render();
+    await sleep(500);
+
+    // Step 2: check negative
+    setFlowActive('rlock', 1);
+    if (S.readerCount < 0) {
+        // Writer waiting — must block
+        setAction(`R${rid}: readerCount < 0! <span class="highlight">有写锁在等待，阻塞</span>`);
+        addLog('neg', `R${rid}: readerCount=${S.readerCount} < 0 → 有写在等待，阻塞`);
+        S.waitingReaders.push({id: rid});
+        render();
+        await sleep(400);
+
+        setFlowActive('rlock', 2);
+        setAction(`R${rid}: Semacquire(readerSem) — 等待写锁释放`);
+        addLog('sema', `R${rid}: 阻塞在 readerSem`);
+        render();
+    } else {
+        // Free to read
+        setFlowActive('rlock', 2);
+        S.activeReaders.push({id: rid});
+        setAction(`R${rid}: <span class="highlight">readerCount > 0，直接获得读锁</span>`);
+        addLog('rlock', `R${rid}: ✅ 直接获得读锁 (当前${S.activeReaders.length}个读者)`);
+        render();
+    }
+    S.animating = false;
+    render();
+}
+
+// ===== RUnlock =====
+async function doRUnlock() {
+    if (S.animating || S.activeReaders.length === 0) return;
+    S.animating = true;
+    const r = S.activeReaders.shift();
+
+    // Step 1: readerCount--
+    setFlowActive('runlock', 0);
+    S.readerCount--;
+    setAction(`R${r.id}: <span class="highlight">readerCount--</span> → ${S.readerCount}`);
+    addLog('runlock', `R${r.id}: readerCount-- → ${S.readerCount}`);
+    render();
+    await sleep(400);
+
+    // Step 2: check negative
+    setFlowActive('runlock', 1);
+    if (S.readerCount >= 0) {
+        setFlowActive('runlock', 2);
+        setAction(`R${r.id}: readerCount >= 0，直接返回`);
+        addLog('runlock', `R${r.id}: 无写等待，直接返回`);
+        S.animating = false;
+        render();
+        return;
+    }
+
+    // Has writer waiting
+    setAction(`R${r.id}: readerCount < 0，有写在等待`);
+    addLog('neg', `R${r.id}: 有写在等待，检查是否为最后一个读者`);
+    await sleep(300);
+
+    // Step 3: readerWait--
+    setFlowActive('runlock', 2);
+    S.readerWait--;
+    setAction(`R${r.id}: <span class="highlight">readerWait--</span> → ${S.readerWait}`);
+    addLog('runlock', `R${r.id}: readerWait-- → ${S.readerWait}`);
+    render();
+    await sleep(400);
+
+    // Step 4: readerWait == 0 ?
+    setFlowActive('runlock', 3);
+    if (S.readerWait === 0) {
+        setAction(`R${r.id}: readerWait == 0! <span class="highlight">最后一个读者 → 唤醒写者</span>`);
+        addLog('sema', `R${r.id}: ✅ 最后一个读者！Semrelease(writerSem) → 唤醒写者`);
+        S.writerSem++;
+
+        // Wake the first waiting writer
+        if (S.waitingWriters.length > 0) {
+            const w = S.waitingWriters.shift();
+            S.activeWriter = w;
+            setAction(`W${w.id}: 被唤醒，获得写锁！`);
+            addLog('lock', `W${w.id}: ✅ 获得写锁`);
+        }
+    } else {
+        setAction(`R${r.id}: readerWait = ${S.readerWait}，还有读者没读完`);
+        addLog('runlock', `R${r.id}: 还有 ${S.readerWait} 个读者，写继续等`);
+    }
+    S.animating = false;
+    render();
+}
+
+// ===== Lock (Write) =====
+async function doLock() {
+    if (S.animating || S.wLocked) return;
+    S.animating = true;
+    const wid = S.nextW++;
+
+    // Step 1: acquire mutex w
+    setFlowActive('lock', 0);
+    S.wLocked = true;
+    setAction(`W${wid}: <span class="highlight">rw.w.Lock()</span> — 获取互斥锁，保证写写互斥`);
+    addLog('lock', `W${wid}: w.Lock() → 获取互斥锁`);
+    render();
+    await sleep(500);
+
+    // Step 2: readerCount -= 2^30
+    setFlowActive('lock', 1);
+    const prevRC = S.readerCount;
+    const currentReaders = S.readerCount > 0 ? S.readerCount : 0;
+    S.readerCount -= MAX_READERS;
+    setAction(`W${wid}: <span class="highlight">readerCount -= 2^30</span> → ${S.readerCount} (变负数！)`);
+    addLog('neg', `W${wid}: readerCount ${prevRC} → ${S.readerCount} (变负数，标记有写在等待)`);
+    render();
+    await sleep(500);
+
+    // Step 3: any readers reading?
+    setFlowActive('lock', 2);
+    if (currentReaders > 0) {
+        setAction(`W${wid}: 还有 ${currentReaders} 个读者在读，需要等待`);
+        addLog('lock', `W${wid}: 发现 ${currentReaders} 个活跃读者`);
+        await sleep(300);
+
+        // Step 4: set readerWait
+        setFlowActive('lock', 3);
+        S.readerWait = currentReaders;
+        setAction(`W${wid}: <span class="highlight">readerWait = ${currentReaders}</span>，等待这些读者读完`);
+        addLog('lock', `W${wid}: readerWait = ${currentReaders} (等待这些读者释放)`);
+        render();
+        await sleep(300);
+
+        // Step 5: block on writerSem
+        setFlowActive('lock', 4);
+        S.waitingWriters.push({id: wid});
+        setAction(`W${wid}: <span class="highlight">Semacquire(writerSem)</span> — 阻塞等最后一个读者唤醒`);
+        addLog('sema', `W${wid}: 阻塞在 writerSem，等读者读完`);
+        render();
+    } else {
+        // No readers — acquire write lock immediately
+        setFlowActive('lock', 2);
+        S.activeWriter = {id: wid};
+        setAction(`W${wid}: <span class="highlight">无活跃读者，直接获得写锁！</span>`);
+        addLog('lock', `W${wid}: ✅ 直接获得写锁 (无活跃读者)`);
+        render();
+    }
+    S.animating = false;
+    render();
+}
+
+// ===== Unlock (Write) =====
+async function doUnlock() {
+    if (S.animating || !S.activeWriter) return;
+    S.animating = true;
+    const w = S.activeWriter;
+
+    // Step 1: readerCount += 2^30
+    setFlowActive('unlock', 0);
+    S.readerCount += MAX_READERS;
+    const waitingRCount = S.readerCount;
+    setAction(`W${w.id}: <span class="highlight">readerCount += 2^30</span> → ${S.readerCount} (恢复正数！)`);
+    addLog('unlock', `W${w.id}: readerCount += 2^30 → ${S.readerCount} (恢复正数)`);
+    render();
+    await sleep(500);
+
+    // Step 2: wake all waiting readers
+    setFlowActive('unlock', 1);
+    if (S.waitingReaders.length > 0) {
+        const count = S.waitingReaders.length;
+        setAction(`W${w.id}: <span class="highlight">唤醒 ${count} 个等待读者</span> (循环释放 readerSem)`);
+        addLog('sema', `W${w.id}: 循环释放 readerSem ${count} 次`);
+        for (let i = 0; i < count; i++) {
+            S.readerSem++;
+            const r = S.waitingReaders.shift();
+            S.activeReaders.push(r);
+            addLog('rlock', `R${r.id}: ✅ 被唤醒，获得读锁`);
+        }
+        await sleep(400);
+    } else {
+        setAction(`W${w.id}: 无等待读者`);
+        addLog('unlock', `无等待读者`);
+    }
+    render();
+    await sleep(300);
+
+    // Step 3: release mutex w
+    setFlowActive('unlock', 2);
+    S.wLocked = false;
+    S.activeWriter = null;
+    setAction(`W${w.id}: <span class="highlight">rw.w.Unlock()</span> — 释放互斥锁`);
+    addLog('unlock', `W${w.id}: w.Unlock() — 释放互斥锁`);
+    render();
+    S.animating = false;
+    render();
+}
+
+// ===== Auto Demo =====
+async function autoDemo() {
+    if (S.animating) return;
+    resetAll();
+    addLog('rlock', '=== 自动演示开始 ===');
+
+    // Phase 1: Multiple readers
+    setAction('阶段1: 多个读者并发读（读读共享）');
+    await sleep(600);
+    await doRLock();  // R1
+    await sleep(300);
+    await doRLock();  // R2
+    await sleep(300);
+    await doRLock();  // R3
+
+    // Phase 2: Writer comes
+    await sleep(800);
+    setAction('阶段2: 写者到来，需要等读者释放');
+    await doLock();  // W1 — should block waiting for 3 readers
+
+    // Phase 3: New reader tries — should block (writer waiting)
+    await sleep(800);
+    setAction('阶段3: 新读者到来，但写者在等待 → 新读者也阻塞！');
+    addLog('neg', 'readerCount < 0，新读者看到有写在等待，也必须等');
+    // Manually add a waiting reader to demonstrate
+    S.nextR++;
+    const rid = S.nextR - 1;
+    S.readerCount++; // still negative
+    S.waitingReaders.push({id: rid});
+    addLog('rlock', `R${rid}: readerCount++ → ${S.readerCount} (仍 < 0，阻塞)`);
+    render();
+    await sleep(600);
+
+    // Phase 4: Readers release one by one
+    setAction('阶段4: 读者逐个释放，readerWait 递减');
+    await sleep(400);
+    await doRUnlock(); // R1 releases
+    await sleep(300);
+    await doRUnlock(); // R2 releases
+    await sleep(300);
+    await doRUnlock(); // R3 releases — last reader, should wake writer
+
+    // Phase 5: Writer has the lock, then releases
+    await sleep(600);
+    setAction('阶段5: 写者完成，释放写锁 → 唤醒所有等待读者');
+    await doUnlock();
+
+    setAction('演示完成: 读读共享 → 写等待 → 读者释放唤醒写 → 写释放唤醒读者');
+    addLog('rlock', '=== 自动演示结束 ===');
+}
+
+// ===== Init =====
+function init() {
+    render();
+    showFlowTab('rlock');
+}
+init();
+</script>
+
+<!-- 关键说明 -->
+<div style="max-width:1260px;margin:0 auto;padding:0 24px 32px">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:24px">
+        <h3 style="font-size:16px;font-weight:700;color:#94a3b8;margin-bottom:14px">关键说明</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;color:#cbd5e1;line-height:1.8">
+            <div>
+                <div style="color:#4ade80;font-weight:700;margin-bottom:4px">读写互斥规则</div>
+                <div><span style="color:#4ade80">读读共享</span>：多个读者可以同时持有读锁，互不阻塞</div>
+                <div><span style="color:#f87171">读写互斥</span>：有写者时，新读者必须等待；有读者时，写者必须等待</div>
+                <div><span style="color:#f87171">写写互斥</span>：同一时间只有一个写者，靠互斥锁 w 保证</div>
+            </div>
+            <div>
+                <div style="color:#f87171;font-weight:700;margin-bottom:4px">readerCount 负数标记（最精妙的设计）</div>
+                <div>写锁到来时 <code>readerCount -= 2^30</code> 变成负数</div>
+                <div>负数同时表示两个含义：<span style="color:#60a5fa">① 仍有读者在读</span> + <span style="color:#f87171">② 有写锁在等待</span></div>
+                <div>新来的 RLock() 发现负数 → 也必须阻塞，防止写被饿死</div>
+                <div>写锁释放时 <code>readerCount += 2^30</code> 恢复正数 → 批量唤醒等待读者</div>
+            </div>
+            <div>
+                <div style="color:#38bdf8;font-weight:700;margin-bottom:4px">写不被饿死的原因</div>
+                <div>写锁来了 → readerCount 变负 → 新来的读看到负数也阻塞</div>
+                <div>等已有读者全部读完（readerWait 减到 0）→ 最后一个读者释放 writerSem 唤醒写</div>
+                <div>写完成 → 批量释放 readerSem → 所有等待读者同时被唤醒</div>
+                <div>相当于把连续的读切割成一批一批，不会让写无限等待</div>
+            </div>
+            <div>
+                <div style="color:#ef4444;font-weight:700;margin-bottom:4px">常见坑</div>
+                <div>❌ 读锁里调写锁 → 死锁（写等读释放，读等写获取）</div>
+                <div>❌ 用 RWMutex 存数据库连接 → GC 清不掉连接，泄漏</div>
+                <div>❌ 读写差不多时用 RWMutex → 比普通 Mutex 还慢</div>
+                <div>✅ 只在读多写少时用：配置缓存、字典缓存</div>
+            </div>
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #334155;font-size:11px;color:#475569;text-align:center">
+            来源：Go 1.22 sync.RWMutex 源码 · 对应文档 02-go-concurrency/05-rwmutex.md
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
