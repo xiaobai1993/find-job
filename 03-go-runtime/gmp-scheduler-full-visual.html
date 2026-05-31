@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GMP 调度器完整动态可视化</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.container{max-width:1340px;margin:0 auto;padding:20px}
+
+/* Header */
+.hdr{text-align:center;margin-bottom:18px}
+.hdr h1{font-size:26px;font-weight:800;background:linear-gradient(135deg,#34d399,#60a5fa,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr p{color:#64748b;font-size:13px;margin-top:4px}
+
+/* Scenario tabs */
+.scenario-tabs{display:flex;gap:4px;margin-bottom:16px;background:#1e293b;border-radius:10px;padding:4px;flex-wrap:wrap}
+.stab{flex:1;min-width:120px;padding:10px 8px;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;transition:all .25s;background:transparent;color:#64748b;text-align:center}
+.stab.active{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;box-shadow:0 2px 12px rgba(99,102,241,.3)}
+.stab:hover:not(.active){color:#cbd5e1;background:#334155}
+.stab .stab-icon{font-size:16px;display:block;margin-bottom:2px}
+
+/* Canvas area */
+.canvas-wrap{background:#0d1117;border:1px solid #21262d;border-radius:14px;padding:20px;min-height:500px;position:relative;overflow:hidden;margin-bottom:16px}
+
+/* Global queue */
+.gq-bar{background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.2);border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px}
+.gq-label{font-size:11px;color:#38bdf8;font-weight:700;white-space:nowrap;min-width:80px}
+.gq-items{display:flex;gap:4px;flex-wrap:wrap;min-height:28px}
+
+/* Sysmon bar */
+.sysmon-bar{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:8px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px;transition:all .4s}
+.sysmon-bar.alert{background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.5);box-shadow:0 0 16px rgba(239,68,68,.2)}
+.sysmon-label{font-size:11px;color:#f87171;font-weight:700;white-space:nowrap;min-width:80px}
+.sysmon-status{font-size:11px;color:#94a3b8}
+.sysmon-timer{margin-left:auto;font-size:11px;color:#64748b;font-family:'SF Mono',monospace}
+
+/* MP Rows */
+.mp-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:10px 12px;background:rgba(139,92,246,.04);border:1px solid rgba(139,92,246,.12);border-radius:10px;transition:all .4s;position:relative}
+.mp-row.highlight{border-color:rgba(99,102,241,.5);background:rgba(99,102,241,.08);box-shadow:0 0 20px rgba(99,102,241,.15)}
+.mp-row.blocked{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.06);opacity:.7}
+.mp-row.orphan{border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08);border-style:dashed}
+
+.m-box{width:56px;height:56px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0;transition:all .4s;position:relative}
+.m-box.normal{background:linear-gradient(135deg,#7c3aed,#6d28d9);border:2px solid #a78bfa}
+.m-box.sleeping{background:#1e293b;border:2px dashed #475569;color:#64748b}
+.m-box.blocked-m{background:#450a0a;border:2px solid #dc2626;animation:blockedPulse 2s infinite}
+.m-box small{font-size:9px;font-weight:400}
+.m-box.normal small{color:#c4b5fd}
+.m-box.blocked-m small{color:#fca5a5}
+.m-status{position:absolute;bottom:-14px;font-size:9px;font-weight:600;white-space:nowrap}
+@keyframes blockedPulse{0%,100%{box-shadow:0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 12px rgba(239,68,68,.4)}}
+
+.p-box{width:56px;height:56px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0;transition:all .4s;position:relative}
+.p-box.running{background:linear-gradient(135deg,#ea580c,#c2410c);border:2px solid #fb923c}
+.p-box.pidle{background:#1e293b;border:2px dashed #475569;color:#64748b}
+.p-box.psyscall{background:#4c1d95;border:2px solid #8b5cf6;animation:syscallPulse 2s infinite}
+.p-box small{font-size:9px;font-weight:400}
+.p-box.running small{color:#fed7aa}
+.p-box.psyscall small{color:#c4b5fd}
+.p-status{position:absolute;bottom:-14px;font-size:9px;font-weight:600;white-space:nowrap}
+@keyframes syscallPulse{0%,100%{box-shadow:0 0 0 rgba(139,92,246,0)}50%{box-shadow:0 0 12px rgba(139,92,246,.3)}}
+
+.bind-line{width:20px;height:2px;background:#475569;flex-shrink:0;position:relative}
+.bind-line::after{content:'';position:absolute;right:0;top:-3px;border:4px solid transparent;border-left:6px solid #475569}
+.bind-line.active{background:#6366f1}
+.bind-line.active::after{border-left-color:#6366f1}
+.bind-line.broken{background:transparent;background-image:linear-gradient(to right,#475569 50%,transparent 50%);background-size:6px 2px}
+.bind-line.broken::after{display:none}
+
+.g-queue{display:flex;gap:4px;flex-wrap:wrap;flex:1;min-height:36px;align-items:center;padding:0 4px}
+
+.g-item{width:34px;height:34px;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;transition:all .35s;position:relative;cursor:default}
+.g-item .gname{font-size:10px;font-weight:800}
+.g-item .gstate{font-size:7px;opacity:.8}
+.g-item.runnable{background:#065f46;color:#6ee7b7;border:1.5px solid #10b981}
+.g-item.running{background:#7c2d12;color:#fdba74;border:1.5px solid #f97316;animation:runPulse 1.2s infinite}
+.g-item.waiting{background:#92400e;color:#fcd34d;border:1.5px solid #f59e0b;opacity:.75}
+.g-item.syscall{background:#4c1d95;color:#c4b5fd;border:1.5px solid #8b5cf6;animation:sysG 1.5s infinite}
+.g-item.dead{background:#1e293b;color:#64748b;border:1.5px dashed #475569;opacity:.4}
+.g-item.stealing{animation:stealFly .8s ease}
+@keyframes runPulse{0%,100%{transform:scale(1);box-shadow:0 0 0 rgba(249,115,22,0)}50%{transform:scale(1.08);box-shadow:0 0 10px rgba(249,115,22,.3)}}
+@keyframes sysG{0%,100%{opacity:.7}50%{opacity:1}}
+@keyframes stealFly{0%{transform:translateX(60px);opacity:0}100%{transform:translateX(0);opacity:1}}
+
+/* Orphan M row (for syscall scenario) */
+.orphan-m-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:10px 12px;background:rgba(239,68,68,.04);border:1px dashed rgba(239,68,68,.3);border-radius:10px;opacity:0;max-height:0;overflow:hidden;transition:all .5s}
+.orphan-m-row.visible{opacity:1;max-height:80px;margin-bottom:10px;padding:10px 12px}
+
+/* Control bar */
+.ctrl-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.btn{padding:8px 18px;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+.btn-play{background:linear-gradient(135deg,#10b981,#059669);color:white}
+.btn-step{background:linear-gradient(135deg,#3b82f6,#2563eb);color:white}
+.btn-reset{background:#334155;color:#94a3b8}
+.btn-auto{background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:white}
+
+/* Narration */
+.narration{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px 18px;min-height:60px;margin-bottom:14px;font-size:13px;line-height:1.8;color:#e2e8f0}
+.narration .step-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;margin-right:6px}
+.narration .step-badge.green{background:#065f46;color:#6ee7b7}
+.narration .step-badge.blue{background:#1e40af;color:#93c5fd}
+.narration .step-badge.orange{background:#7c2d12;color:#fdba74}
+.narration .step-badge.purple{background:#4c1d95;color:#c4b5fd}
+.narration .step-badge.red{background:#7f1d1d;color:#fca5a5}
+.narration .key{color:#fbbf24;font-weight:700}
+.narration .code{background:#0f172a;padding:1px 5px;border-radius:3px;font-family:'SF Mono',monospace;font-size:11px;color:#93c5fd}
+
+/* Log */
+.log-box{background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:12px;max-height:180px;overflow-y:auto;font-family:'SF Mono','Fira Code',monospace;font-size:11px;line-height:1.6}
+.log-box::-webkit-scrollbar{width:3px}
+.log-box::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
+.log-line{padding:1px 0}
+.log-line .ts{color:#475569;margin-right:6px}
+.log-line.l-info{color:#94a3b8}
+.log-line.l-sysmon{color:#f87171}
+.log-line.l-sched{color:#60a5fa}
+.log-line.l-steal{color:#fbbf24}
+.log-line.l-handoff{color:#c084fc}
+.log-line.l-ok{color:#34d399}
+
+/* Arrow overlay for handoff */
+.arrow-overlay{position:absolute;pointer-events:none;z-index:10}
+.handoff-arrow{position:absolute;font-size:20px;color:#c084fc;opacity:0;transition:all .6s}
+.handoff-arrow.show{opacity:1}
+.steal-arrow{position:absolute;font-size:18px;color:#fbbf24;opacity:0;transition:all .4s}
+.steal-arrow.show{opacity:1}
+
+/* Responsive */
+@media(max-width:768px){
+  .scenario-tabs{gap:2px}
+  .stab{font-size:10px;padding:8px 4px;min-width:80px}
+  .m-box,.p-box{width:44px;height:44px;font-size:12px}
+  .g-item{width:28px;height:28px}
+  .g-item .gname{font-size:8px}
+  .g-item .gstate{display:none}
+}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="hdr">
+  <h1>GMP 调度器完整动态可视化</h1>
+  <p>涵盖正常调度 / 通道阻塞 / 系统调用 / sysmon 监控 / 工作窃取 五大场景</p>
+</div>
+
+<!-- Scenario tabs -->
+<div class="scenario-tabs">
+  <button class="stab active" onclick="switchScenario(0)"><span class="stab-icon">1</span>正常调度循环</button>
+  <button class="stab" onclick="switchScenario(1)"><span class="stab-icon">2</span>通道阻塞</button>
+  <button class="stab" onclick="switchScenario(2)"><span class="stab-icon">3</span>阻塞系统调用</button>
+  <button class="stab" onclick="switchScenario(3)"><span class="stab-icon">4</span>sysmon 抢占</button>
+  <button class="stab" onclick="switchScenario(4)"><span class="stab-icon">5</span>工作窃取</button>
+</div>
+
+<!-- Narration -->
+<div class="narration" id="narration">选择场景后点击「自动演示」观看完整的 GMP 调度流程动画。</div>
+
+<!-- Controls -->
+<div class="ctrl-bar">
+  <button class="btn btn-auto" id="btnAuto" onclick="startAutoPlay()">自动演示</button>
+  <button class="btn btn-step" id="btnStep" onclick="stepForward()">下一步</button>
+  <button class="btn btn-reset" onclick="resetAll()">重置</button>
+  <span style="margin-left:auto;font-size:12px;color:#64748b" id="stepCounter">步骤 0/0</span>
+</div>
+
+<!-- Canvas -->
+<div class="canvas-wrap" id="canvas">
+  <!-- Sysmon -->
+  <div class="sysmon-bar" id="sysmonBar">
+    <span class="sysmon-label">sysmon</span>
+    <span class="sysmon-status" id="sysmonStatus">监控中 (20us 轮询)</span>
+    <span class="sysmon-timer" id="sysmonTimer"></span>
+  </div>
+
+  <!-- Global Queue -->
+  <div class="gq-bar">
+    <span class="gq-label">Global Queue</span>
+    <div class="gq-items" id="globalQ"></div>
+  </div>
+
+  <!-- M-P rows -->
+  <div id="mpRows"></div>
+
+  <!-- Orphan M (for syscall scenario) -->
+  <div class="orphan-m-row" id="orphanM"></div>
+</div>
+
+<!-- Log -->
+<div class="log-box" id="logBox"></div>
+</div>
+
+<script>
+// =============================================
+// State Model
+// =============================================
+var RUNNABLE='runnable', RUNNING='running', WAITING='waiting', SYSCALL='syscall', DEAD='dead';
+var M_RUNNING='normal', M_SLEEPING='sleeping', M_BLOCKED='blocked-m';
+var P_RUNNING='running', P_IDLE='pidle', P_SYSCALL='psyscall';
+
+var uid = 0;
+function G(name, state) { return {id: ++uid, name:name, state:state||RUNNABLE}; }
+function makeP(id) { return {id:id, state:P_IDLE, localQ:[], runningG:null, m:null}; }
+function makeM(id) { return {id:id, state:M_SLEEPING, p:null, curg:null}; }
+
+// Global state
+var S = {
+  ps: [],     // all P's
+  ms: [],     // all M's (including sleeping/blocked)
+  gq: [],     // global queue
+  sysmon: {active:true, alert:false, msg:''},
+  scenario: 0,
+  step: 0,
+  steps: [],
+  playing: false,
+  timer: null
+};
+
+// =============================================
+// Scenarios definition
+// =============================================
+function defineSteps(scenario) {
+  S.steps = [];
+  switch(scenario) {
+  case 0: // Normal scheduling loop
+    S.steps = [
+      {n:'程序启动', d:'Go 运行时创建 <span class="key">GOMAXPROCS</span> 个 P，一批初始 M', act:function(){ initScenario0(); }},
+      {n:'P 绑定 M', d:'每个 P 绑定一个 M，从本地队列取 G', act:function(){ bindAll(); }},
+      {n:'M 执行 G1', d:'M0 开始执行 G1，G1 状态变为 <span class="code">_Grunning</span>', act:function(){ runG(0,0); }},
+      {n:'G1 时间片用完', d:'运行时触发用户态抢占，暂停 G1，<span class="key">全程用户态</span>无内核切换', act:function(){ preemptG(0,0); }},
+      {n:'G1 放回队列', d:'G1 重新放回 P0 本地队列，状态变为 <span class="code">_Grunnable</span>', act:function(){ requeueG(0,0); }},
+      {n:'P 取下一个 G', d:'P0 从本地队列取 G2，M0 立即开始执行 G2', act:function(){ runNextG(0); }},
+      {n:'循环继续', d:'G2 运行完毕或被抢占，调度器循环：schedule → findrunnable → execute → gogo', act:function(){ cycleContinue(0); }},
+    ];
+    break;
+  case 1: // Channel blocking
+    S.steps = [
+      {n:'正常执行', d:'G1 在 M0 上运行，执行 <span class="code">ch &lt;- value</span> 发送数据', act:function(){ initScenario1(); }},
+      {n:'G1 阻塞等待', d:'channel 对端没人接收，G1 调用 <span class="code">gopark()</span> 进入 <span class="code">_Gwaiting</span> 状态', act:function(){ parkG(0,0); }},
+      {n:'P 继续运行', d:'<span class="key">P 不会空闲！</span>M0 从队列取 G2 继续执行，CPU 利用率拉满', act:function(){ runNextG(0); }},
+      {n:'channel 就绪', d:'另一个 goroutine 从 channel 接收数据，G1 被唤醒，状态变回 <span class="code">_Grunnable</span>', act:function(){ unparkG(0,0); }},
+      {n:'G1 重新入队', d:'G1 放回 P0 本地队列（或全局队列），等待下次调度', act:function(){ requeueG(0,0); }},
+    ];
+    break;
+  case 2: // Blocking system call
+    S.steps = [
+      {n:'正常执行', d:'G1 在 M0 上运行，即将执行 <span class="code">read(fd, buf)</span> 阻塞系统调用', act:function(){ initScenario2(); }},
+      {n:'entersyscall()', d:'G1 状态 → <span class="code">_Gsyscall</span>，P0 状态 → <span class="code">_Psyscall</span>，M0 进入内核态阻塞', act:function(){ enterSyscall(0,0); }},
+      {n:'sysmon 检测', d:'sysmon 发现 P0 在 <span class="code">_Psyscall</span> 状态超过 20us，执行 <span class="key">retake → handoffp</span>', act:function(){ sysmonRetake(0); }},
+      {n:'P 解绑 handoff', d:'P0 从 M0 解绑！寻找空闲 M1 接管 P0，M1 开始跑 P0 队列里的 G', act:function(){ handoffP(0); }},
+      {n:'M1 继续运行', d:'新 M1 绑定 P0，从队列取 G2 执行，<span class="key">CPU 继续干活</span>', act:function(){ newMRuns(0); }},
+      {n:'系统调用返回', d:'M0 的 read() 返回，调用 <span class="code">exitsyscall()</span>，发现 P0 被抢走了', act:function(){ exitSyscall(0); }},
+      {n:'G1 重新入队', d:'M0 拿不到空闲 P → 把 G1 放到全局队列，M0 自己休眠', act:function(){ exitSyscallFinish(0); }},
+    ];
+    break;
+  case 3: // sysmon preemption
+    S.steps = [
+      {n:'G1 长时间运行', d:'G1 在 M0 上跑了超过 10ms（如死循环），没有主动让出', act:function(){ initScenario3(); }},
+      {n:'sysmon 检测', d:'sysmon 发现 P0 的 <span class="code">_Prunning</span> 超过 10ms，触发 <span class="key">抢占信号 SIGURG</span>', act:function(){ sysmonPreempt(0); }},
+      {n:'信号处理', d:'M0 收到 SIGURG，将 G1 的 PC 改为 <span class="code">asyncPreempt()</span>', act:function(){ signalHandled(0); }},
+      {n:'G1 被抢占', d:'G1 让出 P0，放回队列，M0 从队列取下一个 G 执行', act:function(){ preemptDone(0); }},
+      {n:'调度恢复', d:'其他 G 得以运行，调度延迟从几十 ms 降到几十 us', act:function(){ resumeNormal(0); }},
+    ];
+    break;
+  case 4: // Work stealing
+    S.steps = [
+      {n:'负载不均', d:'P0 队列有 6 个 G 很忙，P1 队列空了很闲', act:function(){ initScenario4(); }},
+      {n:'P1 本地队列空', d:'P1 的 <span class="code">findrunnable()</span> 在本地队列找不到 G', act:function(){ p1Empty(); }},
+      {n:'随机选 P0', d:'随机选中 P0（避免所有 P 都抢同一个），准备偷一半 G', act:function(){ selectTarget(0); }},
+      {n:'偷取执行', d:'P1 调用 <span class="code">runqsteal()</span>，从 P0 偷 3 个 G 到自己队列', act:function(){ doSteal(); }},
+      {n:'负载均衡', d:'P0 剩 3 个，P1 有 3 个，两边均衡，CPU 利用率拉满', act:function(){ balanced(); }},
+    ];
+    break;
+  }
+}
+
+// =============================================
+// Rendering
+// =============================================
+function render() {
+  // Sysmon
+  var sb = document.getElementById('sysmonBar');
+  sb.className = 'sysmon-bar' + (S.sysmon.alert ? ' alert' : '');
+  document.getElementById('sysmonStatus').textContent = S.sysmon.msg || '监控中 (20us 轮询)';
+
+  // Global queue
+  var gqEl = document.getElementById('globalQ');
+  gqEl.innerHTML = '';
+  S.gq.forEach(function(g) {
+    gqEl.appendChild(makeGEl(g));
+  });
+  if(S.gq.length === 0) gqEl.innerHTML = '<span style="color:#475569;font-size:11px">空</span>';
+
+  // MP rows - only show active M's (bound to P or recently relevant)
+  var rowsEl = document.getElementById('mpRows');
+  rowsEl.innerHTML = '';
+
+  // Group by P
+  S.ps.forEach(function(p, idx) {
+    var m = p.m;
+    var row = document.createElement('div');
+    row.className = 'mp-row';
+    row.id = 'mp-row-' + idx;
+
+    // M box
+    if(m) {
+      var mBox = document.createElement('div');
+      mBox.className = 'm-box ' + m.state;
+      mBox.innerHTML = 'M' + m.id + '<small>M</small>';
+      var mStatus = document.createElement('div');
+      mStatus.className = 'm-status';
+      mStatus.style.color = m.state===M_RUNNING?'#6ee7b7':m.state===M_BLOCKED?'#f87171':'#64748b';
+      mStatus.textContent = m.state===M_RUNNING?'运行中':m.state===M_BLOCKED?'内核阻塞':'休眠';
+      mBox.appendChild(mStatus);
+      row.appendChild(mBox);
+    } else {
+      var mEmpty = document.createElement('div');
+      mEmpty.className = 'm-box sleeping';
+      mEmpty.innerHTML = '?<small>M</small>';
+      row.appendChild(mEmpty);
+    }
+
+    // Bind line
+    var bl = document.createElement('div');
+    bl.className = 'bind-line' + (m && p.state!==P_IDLE ? ' active' : '') + (!m ? ' broken' : '');
+    row.appendChild(bl);
+
+    // P box
+    var pBox = document.createElement('div');
+    pBox.className = 'p-box ' + p.state;
+    pBox.innerHTML = 'P' + p.id + '<small>P</small>';
+    var pStatus = document.createElement('div');
+    pStatus.className = 'p-status';
+    pStatus.style.color = p.state===P_RUNNING?'#6ee7b7':p.state===P_SYSCALL?'#c4b5fd':'#64748b';
+    pStatus.textContent = p.state===P_RUNNING?'_Prunning':p.state===P_SYSCALL?'_Psyscall':'_Pidle';
+    pBox.appendChild(pStatus);
+    row.appendChild(pBox);
+
+    // G queue
+    var gq = document.createElement('div');
+    gq.className = 'g-queue';
+    if(p.runningG) gq.appendChild(makeGEl(p.runningG));
+    p.localQ.forEach(function(g) { gq.appendChild(makeGEl(g)); });
+    if(!p.runningG && p.localQ.length===0) gq.innerHTML='<span style="color:#475569;font-size:11px">空</span>';
+    row.appendChild(gq);
+
+    rowsEl.appendChild(row);
+  });
+
+  // Orphan M's (blocked, no P)
+  var orphanEl = document.getElementById('orphanM');
+  orphanEl.innerHTML = '';
+  var orphanMs = S.ms.filter(function(m) { return m.state === M_BLOCKED && !m.p; });
+  if(orphanMs.length > 0) {
+    orphanEl.className = 'orphan-m-row visible';
+    orphanMs.forEach(function(m) {
+      var mBox = document.createElement('div');
+      mBox.className = 'm-box blocked-m';
+      mBox.innerHTML = 'M' + m.id + '<small>阻塞</small>';
+      var ms = document.createElement('div');
+      ms.className = 'm-status';
+      ms.style.color = '#fca5a5';
+      ms.textContent = 'syscall 阻塞';
+      mBox.appendChild(ms);
+      orphanEl.appendChild(mBox);
+      if(m.curg) {
+        var gq = document.createElement('div');
+        gq.className = 'g-queue';
+        gq.appendChild(makeGEl(m.curg));
+        orphanEl.appendChild(gq);
+      }
+    });
+  } else {
+    orphanEl.className = 'orphan-m-row';
+  }
+
+  // Step counter
+  document.getElementById('stepCounter').textContent = '步骤 ' + S.step + '/' + S.steps.length;
+}
+
+function makeGEl(g) {
+  var d = document.createElement('div');
+  d.className = 'g-item ' + g.state;
+  d.innerHTML = '<span class="gname">' + g.name + '</span><span class="gstate">' + g.state + '</span>';
+  return d;
+}
+
+function narrate(html) {
+  document.getElementById('narration').innerHTML = html;
+}
+
+function log(msg, cls) {
+  var box = document.getElementById('logBox');
+  var d = document.createElement('div');
+  d.className = 'log-line l-' + (cls||'info');
+  d.innerHTML = '<span class="ts">' + new Date().toLocaleTimeString() + '</span>' + msg;
+  box.insertBefore(d, box.firstChild);
+  while(box.children.length > 60) box.removeChild(box.lastChild);
+}
+
+// =============================================
+// Scenario Init Functions
+// =============================================
+function initScenario0() {
+  S.ps = [makeP(0), makeP(1)];
+  S.ms = [makeM(0), makeM(1)];
+  S.gq = [];
+  S.ps[0].localQ = [G('G1',RUNNABLE), G('G2',RUNNABLE), G('G3',RUNNABLE)];
+  S.ps[1].localQ = [G('G4',RUNNABLE), G('G5',RUNNABLE)];
+  S.sysmon = {active:true, alert:false, msg:'监控中'};
+  log('初始化：2个P，2个M，G1-G5就绪','sched');
+  render();
+}
+
+function initScenario1() {
+  S.ps = [makeP(0), makeP(1)];
+  S.ms = [makeM(0), makeM(1)];
+  S.gq = [];
+  S.ps[0].localQ = [G('G1',RUNNABLE), G('G2',RUNNABLE)];
+  S.ps[1].localQ = [G('G3',RUNNABLE)];
+  bindAll();
+  S.ps[0].runningG = S.ps[0].localQ.shift();
+  S.ps[0].runningG.state = RUNNING;
+  S.ps[0].m.curg = S.ps[0].runningG;
+  S.sysmon = {active:true, alert:false, msg:'监控中'};
+  log('G1在M0上运行，即将执行 ch <- value','sched');
+  render();
+}
+
+function initScenario2() {
+  S.ps = [makeP(0), makeP(1)];
+  S.ms = [makeM(0), makeM(1)];
+  S.gq = [];
+  S.ps[0].localQ = [G('G1',RUNNABLE), G('G2',RUNNABLE), G('G3',RUNNABLE)];
+  S.ps[1].localQ = [G('G4',RUNNABLE), G('G5',RUNNABLE)];
+  bindAll();
+  S.ps[0].runningG = S.ps[0].localQ.shift();
+  S.ps[0].runningG.state = RUNNING;
+  S.ps[0].m.curg = S.ps[0].runningG;
+  S.sysmon = {active:true, alert:false, msg:'监控中'};
+  log('G1在M0上运行，即将执行 read() 阻塞系统调用','sched');
+  render();
+}
+
+function initScenario3() {
+  S.ps = [makeP(0), makeP(1)];
+  S.ms = [makeM(0), makeM(1)];
+  S.gq = [];
+  S.ps[0].localQ = [G('G2',RUNNABLE), G('G3',RUNNABLE)];
+  S.ps[1].localQ = [G('G4',RUNNABLE)];
+  bindAll();
+  var g1 = G('G1',RUNNING);
+  S.ps[0].runningG = g1;
+  S.ps[0].m.curg = g1;
+  S.sysmon = {active:true, alert:false, msg:'监控中'};
+  log('G1 在 M0 上已运行 >10ms（死循环），未主动让出','sysmon');
+  render();
+}
+
+function initScenario4() {
+  S.ps = [makeP(0), makeP(1)];
+  S.ms = [makeM(0), makeM(1)];
+  S.gq = [];
+  S.ps[0].localQ = [G('G1',RUNNABLE),G('G2',RUNNABLE),G('G3',RUNNABLE),G('G4',RUNNABLE),G('G5',RUNNABLE),G('G6',RUNNABLE)];
+  S.ps[1].localQ = [];
+  bindAll();
+  S.sysmon = {active:true, alert:false, msg:'监控中'};
+  log('P0 有6个G很忙，P1 队列空了','steal');
+  render();
+}
+
+// =============================================
+// Action Functions
+// =============================================
+function bindAll() {
+  S.ps.forEach(function(p, i) {
+    if(S.ms[i] && !p.m) {
+      p.m = S.ms[i];
+      p.m.p = p;
+      p.m.state = M_RUNNING;
+      p.state = P_RUNNING;
+    }
+  });
+  log('所有 P 绑定 M','sched');
+  render();
+}
+
+function runG(pIdx, gIdx) {
+  var p = S.ps[pIdx];
+  var g = p.localQ[gIdx];
+  p.localQ.splice(gIdx, 1);
+  g.state = RUNNING;
+  p.runningG = g;
+  if(p.m) p.m.curg = g;
+  log(g.name + ' 开始运行 (_Grunning)','sched');
+  render();
+}
+
+function preemptG(pIdx, gIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(!g) return;
+  log(g.name + ' 被抢占，用户态切换 gogo → schedule','sched');
+  render();
+}
+
+function requeueG(pIdx, gIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(!g) return;
+  g.state = RUNNABLE;
+  p.runningG = null;
+  if(p.m) p.m.curg = null;
+  p.localQ.push(g);
+  log(g.name + ' 放回 P' + p.id + ' 本地队列 (_Grunnable)','sched');
+  render();
+}
+
+function runNextG(pIdx) {
+  var p = S.ps[pIdx];
+  if(p.localQ.length === 0) return;
+  var g = p.localQ.shift();
+  g.state = RUNNING;
+  p.runningG = g;
+  if(p.m) p.m.curg = g;
+  log(g.name + ' 从本地队列取出运行 (_Grunning)','sched');
+  render();
+}
+
+function cycleContinue(pIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(g) {
+    g.state = RUNNABLE;
+    p.localQ.push(g);
+    p.runningG = null;
+    if(p.m) p.m.curg = null;
+  }
+  if(p.localQ.length > 0) {
+    var ng = p.localQ.shift();
+    ng.state = RUNNING;
+    p.runningG = ng;
+    if(p.m) p.m.curg = ng;
+    log('调度循环：schedule() → findrunnable() → execute(' + ng.name + ')','sched');
+  }
+  render();
+}
+
+function parkG(pIdx, gIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(!g) return;
+  g.state = WAITING;
+  p.runningG = null;
+  if(p.m) p.m.curg = null;
+  log(g.name + ' gopark() → _Gwaiting（等待 channel）','sched');
+  render();
+}
+
+function unparkG(pIdx, gIdx) {
+  var p = S.ps[pIdx];
+  // find waiting G
+  var g = null;
+  // search in localQ first
+  for(var i=0; i<p.localQ.length; i++) {
+    if(p.localQ[i].state === WAITING) { g = p.localQ[i]; p.localQ.splice(i,1); break; }
+  }
+  if(!g) {
+    // check if there's a waiting G we parked earlier (stored temporarily)
+    g = findWaitingG(p);
+  }
+  if(g) {
+    g.state = RUNNABLE;
+    p.localQ.unshift(g); // put at front of queue
+    log(g.name + ' 被唤醒 goready() → _Grunnable','sched');
+  }
+  render();
+}
+
+// Helper to find waiting G
+var _waitingGs = [];
+function findWaitingG(p) {
+  for(var i=0; i<_waitingGs.length; i++) {
+    var wg = _waitingGs[i];
+    if(wg.pIdx === p.id) {
+      _waitingGs.splice(i, 1);
+      return wg.g;
+    }
+  }
+  return null;
+}
+
+// Override parkG to store waiting G
+var _origParkG = parkG;
+parkG = function(pIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(!g) return;
+  g.state = WAITING;
+  p.runningG = null;
+  if(p.m) p.m.curg = null;
+  _waitingGs.push({g:g, pIdx:p.id});
+  log(g.name + ' gopark() → _Gwaiting（等待 channel）','sched');
+  render();
+};
+
+// System call scenario actions
+function enterSyscall(pIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(!g) return;
+  g.state = SYSCALL;
+  p.state = P_SYSCALL;
+  p.runningG = g; // still attached
+  if(p.m) {
+    p.m.curg = g;
+    p.m.state = M_BLOCKED;
+  }
+  log(g.name + ' entersyscall() → _Gsyscall, P' + p.id + ' → _Psyscall','sched');
+  render();
+}
+
+function sysmonRetake(pIdx) {
+  var p = S.ps[pIdx];
+  S.sysmon.alert = true;
+  S.sysmon.msg = '⚠ P' + p.id + ' 在 _Psyscall 超 20us! 执行 retake()';
+  log('sysmon: P' + p.id + ' syscall 超 20us，retake!','sysmon');
+  render();
+}
+
+function handoffP(pIdx) {
+  var p = S.ps[pIdx];
+  var oldM = p.m;
+  var blockedG = p.runningG;
+
+  // Detach P from old M
+  if(oldM) {
+    oldM.p = null;
+    oldM.curg = blockedG; // G stays with blocked M
+    oldM.state = M_BLOCKED;
+  }
+
+  // Find or create a new M
+  var newM = null;
+  for(var i=0; i<S.ms.length; i++) {
+    if(S.ms[i].state === M_SLEEPING && !S.ms[i].p) {
+      newM = S.ms[i];
+      break;
+    }
+  }
+  if(!newM) {
+    newM = makeM(S.ms.length);
+    S.ms.push(newM);
+  }
+
+  // Bind P to new M
+  p.m = newM;
+  newM.p = p;
+  newM.state = M_RUNNING;
+  p.state = P_RUNNING;
+  p.runningG = null; // G stays with old M
+
+  S.sysmon.alert = false;
+  S.sysmon.msg = 'handoffp: P' + p.id + ' 从 M' + oldM.id + ' 解绑 → 绑定 M' + newM.id;
+  log('handoffp(): P' + p.id + ' → M' + newM.id + '，M' + oldM.id + ' 阻塞在 syscall','handoff');
+  render();
+}
+
+function newMRuns(pIdx) {
+  var p = S.ps[pIdx];
+  if(p.localQ.length > 0) {
+    var g = p.localQ.shift();
+    g.state = RUNNING;
+    p.runningG = g;
+    if(p.m) p.m.curg = g;
+    log('M' + p.m.id + ' 从 P' + p.id + ' 队列取 ' + g.name + ' 运行','sched');
+  }
+  S.sysmon.msg = '监控中';
+  render();
+}
+
+function exitSyscall(pIdx) {
+  var p = S.ps[pIdx];
+  // Find blocked M
+  var blockedM = null;
+  S.ms.forEach(function(m) {
+    if(m.state === M_BLOCKED && m.curg && m.curg.state === SYSCALL) {
+      blockedM = m;
+    }
+  });
+  if(!blockedM) return;
+  var g = blockedM.curg;
+  log(g.name + ' exitsyscall()：系统调用返回，M' + blockedM.id + ' 发现 P' + p.id + ' 被抢走','handoff');
+  render();
+}
+
+function exitSyscallFinish(pIdx) {
+  var p = S.ps[pIdx];
+  var blockedM = null;
+  S.ms.forEach(function(m) {
+    if(m.state === M_BLOCKED && m.curg && m.curg.state === SYSCALL) {
+      blockedM = m;
+    }
+  });
+  if(!blockedM) return;
+  var g = blockedM.curg;
+  g.state = RUNNABLE;
+  S.gq.push(g);
+  blockedM.curg = null;
+  blockedM.state = M_SLEEPING;
+  log(g.name + ' 放入全局队列，M' + blockedM.id + ' 休眠 stopm()','handoff');
+  render();
+}
+
+// sysmon preemption actions
+function sysmonPreempt(pIdx) {
+  var p = S.ps[pIdx];
+  S.sysmon.alert = true;
+  S.sysmon.msg = '⚠ P' + p.id + ' _Prunning 超 10ms! 发送 SIGURG 抢占信号';
+  log('sysmon: P' + p.id + ' 运行超 10ms，发送 SIGURG','sysmon');
+  render();
+}
+
+function signalHandled(pIdx) {
+  var p = S.ps[pIdx];
+  log('M' + (p.m?p.m.id:'?') + ' 收到 SIGURG，修改 G1 PC → asyncPreempt()','sysmon');
+  S.sysmon.msg = 'SIGURG 已发送，等待 M 响应...';
+  render();
+}
+
+function preemptDone(pIdx) {
+  var p = S.ps[pIdx];
+  var g = p.runningG;
+  if(g) {
+    g.state = RUNNABLE;
+    p.localQ.push(g);
+    p.runningG = null;
+    if(p.m) p.m.curg = null;
+  }
+  S.sysmon.alert = false;
+  S.sysmon.msg = '监控中';
+  if(p.localQ.length > 0) {
+    var ng = p.localQ.shift();
+    ng.state = RUNNING;
+    p.runningG = ng;
+    if(p.m) p.m.curg = ng;
+    log(g ? g.name + ' 被抢占放回队列，' + ng.name + ' 开始运行' : ng.name + ' 开始运行','ok');
+  }
+  render();
+}
+
+function resumeNormal(pIdx) {
+  log('调度恢复正常，所有 G 公平获得 CPU 时间','ok');
+  render();
+}
+
+// Work stealing actions
+function p1Empty() {
+  var p1 = S.ps[1];
+  log('P1 findrunnable()：本地队列空，尝试窃取','steal');
+  render();
+}
+
+function selectTarget(pIdx) {
+  log('随机选中 P0 作为窃取目标','steal');
+  var row0 = document.getElementById('mp-row-0');
+  var row1 = document.getElementById('mp-row-1');
+  if(row0) row0.classList.add('highlight');
+  if(row1) row1.classList.add('highlight');
+  render();
+}
+
+function doSteal() {
+  var p0 = S.ps[0];
+  var p1 = S.ps[1];
+  var half = Math.ceil(p0.localQ.length / 2);
+  var stolen = p0.localQ.splice(0, half);
+  stolen.forEach(function(g) {
+    g.state = RUNNABLE;
+    p1.localQ.push(g);
+  });
+  log('P1 从 P0 偷了 ' + stolen.length + ' 个 G：' + stolen.map(function(g){return g.name}).join(','),'steal');
+  render();
+}
+
+function balanced() {
+  log('P0 剩 ' + S.ps[0].localQ.length + ' 个，P1 有 ' + S.ps[1].localQ.length + ' 个，负载均衡!','ok');
+  var row0 = document.getElementById('mp-row-0');
+  var row1 = document.getElementById('mp-row-1');
+  if(row0) row0.classList.remove('highlight');
+  if(row1) row1.classList.remove('highlight');
+  render();
+}
+
+// =============================================
+// Scenario Switch & Playback
+// =============================================
+function switchScenario(idx) {
+  if(S.playing) stopPlay();
+  S.scenario = idx;
+  S.step = 0;
+  _waitingGs = [];
+  document.querySelectorAll('.stab').forEach(function(t,i){t.classList.toggle('active',i===idx)});
+  defineSteps(idx);
+  resetState();
+  narrate('<span class="step-badge green">场景 '+(idx+1)+'</span> ' + (S.steps[0] ? S.steps[0].d : ''));
+  log('切换到场景 ' + (idx+1),'info');
+  // Auto init
+  if(S.steps.length > 0) {
+    S.steps[0].act();
+  }
+}
+
+function resetState() {
+  S.ps = [];
+  S.ms = [];
+  S.gq = [];
+  S.sysmon = {active:true, alert:false, msg:'监控中'};
+  var orphanEl = document.getElementById('orphanM');
+  orphanEl.className = 'orphan-m-row';
+  document.getElementById('logBox').innerHTML = '';
+  render();
+}
+
+function resetAll() {
+  stopPlay();
+  S.step = 0;
+  _waitingGs = [];
+  switchScenario(S.scenario);
+}
+
+function startAutoPlay() {
+  if(S.playing) { stopPlay(); return; }
+  S.playing = true;
+  S.step = 0;
+  _waitingGs = [];
+  resetState();
+  document.getElementById('btnAuto').textContent = '暂停';
+  document.getElementById('btnAuto').classList.remove('btn-auto');
+  document.getElementById('btnAuto').classList.add('btn-reset');
+  autoAdvance();
+}
+
+function autoAdvance() {
+  if(!S.playing) return;
+  if(S.step >= S.steps.length) {
+    stopPlay();
+    narrate('<span class="step-badge green">完成</span> 演示结束，可以重置后重新观看');
+    return;
+  }
+  var s = S.steps[S.step];
+  s.act();
+  narrate('<span class="step-badge ' + stepBadgeClass(S.step) + '">步骤 '+(S.step+1)+'/'+S.steps.length+'</span> ' + s.n + '：' + s.d);
+  S.step++;
+  S.timer = setTimeout(autoAdvance, 1800);
+}
+
+function stepForward() {
+  if(S.playing) stopPlay();
+  if(S.step >= S.steps.length) return;
+  var s = S.steps[S.step];
+  s.act();
+  narrate('<span class="step-badge ' + stepBadgeClass(S.step) + '">步骤 '+(S.step+1)+'/'+S.steps.length+'</span> ' + s.n + '：' + s.d);
+  S.step++;
+}
+
+function stopPlay() {
+  S.playing = false;
+  if(S.timer) { clearTimeout(S.timer); S.timer = null; }
+  var btn = document.getElementById('btnAuto');
+  btn.textContent = '自动演示';
+  btn.classList.add('btn-auto');
+  btn.classList.remove('btn-reset');
+}
+
+function stepBadgeClass(i) {
+  var classes = ['green','blue','orange','purple','red'];
+  return classes[i % classes.length];
+}
+
+// =============================================
+// Init
+// =============================================
+switchScenario(0);
+</script>
+</body>
+</html>
