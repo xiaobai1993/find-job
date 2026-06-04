@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux 内存管理 — 面试可视化</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+
+  .nav { display: flex; gap: 8px; flex-wrap: wrap; padding: 16px 24px; background: #1a1d2e; border-bottom: 1px solid #2d3148; position: sticky; top: 0; z-index: 100; }
+  .nav-btn { padding: 8px 16px; border-radius: 20px; border: 1px solid #3d4166; background: transparent; color: #94a3b8; cursor: pointer; font-size: 13px; transition: all .2s; }
+  .nav-btn.active, .nav-btn:hover { background: #6366f1; color: #fff; border-color: #6366f1; }
+
+  .section { display: none; padding: 32px 24px; max-width: 960px; margin: 0 auto; }
+  .section.active { display: block; }
+
+  h1 { font-size: 26px; font-weight: 700; color: #a5b4fc; margin-bottom: 8px; }
+  h2 { font-size: 20px; color: #818cf8; margin: 28px 0 12px; }
+  .subtitle { color: #64748b; font-size: 14px; margin-bottom: 32px; }
+  p { line-height: 1.8; color: #cbd5e1; margin-bottom: 12px; }
+
+  .card { background: #1e2235; border: 1px solid #2d3148; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card.highlight { border-color: #6366f1; background: #1e1f3a; }
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .tag.blue { background: #1e3a5f; color: #60a5fa; }
+  .tag.green { background: #14532d; color: #4ade80; }
+  .tag.red { background: #4c1d1d; color: #f87171; }
+  .tag.yellow { background: #451a03; color: #fbbf24; }
+
+  /* ===== 场景1: 进程内存布局 ===== */
+  .memory-layout { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .layout-diagram { flex: 0 0 200px; }
+  .layout-info { flex: 1; min-width: 280px; }
+  .mem-block { border-radius: 8px; padding: 14px 16px; margin-bottom: 4px; cursor: pointer; transition: all .25s; border: 2px solid transparent; position: relative; }
+  .mem-block:hover { transform: translateX(6px); }
+  .mem-block.selected { border-color: #fff; transform: translateX(6px); }
+  .mem-block .label { font-weight: 600; font-size: 14px; }
+  .mem-block .addr { font-size: 11px; opacity: .7; margin-top: 2px; }
+  .block-kernel { background: #2a1a3e; }
+  .block-stack  { background: #1a3a2a; }
+  .block-mmap   { background: #1a2a3e; }
+  .block-heap   { background: #3e2a1a; }
+  .block-bss    { background: #3e3a1a; }
+  .block-data   { background: #1a3e3a; }
+  .block-text   { background: #1a1e3e; }
+  .arrow-grow { font-size: 18px; text-align: center; padding: 2px 0; color: #64748b; }
+  .info-panel { background: #131624; border: 1px solid #2d3148; border-radius: 10px; padding: 20px; min-height: 180px; transition: all .3s; }
+  .info-panel h3 { font-size: 16px; color: #a5b4fc; margin-bottom: 10px; }
+  .info-panel .go-note { margin-top: 12px; padding: 10px 12px; background: #1a2f1a; border-left: 3px solid #4ade80; border-radius: 4px; font-size: 13px; color: #86efac; }
+
+  /* ===== 场景2: 虚拟内存 ===== */
+  .vm-container { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .vm-box { border-radius: 12px; border: 1px solid #2d3148; background: #1e2235; padding: 0; overflow: hidden; width: 180px; }
+  .vm-box .box-title { background: #2d3148; padding: 10px 14px; font-size: 13px; font-weight: 700; text-align: center; }
+  .vm-page { margin: 8px; border-radius: 6px; padding: 10px 12px; font-size: 13px; cursor: pointer; transition: all .2s; border: 2px solid transparent; }
+  .vm-page:hover { opacity: .85; }
+  .vm-page.mapped { background: #1a3a2a; }
+  .vm-page.swapped { background: #3e1a1a; }
+  .vm-page.unmapped { background: #1e2235; border-style: dashed; border-color: #3d4166; color: #4a5568; }
+  .vm-page.active-page { border-color: #facc15 !important; }
+  .vm-arrow { font-size: 28px; color: #6366f1; }
+  .phys-page { margin: 8px; border-radius: 6px; padding: 10px 12px; font-size: 13px; }
+  .phys-page.used { background: #1a3a5f; }
+  .phys-page.free { background: #1e2235; border: 1px dashed #2d3148; color: #4a5568; }
+  .disk-page { margin: 8px; border-radius: 6px; padding: 10px 12px; font-size: 13px; background: #2a1a0a; }
+  .vm-story { margin-top: 20px; }
+
+  /* ===== 场景3: 缺页中断 ===== */
+  .pf-scene { position: relative; }
+  .pf-step-list { display: flex; flex-direction: column; gap: 0; }
+  .pf-step { display: flex; gap: 16px; align-items: flex-start; padding: 16px; border-radius: 10px; cursor: pointer; transition: all .2s; border: 1px solid transparent; }
+  .pf-step:hover { background: #1e2235; }
+  .pf-step.active-step { background: #1e1f3a; border-color: #6366f1; }
+  .pf-step-num { width: 36px; height: 36px; border-radius: 50%; background: #2d3148; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; transition: all .2s; }
+  .pf-step.active-step .pf-step-num { background: #6366f1; }
+  .pf-step-content h4 { font-size: 15px; color: #e2e8f0; margin-bottom: 4px; }
+  .pf-step-content p { font-size: 13px; color: #94a3b8; margin: 0; }
+  .connector { width: 2px; height: 20px; background: #2d3148; margin-left: 17px; }
+  .pf-visual { background: #131624; border-radius: 12px; padding: 20px; margin-top: 20px; min-height: 120px; border: 1px solid #2d3148; }
+  .cpu-box { display: inline-flex; align-items: center; gap: 8px; background: #1a2f4a; border: 1px solid #3b82f6; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #93c5fd; }
+  .kernel-box { display: inline-flex; align-items: center; gap: 8px; background: #2a1a4a; border: 1px solid #a855f7; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #d8b4fe; }
+  .mem-box-small { display: inline-flex; align-items: center; gap: 8px; background: #1a3a2a; border: 1px solid #22c55e; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #86efac; }
+  .flow-arrow { display: inline-block; margin: 0 8px; color: #facc15; font-size: 16px; }
+
+  /* ===== 场景4: TLB ===== */
+  .tlb-demo { display: flex; flex-direction: column; gap: 16px; }
+  .tlb-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .tlb-chip { border-radius: 8px; padding: 12px 16px; font-size: 13px; text-align: center; min-width: 110px; }
+  .tlb-hit   { background: #14532d; border: 1px solid #22c55e; color: #4ade80; }
+  .tlb-miss  { background: #4c1d1d; border: 1px solid #ef4444; color: #fca5a5; }
+  .tlb-neutral { background: #1e2235; border: 1px solid #3d4166; color: #94a3b8; }
+  .tlb-cache { background: #1a2f1a; border: 2px solid #22c55e; border-radius: 10px; padding: 16px; }
+  .tlb-time { font-size: 20px; font-weight: 700; }
+  .speed-bar { height: 8px; border-radius: 4px; margin-top: 4px; }
+
+  /* ===== 场景5: Swap / OOM ===== */
+  .swap-demo { }
+  .mem-bar-container { background: #131624; border-radius: 10px; overflow: hidden; height: 48px; border: 1px solid #2d3148; margin-bottom: 8px; display: flex; }
+  .mem-bar-seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; transition: width .6s ease; white-space: nowrap; overflow: hidden; }
+  .seg-used  { background: #3b82f6; color: #fff; }
+  .seg-cache { background: #6366f1; color: #fff; }
+  .seg-free  { background: #1e2235; color: #4a5568; border-right: none; }
+  .seg-swap  { background: #ef4444; color: #fff; }
+  .swap-controls { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+  .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 600; transition: all .2s; }
+  .btn-blue  { background: #3b82f6; color: #fff; }
+  .btn-red   { background: #ef4444; color: #fff; }
+  .btn-green { background: #22c55e; color: #fff; }
+  .btn-gray  { background: #374151; color: #d1d5db; }
+  .btn:hover { opacity: .85; transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .oom-panel { background: #1a0a0a; border: 1px solid #7f1d1d; border-radius: 10px; padding: 16px; margin-top: 12px; display: none; }
+  .oom-panel.show { display: block; }
+  .oom-title { color: #ef4444; font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+  .log-line { font-family: 'Courier New', monospace; font-size: 12px; color: #9ca3af; line-height: 1.8; }
+  .log-line.warn { color: #fbbf24; }
+  .log-line.kill { color: #ef4444; font-weight: 700; }
+
+  /* ===== 场景6: mmap ===== */
+  .mmap-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 600px) { .mmap-compare { grid-template-columns: 1fr; } }
+  .mmap-path { border-radius: 10px; padding: 16px; }
+  .mmap-path.traditional { background: #1a1e3e; border: 1px solid #3b4fd8; }
+  .mmap-path.mmap-way { background: #1a3e1e; border: 1px solid #22a843; }
+  .mmap-path h3 { font-size: 15px; margin-bottom: 12px; }
+  .step-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .step-icon { font-size: 18px; flex-shrink: 0; width: 24px; }
+  .step-text { font-size: 13px; color: #cbd5e1; line-height: 1.5; }
+  .copy-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; background: #7f1d1d; color: #fca5a5; margin-left: 4px; }
+  .copy-badge.zero { background: #14532d; color: #86efac; }
+
+  /* interview tips */
+  .tip-box { background: #1a2f1a; border-left: 3px solid #4ade80; border-radius: 8px; padding: 14px 16px; margin: 16px 0; }
+  .tip-box .tip-title { font-size: 12px; font-weight: 700; color: #4ade80; margin-bottom: 6px; letter-spacing: .5px; text-transform: uppercase; }
+  .tip-box p { font-size: 13px; color: #86efac; margin: 0; line-height: 1.7; }
+
+  .animate-in { animation: fadeIn .4s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  .pulse { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <button class="nav-btn active" onclick="showSection('layout')">① 进程内存布局</button>
+  <button class="nav-btn" onclick="showSection('vm')">② 虚拟内存</button>
+  <button class="nav-btn" onclick="showSection('pagefault')">③ 缺页中断</button>
+  <button class="nav-btn" onclick="showSection('tlb')">④ TLB 加速</button>
+  <button class="nav-btn" onclick="showSection('swap')">⑤ Swap & OOM</button>
+  <button class="nav-btn" onclick="showSection('mmap')">⑥ mmap</button>
+</div>
+
+<!-- ① 进程内存布局 -->
+<div id="section-layout" class="section active">
+  <h1>① 进程的内存长什么样？</h1>
+  <p class="subtitle">点击每一块，看它是干什么用的</p>
+
+  <div class="memory-layout">
+    <div class="layout-diagram">
+      <div style="text-align:center;font-size:11px;color:#64748b;margin-bottom:4px;">高地址 ↑</div>
+
+      <div class="mem-block block-kernel selected" onclick="showBlockInfo('kernel')">
+        <div class="label">🔒 内核空间</div>
+        <div class="addr">用户不能碰</div>
+      </div>
+      <div class="arrow-grow">↕ 隔离</div>
+      <div class="mem-block block-stack" onclick="showBlockInfo('stack')">
+        <div class="label">📦 栈 Stack</div>
+        <div class="addr">↓ 向下增长</div>
+      </div>
+      <div style="height:8px;background:linear-gradient(#1a3a2a,#1e2235);border-radius:2px;margin:2px 0;opacity:.5;"></div>
+      <div class="mem-block block-mmap" onclick="showBlockInfo('mmap')">
+        <div class="label">📚 共享库区</div>
+        <div class="addr">libc、动态库</div>
+      </div>
+      <div style="height:8px;background:linear-gradient(#1e2235,#3e2a1a);border-radius:2px;margin:2px 0;opacity:.5;"></div>
+      <div class="mem-block block-heap" onclick="showBlockInfo('heap')">
+        <div class="label">🔼 堆 Heap</div>
+        <div class="addr">↑ 向上增长</div>
+      </div>
+      <div class="mem-block block-bss" onclick="showBlockInfo('bss')">
+        <div class="label">📋 BSS 段</div>
+        <div class="addr">未初始化变量</div>
+      </div>
+      <div class="mem-block block-data" onclick="showBlockInfo('data')">
+        <div class="label">📊 数据段</div>
+        <div class="addr">已初始化变量</div>
+      </div>
+      <div class="mem-block block-text" onclick="showBlockInfo('text')">
+        <div class="label">💻 代码段</div>
+        <div class="addr">程序指令（只读）</div>
+      </div>
+
+      <div style="text-align:center;font-size:11px;color:#64748b;margin-top:4px;">低地址 ↓</div>
+    </div>
+
+    <div class="layout-info">
+      <div id="block-info" class="info-panel animate-in">
+        <h3>🔒 内核空间</h3>
+        <p>操作系统内核住在这里。用户程序<strong>不能直接访问</strong>，一访问就会触发"段错误"（Segmentation Fault）崩溃。</p>
+        <p>系统调用（read/write/open）就是用户程序请求内核帮忙做事的方式。</p>
+        <div class="tip-box">
+          <div class="tip-title">面试口诀</div>
+          <p>内核空间 = 操作系统的地盘，用户程序只能通过"系统调用"这扇门进入，不能直接闯入。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ② 虚拟内存 -->
+<div id="section-vm" class="section">
+  <h1>② 虚拟内存 — 每个进程都"以为"自己有全部内存</h1>
+  <p class="subtitle">虚拟地址 → 页表翻译 → 物理地址（或磁盘）</p>
+
+  <div class="card highlight">
+    <p>想象一下：你开了 5 个 App，每个都感觉自己有 128GB 内存。但物理内存只有 16GB。<br>
+    这就是虚拟内存的魔法 — <strong>每个进程看到的都是"假地址"，内核偷偷翻译成真实位置。</strong></p>
+  </div>
+
+  <div class="vm-container" style="margin-top:24px;">
+    <div class="vm-box">
+      <div class="box-title" style="background:#1a2f4a;color:#93c5fd;">进程A 的虚拟地址</div>
+      <div class="vm-page mapped" id="vp0" onclick="showMapping(0)">虚拟页 0x1000<br><small>代码段</small></div>
+      <div class="vm-page mapped" id="vp1" onclick="showMapping(1)">虚拟页 0x2000<br><small>堆数据</small></div>
+      <div class="vm-page swapped" id="vp2" onclick="showMapping(2)">虚拟页 0x3000<br><small>很久没用的数据</small></div>
+      <div class="vm-page unmapped" id="vp3" onclick="showMapping(3)">虚拟页 0x4000<br><small>还没分配</small></div>
+    </div>
+
+    <div style="text-align:center;">
+      <div class="vm-arrow">📋</div>
+      <div style="font-size:12px;color:#818cf8;margin-top:4px;">页表翻译</div>
+    </div>
+
+    <div class="vm-box">
+      <div class="box-title" style="background:#1a3a2a;color:#86efac;">物理内存</div>
+      <div class="phys-page used" id="pp0">物理页框 #5<br><small>进程A代码</small></div>
+      <div class="phys-page used" id="pp1">物理页框 #12<br><small>进程A堆</small></div>
+      <div class="phys-page free" id="pp2">物理页框 #8<br><small>空闲</small></div>
+      <div class="phys-page free" id="pp3">物理页框 #15<br><small>空闲</small></div>
+    </div>
+
+    <div style="text-align:center;">
+      <div class="vm-arrow">💾</div>
+      <div style="font-size:12px;color:#f87171;margin-top:4px;">Swap 磁盘</div>
+    </div>
+
+    <div class="vm-box">
+      <div class="box-title" style="background:#2a1a0a;color:#fbbf24;">Swap 磁盘</div>
+      <div class="disk-page" id="dp0">Swap 槽 #3<br><small>很久没用的数据</small></div>
+      <div class="phys-page free" style="margin:8px;">—<br><small>空闲</small></div>
+    </div>
+  </div>
+
+  <div id="vm-story-panel" class="card" style="margin-top:20px;">
+    <p style="color:#94a3b8;">👆 点击左边的虚拟页，看翻译过程</p>
+  </div>
+
+  <div class="tip-box" style="margin-top:16px;">
+    <div class="tip-title">面试三句话</div>
+    <p>
+      1. <strong>隔离：</strong>进程A崩了不影响进程B，因为他们的虚拟地址空间是独立的。<br>
+      2. <strong>按需分配：</strong>malloc只是给了个虚拟地址，实际物理内存访问时才分配（触发缺页中断）。<br>
+      3. <strong>超越物理限制：</strong>不常用的数据可以换到磁盘（Swap），虚拟空间可以大于物理内存。
+    </p>
+  </div>
+</div>
+
+<!-- ③ 缺页中断 -->
+<div id="section-pagefault" class="section">
+  <h1>③ 缺页中断 — 内存的"懒加载"机制</h1>
+  <p class="subtitle">malloc 只是口头承诺，真正访问时才"实际到账"</p>
+
+  <div class="card" style="margin-bottom:24px;">
+    <p>你在超市买了件商品，收银台说"到货通知你"（malloc返回地址）。<br>
+    你回家打开门取货时发现没到 → 打电话让超市赶紧送过来（缺页中断）→ 到了之后你再去取（重新执行指令）。</p>
+  </div>
+
+  <div style="display:flex;gap:20px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:280px;">
+      <div class="pf-step-list">
+        <div class="pf-step active-step" onclick="setPFStep(0)" id="pfs0">
+          <div class="pf-step-num">1</div>
+          <div class="pf-step-content">
+            <h4>程序执行访问内存的指令</h4>
+            <p>CPU执行 MOV 指令，要读/写某个虚拟地址</p>
+          </div>
+        </div>
+        <div class="connector"></div>
+        <div class="pf-step" onclick="setPFStep(1)" id="pfs1">
+          <div class="pf-step-num">2</div>
+          <div class="pf-step-content">
+            <h4>MMU 查页表，发现"不在物理内存"</h4>
+            <p>页表里这一页标记为"不存在"，触发缺页中断</p>
+          </div>
+        </div>
+        <div class="connector"></div>
+        <div class="pf-step" onclick="setPFStep(2)" id="pfs2">
+          <div class="pf-step-num">3</div>
+          <div class="pf-step-content">
+            <h4>CPU 进入内核，交给缺页中断处理程序</h4>
+            <p>内核检查：这个虚拟地址合法吗？</p>
+          </div>
+        </div>
+        <div class="connector"></div>
+        <div class="pf-step" onclick="setPFStep(3)" id="pfs3">
+          <div class="pf-step-num">4</div>
+          <div class="pf-step-content">
+            <h4>找一块空闲物理内存，建立映射</h4>
+            <p>修改页表，把虚拟页指向这块物理内存</p>
+          </div>
+        </div>
+        <div class="connector"></div>
+        <div class="pf-step" onclick="setPFStep(4)" id="pfs4">
+          <div class="pf-step-num">5</div>
+          <div class="pf-step-content">
+            <h4>重新执行那条指令 ✅</h4>
+            <p>这次页表里有了，正常访问，程序继续跑</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:280px;">
+      <div class="pf-visual" id="pf-visual">
+        <div id="pf-anim">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div class="cpu-box">💻 CPU<br><small>执行指令</small></div>
+          </div>
+          <div style="margin-top:12px;font-size:13px;color:#94a3b8;">CPU 正准备读取虚拟地址 0x3000 的数据...</div>
+        </div>
+      </div>
+
+      <div class="tip-box" style="margin-top:16px;">
+        <div class="tip-title">和普通中断的区别</div>
+        <p>
+          普通中断（如键盘）：异步来的，处理完后执行<strong>下一条</strong>指令。<br>
+          缺页中断：由当前指令触发，处理完后<strong>重新执行同一条</strong>指令。
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ④ TLB -->
+<div id="section-tlb" class="section">
+  <h1>④ TLB — 地址翻译的"小抄"</h1>
+  <p class="subtitle">每次访问内存都查页表太慢，TLB 是硬件里的缓存</p>
+
+  <div class="card" style="margin-bottom:20px;">
+    <p>每次读写内存都需要"查页表"把虚拟地址翻译成物理地址。<br>
+    但页表在内存里，查一次要访问内存，那读写内存就要访问内存两次——太慢了！<br>
+    <strong>TLB 就是 CPU 芯片里内置的"小本本"，记住最近用过的翻译结果。</strong></p>
+  </div>
+
+  <div class="tlb-demo">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+      <div class="card" style="text-align:center;">
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:8px;">TLB 命中（Hit）</div>
+        <div class="tlb-chip tlb-hit" style="display:inline-block;margin-bottom:8px;">✅ 缓存里找到</div>
+        <div class="tlb-time" style="color:#4ade80;">~1ns</div>
+        <div class="speed-bar" style="background:#4ade80;width:10%;"></div>
+        <div style="font-size:12px;color:#64748b;margin-top:6px;">和寄存器一样快</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:8px;">TLB 未命中（Miss）</div>
+        <div class="tlb-chip tlb-miss" style="display:inline-block;margin-bottom:8px;">❌ 去查页表</div>
+        <div class="tlb-time" style="color:#f87171;">~100ns</div>
+        <div class="speed-bar" style="background:#ef4444;width:100%;"></div>
+        <div style="font-size:12px;color:#64748b;margin-top:6px;">慢100倍（还要走内存）</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">进程切换为什么慢？</h2>
+      <p>进程A切换到进程B时，TLB 里存的全是进程A的翻译结果。<br>
+      换了进程这些全都<strong>失效了，要全部清空（flush）</strong>。</p>
+      <p>新进程一开始所有内存访问都要慢慢查页表，直到 TLB 重新"暖"起来。</p>
+      <div class="badge-row">
+        <span class="tag blue">线程切换</span><span style="color:#60a5fa;font-size:13px;">同进程共享页表，TLB 不需要全刷 → 快</span>
+      </div>
+      <div class="badge-row">
+        <span class="tag red">进程切换</span><span style="color:#f87171;font-size:13px;">不同进程，TLB 全部清空 → 慢</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">大页（Huge Page）</h2>
+      <p>标准页 4KB，TLB 条数有限（通常 64~1024 条）。<br>
+      如果换成 <strong>2MB 大页</strong>，同样的 TLB 条数能覆盖更多内存 → TLB miss 减少 → 性能提升。</p>
+      <div class="badge-row">
+        <span class="tag green">MySQL</span>
+        <span class="tag green">PostgreSQL</span>
+        <span class="tag green">Redis</span>
+        <span style="font-size:13px;color:#4ade80;">都建议开启大页</span>
+      </div>
+      <div class="tip-box">
+        <div class="tip-title">面试口诀</div>
+        <p>TLB = 页表的 CPU 缓存。命中1纳秒，未命中100纳秒。进程切换清空TLB是进程比线程慢的核心原因之一。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ⑤ Swap & OOM -->
+<div id="section-swap" class="section">
+  <h1>⑤ Swap 内存置换 & OOM 杀进程</h1>
+  <p class="subtitle">物理内存不够用时发生什么</p>
+
+  <div class="card" style="margin-bottom:20px;">
+    <p>把内存想象成你的书桌，磁盘是书架。书桌放不下了，就把不常看的书放回书架（Swap Out）。<br>
+    需要再看时再从书架取出来（Swap In，触发缺页中断）。<br>
+    <strong>书架比桌面慢10万倍</strong>，所以 Swap 太多会让系统非常卡。</p>
+  </div>
+
+  <div class="swap-demo">
+    <div style="font-size:13px;color:#94a3b8;margin-bottom:6px;">系统内存状态（模拟）</div>
+    <div class="mem-bar-container">
+      <div class="mem-bar-seg seg-used"  id="bar-used"  style="width:40%;">已用 40%</div>
+      <div class="mem-bar-seg seg-cache" id="bar-cache" style="width:20%;">Cache 20%</div>
+      <div class="mem-bar-seg seg-free"  id="bar-free"  style="width:40%;">空闲 40%</div>
+    </div>
+    <div style="font-size:13px;color:#94a3b8;margin-bottom:6px;">Swap 使用</div>
+    <div class="mem-bar-container">
+      <div class="mem-bar-seg seg-swap" id="bar-swap" style="width:0%;">Swap 0%</div>
+      <div class="mem-bar-seg seg-free" id="bar-swap-free" style="width:100%;">空闲 100%</div>
+    </div>
+
+    <div class="swap-controls">
+      <button class="btn btn-blue" onclick="allocMemory()">🔼 程序申请内存</button>
+      <button class="btn btn-green" onclick="freeMemory()">🔽 程序释放内存</button>
+      <button class="btn btn-gray" onclick="resetMemory()">↺ 重置</button>
+    </div>
+
+    <div id="swap-status" class="card" style="font-size:14px;color:#94a3b8;">
+      系统内存充足，一切正常。
+    </div>
+
+    <div id="oom-panel" class="oom-panel">
+      <div class="oom-title">☠️ OOM Killer 触发！</div>
+      <div class="log-line">[kernel] Out of memory: Kill process 1234 (mysql)</div>
+      <div class="log-line warn">[kernel] oom_score = 823, vm_rss = 8.2GB</div>
+      <div class="log-line kill">[kernel] Killed process 1234 (mysql) total-vm:10GB, anon-rss:8GB</div>
+      <div style="margin-top:12px;font-size:13px;color:#9ca3af;">
+        内核会选 <strong style="color:#fbbf24;">oom_score 最高</strong> 的进程杀掉（占内存最多+优先级低）。<br>
+        数据库进程最容易中招，因为它们占内存最多。<br>
+        可以通过 <code style="color:#a5b4fc;">/proc/&lt;pid&gt;/oom_score_adj</code> 调整，设为 -1000 让内核不杀这个进程。
+      </div>
+    </div>
+
+    <div class="tip-box" style="margin-top:16px;">
+      <div class="tip-title">Kubernetes 为什么禁用 Swap？</div>
+      <p>K8s 给容器承诺了固定内存配额（limits/requests）。<br>
+      如果允许 Swap，容器以为自己有 1GB，实际上 800MB 在磁盘上——性能完全不可预测。<br>
+      所以 K8s 部署节点必须 <code>swapoff -a</code>，保证内存行为可控。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ⑥ mmap -->
+<div id="section-mmap" class="section">
+  <h1>⑥ mmap — 把文件"变成"内存</h1>
+  <p class="subtitle">少一次拷贝，大文件性能提升显著</p>
+
+  <div class="card" style="margin-bottom:20px;">
+    <p>传统 read() 是：先把文件读进内核缓冲区，再从内核缓冲区复制到你的程序缓冲区 — 数据走了两遍。<br>
+    mmap 是：直接把文件页和你的虚拟内存空间"接通"，访问内存就等于访问文件 — 数据只走一遍。</p>
+  </div>
+
+  <div class="mmap-compare">
+    <div class="mmap-path traditional">
+      <h3 style="color:#93c5fd;">📖 传统 read() 方式</h3>
+      <div class="step-item">
+        <div class="step-icon">💾</div>
+        <div class="step-text">磁盘读取数据</div>
+      </div>
+      <div class="step-item">
+        <div class="step-icon">⬇️</div>
+        <div class="step-text">DMA 拷贝到<strong>内核缓冲区</strong><span class="copy-badge">拷贝 ①</span></div>
+      </div>
+      <div class="step-item">
+        <div class="step-icon">⬇️</div>
+        <div class="step-text">内核把数据 copy 到<strong>用户缓冲区</strong><span class="copy-badge">拷贝 ②</span></div>
+      </div>
+      <div class="step-item">
+        <div class="step-icon">✅</div>
+        <div class="step-text">程序才能用</div>
+      </div>
+      <div style="margin-top:12px;padding:8px 12px;background:#1a1e3e;border-radius:6px;font-size:13px;color:#93c5fd;">
+        总计：<strong>2次拷贝</strong>，2次上下文切换（用户态↔内核态）
+      </div>
+    </div>
+
+    <div class="mmap-path mmap-way">
+      <h3 style="color:#4ade80;">🗺️ mmap 方式</h3>
+      <div class="step-item">
+        <div class="step-icon">💾</div>
+        <div class="step-text">磁盘读取数据</div>
+      </div>
+      <div class="step-item">
+        <div class="step-icon">⬇️</div>
+        <div class="step-text">DMA 拷贝到<strong>页缓存</strong><span class="copy-badge">拷贝 ①</span></div>
+      </div>
+      <div class="step-item">
+        <div class="step-icon">🔗</div>
+        <div class="step-text">页缓存<strong>直接映射</strong>到进程虚拟地址 <span class="copy-badge zero">零拷贝 ✓</span></div>
+      </div>
+      <div class="step-item">
+        <div class="step-icon">✅</div>
+        <div class="step-text">程序访问内存就等于访问文件</div>
+      </div>
+      <div style="margin-top:12px;padding:8px 12px;background:#143214;border-radius:6px;font-size:13px;color:#4ade80;">
+        总计：<strong>1次拷贝</strong>（若页缓存命中则 0 次），共享内存无需拷贝
+      </div>
+    </div>
+  </div>
+
+  <h2>哪些地方在用 mmap？</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:8px;">📬</div>
+      <div style="font-weight:700;color:#e2e8f0;">Kafka</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:4px;">消息索引文件用 mmap，读取时不需要 read() 系统调用</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:8px;">🗄️</div>
+      <div style="font-weight:700;color:#e2e8f0;">SQLite</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:4px;">数据库文件用 mmap 访问，WAL 模式下尤其高效</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:8px;">🔴</div>
+      <div style="font-weight:700;color:#e2e8f0;">Redis RDB</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:4px;">加载 RDB 快照时用 mmap，超大快照秒级加载</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:8px;">🤝</div>
+      <div style="font-weight:700;color:#e2e8f0;">共享内存 IPC</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:4px;">进程间通信本质就是 mmap 同一块内存，零拷贝传数据</div>
+    </div>
+  </div>
+
+  <div class="tip-box">
+    <div class="tip-title">mmap 的缺点（别只说好的）</div>
+    <p>
+      1. <strong>小文件反而慢：</strong>建立映射本身有开销，小文件不如直接 read。<br>
+      2. <strong>写入不稳定：</strong>程序崩溃可能导致数据没落盘，需要手动调用 msync。<br>
+      3. <strong>文件大小变化麻烦：</strong>映射建立后文件扩容需要重新映射。
+    </p>
+  </div>
+</div>
+
+<script>
+// 导航切换
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('section-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ① 内存布局信息
+const blockData = {
+  kernel: {
+    title: '🔒 内核空间',
+    html: `<p>操作系统内核住在这里。用户程序<strong>不能直接访问</strong>，一访问就会触发"段错误"（Segfault）崩溃。</p>
+           <p>系统调用就是用户程序通过"门"请求内核帮忙的方式（read/write/open 等）。</p>
+           <div class="tip-box"><div class="tip-title">面试口诀</div><p>内核 = 操作系统的地盘。用户代码只能通过系统调用这扇门进入，不能强行闯入。</p></div>`
+  },
+  stack: {
+    title: '📦 栈 Stack',
+    html: `<p>存放<strong>局部变量、函数参数、返回地址</strong>。函数调用时自动压栈，函数返回时自动弹出。</p>
+           <p>向<strong>低地址方向增长</strong>。Linux 默认大小 8MB（ulimit -s 查看），超了就是"栈溢出"。</p>
+           <div class="go-note">💚 Go 的 goroutine 栈初始只有 2KB，自动扩容，最大几 GB。这是 Go 能跑百万 goroutine 的关键！</div>`
+  },
+  mmap: {
+    title: '📚 共享库映射区',
+    html: `<p>动态链接库（libc、libpthread 等）加载到这里。<strong>多个进程共享同一份代码页</strong>，不需要每个进程都复制一份。</p>
+           <p>也是 mmap 系统调用映射文件的地方。</p>
+           <div class="tip-box"><div class="tip-title">面试追问</div><p>为什么 fork() 出来的子进程不会立刻复制父进程的内存？<br>→ 写时复制（Copy-on-Write）：子进程共享父进程的物理页，只有写入时才复制一份。</p></div>`
+  },
+  heap: {
+    title: '🔼 堆 Heap',
+    html: `<p>malloc/new 分配的内存在这里。向<strong>高地址方向增长</strong>。</p>
+           <p>调用 malloc 时只是分配虚拟地址，<strong>第一次访问才会触发缺页中断真正分配物理内存</strong>。</p>
+           <div class="go-note">💚 Go 的 GC 管理的对象都在堆上。逃逸分析决定一个变量是放栈还是放堆。</div>`
+  },
+  bss: {
+    title: '📋 BSS 段',
+    html: `<p>存放<strong>未初始化的全局变量和静态变量</strong>。</p>
+           <p>程序启动时由操作系统自动<strong>清零填充</strong>，所以不占可执行文件体积（文件里只记个大小）。</p>
+           <div class="tip-box"><div class="tip-title">小知识</div><p>BSS = "Block Started by Symbol"。C 中 <code>static int x;</code> 就在 BSS 段，<code>static int x = 1;</code> 则在 data 段。</p></div>`
+  },
+  data: {
+    title: '📊 数据段 Data',
+    html: `<p>存放<strong>已初始化的全局变量和静态变量</strong>，如 <code>int x = 42;</code>。</p>
+           <p>程序运行期间这些值<strong>可以被修改</strong>，但初始值存在可执行文件里。</p>`
+  },
+  text: {
+    title: '💻 代码段 Text',
+    html: `<p>存放<strong>程序的机器指令</strong>（编译后的二进制代码）。</p>
+           <p><strong>只读</strong> — 不能修改代码段，防止程序意外改写自身指令。多个进程可以共享同一份代码段。</p>
+           <div class="tip-box"><div class="tip-title">面试追问</div><p>为什么代码段是只读的？<br>→ 安全（防止代码被意外覆盖）+ 共享（多进程共用同一份指令页，节省物理内存）。</p></div>`
+  }
+};
+
+function showBlockInfo(key) {
+  const d = blockData[key];
+  const panel = document.getElementById('block-info');
+  panel.innerHTML = `<h3>${d.title}</h3>${d.html}`;
+  panel.classList.remove('animate-in');
+  void panel.offsetWidth;
+  panel.classList.add('animate-in');
+  document.querySelectorAll('.mem-block').forEach(b => b.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+}
+
+// ② 虚拟内存映射
+const vmStories = [
+  { title: '✅ 虚拟页 0x1000 → 物理页框 #5', text: '正常映射。程序的代码在物理内存里，CPU 查页表找到物理地址，直接访问，速度很快。', color: '#22c55e' },
+  { title: '✅ 虚拟页 0x2000 → 物理页框 #12', text: '正常映射。堆数据在物理内存里，malloc 分配后被访问过，已经建立了物理映射。', color: '#22c55e' },
+  { title: '⚠️ 虚拟页 0x3000 → Swap 磁盘槽 #3', text: '这块数据很久没被访问，内核把它换到了磁盘上（Swap Out）。现在访问它会触发缺页中断，内核把磁盘上的数据读回物理内存（Swap In），需要几毫秒。', color: '#f59e0b' },
+  { title: '❌ 虚拟页 0x4000 → 未分配', text: 'malloc 没有分配这块地址，或者 malloc 分配了但还没访问过。访问这里会触发缺页中断，内核判断"地址合法但无物理映射" → 分配一块物理内存 → 建立映射。', color: '#6366f1' }
+];
+
+function showMapping(idx) {
+  const story = vmStories[idx];
+  document.getElementById('vm-story-panel').innerHTML = `
+    <h3 style="color:${story.color};margin-bottom:8px;">${story.title}</h3>
+    <p style="margin:0;">${story.text}</p>`;
+  document.querySelectorAll('.vm-page').forEach(p => p.classList.remove('active-page'));
+  document.getElementById('vp' + idx).classList.add('active-page');
+}
+
+// ③ 缺页中断动画
+const pfAnims = [
+  `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div class="cpu-box">💻 CPU<br><small>执行指令 MOV [0x3000]</small></div>
+  </div>
+  <div style="margin-top:12px;font-size:13px;color:#94a3b8;">CPU 正在执行访问内存地址 0x3000 的指令...</div>`,
+
+  `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div class="cpu-box">💻 CPU</div>
+    <div class="flow-arrow">→</div>
+    <div class="tlb-chip tlb-miss" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;font-size:13px;">📋 页表 Miss!</div>
+  </div>
+  <div style="margin-top:12px;font-size:13px;color:#fbbf24;">⚠️ MMU 查页表：虚拟页 0x3000 标记为"不存在"，触发缺页中断！</div>`,
+
+  `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div class="cpu-box">💻 CPU</div>
+    <div class="flow-arrow">→</div>
+    <div class="kernel-box">🔧 内核<br><small>缺页处理程序</small></div>
+  </div>
+  <div style="margin-top:12px;font-size:13px;color:#d8b4fe;">内核检查：0x3000 是合法地址吗？<br>→ 是的（在进程的 VMA 范围内），继续处理...</div>`,
+
+  `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div class="kernel-box">🔧 内核</div>
+    <div class="flow-arrow">→</div>
+    <div class="mem-box-small">🟢 物理内存<br><small>分配页框 #8</small></div>
+  </div>
+  <div style="margin-top:12px;font-size:13px;color:#86efac;">找到空闲物理页框 #8，<br>修改页表：虚拟页 0x3000 → 物理页框 #8 ✅</div>`,
+
+  `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div class="cpu-box" style="border-color:#22c55e;background:#14532d;">✅ CPU<br><small>重新执行 MOV [0x3000]</small></div>
+  </div>
+  <div style="margin-top:12px;font-size:13px;color:#4ade80;">这次 MMU 查页表成功！正常访问物理内存 #8。<br>程序继续执行，用户完全感知不到刚才发生了缺页中断。</div>`
+];
+
+function setPFStep(idx) {
+  document.querySelectorAll('.pf-step').forEach((s, i) => {
+    s.classList.toggle('active-step', i === idx);
+  });
+  const vis = document.getElementById('pf-anim');
+  vis.innerHTML = pfAnims[idx];
+  vis.classList.remove('animate-in');
+  void vis.offsetWidth;
+  vis.classList.add('animate-in');
+}
+
+// ⑤ Swap 模拟
+let usedPct = 40, cachePct = 20;
+
+function updateBars() {
+  const freePct = Math.max(0, 100 - usedPct - cachePct);
+  const swapPct = Math.max(0, usedPct - 80); // swap starts when used > 80%
+  const swapFreePct = 100 - swapPct;
+
+  document.getElementById('bar-used').style.width = usedPct + '%';
+  document.getElementById('bar-used').textContent = usedPct > 8 ? `已用 ${usedPct}%` : '';
+  document.getElementById('bar-cache').style.width = cachePct + '%';
+  document.getElementById('bar-cache').textContent = cachePct > 8 ? `Cache ${cachePct}%` : '';
+  document.getElementById('bar-free').style.width = freePct + '%';
+  document.getElementById('bar-free').textContent = freePct > 8 ? `空闲 ${freePct}%` : '';
+
+  document.getElementById('bar-swap').style.width = swapPct + '%';
+  document.getElementById('bar-swap').textContent = swapPct > 5 ? `Swap ${swapPct}%` : '';
+  document.getElementById('bar-swap-free').style.width = swapFreePct + '%';
+  document.getElementById('bar-swap-free').textContent = swapFreePct > 8 ? `空闲 ${swapFreePct}%` : '';
+
+  const status = document.getElementById('swap-status');
+  const oom = document.getElementById('oom-panel');
+
+  if (usedPct >= 100) {
+    status.innerHTML = `<span style="color:#ef4444;font-weight:700;">☠️ 物理内存 + Swap 全部耗尽！OOM Killer 触发！</span>`;
+    oom.classList.add('show');
+  } else if (usedPct > 80) {
+    const s = usedPct - 80;
+    status.innerHTML = `<span style="color:#f59e0b;font-weight:700;">⚠️ 物理内存不足！正在使用 Swap（已换出 ${s}%）。系统变慢，磁盘 IO 飙升。</span>`;
+    oom.classList.remove('show');
+  } else if (usedPct > 60) {
+    status.innerHTML = `<span style="color:#fbbf24;">内存使用率较高（${usedPct}%），系统开始回收 Cache，暂时无影响。</span>`;
+    oom.classList.remove('show');
+  } else {
+    status.innerHTML = `<span style="color:#4ade80;">系统内存充足（使用 ${usedPct}%），一切正常。</span>`;
+    oom.classList.remove('show');
+  }
+}
+
+function allocMemory() {
+  usedPct = Math.min(105, usedPct + 10);
+  if (cachePct > 5 && usedPct > 70) cachePct = Math.max(5, cachePct - 5);
+  updateBars();
+}
+
+function freeMemory() {
+  usedPct = Math.max(10, usedPct - 10);
+  if (cachePct < 20) cachePct = Math.min(20, cachePct + 3);
+  updateBars();
+}
+
+function resetMemory() {
+  usedPct = 40; cachePct = 20;
+  updateBars();
+}
+</script>
+</body>
+</html>

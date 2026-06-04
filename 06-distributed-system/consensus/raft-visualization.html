@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Raft 共识算法 — 面试可视化</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.nav{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;background:#1a1d2e;border-bottom:1px solid #2d3148;position:sticky;top:0;z-index:100}
+.nav-btn{padding:7px 15px;border-radius:20px;border:1px solid #3d4166;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s}
+.nav-btn.active,.nav-btn:hover{background:#f59e0b;color:#000;border-color:#f59e0b}
+.section{display:none;padding:28px 20px;max-width:980px;margin:0 auto}
+.section.active{display:block}
+h1{font-size:24px;font-weight:700;color:#fbbf24;margin-bottom:6px}
+h2{font-size:17px;color:#f59e0b;margin:22px 0 10px}
+.sub{color:#64748b;font-size:13px;margin-bottom:22px}
+p{line-height:1.8;color:#cbd5e1;margin-bottom:10px;font-size:14px}
+.card{background:#1e2235;border:1px solid #2d3148;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.hl{border-color:#f59e0b;background:#1f1e1a}
+.tip{background:#2a2010;border-left:3px solid #f59e0b;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-t{font-size:11px;font-weight:700;color:#f59e0b;margin-bottom:5px;letter-spacing:.5px}
+.tip p{color:#fde68a;font-size:13px;margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{background:#2d3148;color:#fbbf24;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:8px 10px;border-bottom:1px solid #1a1d2e;color:#cbd5e1;vertical-align:top}
+tr:hover td{background:#1e2235}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.tg{color:#86efac;background:#14532d}.tr{color:#fca5a5;background:#4c1d1d}.ty{color:#fbbf24;background:#451a03}.tb{color:#93c5fd;background:#1e3a5f}.tp{color:#d8b4fe;background:#2d1a4a}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;margin:4px}
+.btn-yellow{background:#f59e0b;color:#000}.btn-blue{background:#3b82f6;color:#fff}.btn-green{background:#22c55e;color:#fff}.btn-gray{background:#374151;color:#d1d5db}.btn-red{background:#dc2626;color:#fff}
+.btn:hover{opacity:.85;transform:translateY(-1px)}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.ani{animation:fadeIn .3s ease}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes hb{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+
+/* ===节点样式=== */
+.cluster-wrap{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;margin:20px 0;align-items:center}
+.raft-node{width:120px;border-radius:12px;padding:14px;text-align:center;cursor:pointer;transition:all .3s;border:2px solid;position:relative}
+.node-leader{background:#2a2010;border-color:#f59e0b;box-shadow:0 0 16px #f59e0b44}
+.node-follower{background:#1a2f1a;border-color:#22c55e}
+.node-candidate{background:#1a1f3a;border-color:#6366f1;animation:pulse .8s infinite}
+.node-dead{background:#1a1a1a;border-color:#4a5568;opacity:.5;filter:grayscale(1)}
+.node-icon{font-size:28px;margin-bottom:6px}
+.node-role{font-size:12px;font-weight:700;margin-bottom:4px}
+.node-term{font-size:11px;color:#64748b}
+.node-timer{width:100%;height:4px;border-radius:2px;background:#2d3148;margin-top:8px;overflow:hidden}
+.node-timer-fill{height:100%;border-radius:2px;transition:width .1s linear}
+.vote-badge{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#000;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;display:none}
+.log-row{display:flex;align-items:center;gap:6px;margin:4px 0}
+.log-entry{border-radius:5px;padding:3px 8px;font-size:11px;font-family:'Courier New',monospace;flex-shrink:0}
+.log-committed{background:#14532d;border:1px solid #22c55e;color:#4ade80}
+.log-uncommitted{background:#451a03;border:1px dashed #f59e0b;color:#fbbf24}
+.raft-log{background:#131624;border-radius:8px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;line-height:1.9;min-height:100px;max-height:200px;overflow-y:auto;margin-top:12px}
+.rl-ok{color:#4ade80}.rl-info{color:#93c5fd}.rl-warn{color:#fbbf24}.rl-red{color:#f87171}
+/* 日志复制可视化 */
+.repl-grid{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.repl-node-row{display:flex;gap:8px;align-items:center}
+.repl-node-label{width:70px;font-size:12px;font-weight:700;flex-shrink:0;text-align:right}
+.repl-entries{display:flex;gap:4px;flex-wrap:nowrap;overflow-x:auto}
+.re{border-radius:5px;padding:4px 8px;font-size:11px;min-width:48px;text-align:center;flex-shrink:0;transition:all .3s}
+.re-c{background:#14532d;border:1px solid #22c55e;color:#4ade80}
+.re-u{background:#3e2a1a;border:1px dashed #f59e0b;color:#fbbf24}
+.re-empty{background:#1e2235;border:1px dashed #2d3148;color:#2d3148}
+/* 脑裂 */
+.partition-scene{display:flex;gap:16px;margin:16px 0;flex-wrap:wrap}
+.partition-group{border-radius:10px;padding:14px;border:2px solid;flex:1;min-width:180px}
+.group-a{background:#1a2f1a;border-color:#22c55e}
+.group-b{background:#1a1f3a;border-color:#6366f1}
+.partition-line{width:4px;background:repeating-linear-gradient(0deg,#ef4444 0,#ef4444 10px,transparent 10px,transparent 20px);border-radius:2px;align-self:stretch;flex-shrink:0;min-height:100px}
+</style>
+</head>
+<body>
+<div class="nav">
+  <button class="nav-btn active" onclick="show('overview')">① 三角色对比</button>
+  <button class="nav-btn" onclick="show('election')">② Leader 选举</button>
+  <button class="nav-btn" onclick="show('logrepl')">③ 日志复制</button>
+  <button class="nav-btn" onclick="show('splitbrain')">④ 脑裂 & 奇数节点</button>
+  <button class="nav-btn" onclick="show('compare')">⑤ 对比 Paxos/ZAB</button>
+</div>
+
+<!-- ① 三角色 -->
+<div id="s-overview" class="section active">
+  <h1>① Raft 三角色 & 核心思想</h1>
+  <p class="sub">Raft 把一致性问题拆成：选主 + 日志复制 + 安全性三个部分，比 Paxos 更容易理解</p>
+
+  <div class="cluster-wrap">
+    <div class="raft-node node-leader" onclick="showRole('leader')">
+      <div class="node-icon">👑</div>
+      <div class="node-role" style="color:#fbbf24;">Leader</div>
+      <div class="node-term">任期 term=3</div>
+      <div class="node-timer" style="margin-top:6px;"><div class="node-timer-fill" style="width:60%;background:#f59e0b;animation:hb 1s infinite;"></div></div>
+    </div>
+    <div style="text-align:center;font-size:22px;color:#4a5568;padding:20px 0;">←→</div>
+    <div class="raft-node node-follower" onclick="showRole('follower')">
+      <div class="node-icon">👥</div>
+      <div class="node-role" style="color:#4ade80;">Follower</div>
+      <div class="node-term">term=3</div>
+      <div class="node-timer"><div class="node-timer-fill" id="ft1" style="width:30%;background:#22c55e;"></div></div>
+    </div>
+    <div class="raft-node node-follower" onclick="showRole('follower')">
+      <div class="node-icon">👥</div>
+      <div class="node-role" style="color:#4ade80;">Follower</div>
+      <div class="node-term">term=3</div>
+      <div class="node-timer"><div class="node-timer-fill" id="ft2" style="width:70%;background:#22c55e;"></div></div>
+    </div>
+    <div style="text-align:center;font-size:22px;color:#4a5568;padding:20px 0;">←→</div>
+    <div class="raft-node node-candidate" onclick="showRole('candidate')">
+      <div class="node-icon">✋</div>
+      <div class="node-role" style="color:#818cf8;">Candidate</div>
+      <div class="node-term">发起选举中...</div>
+      <div class="node-timer"><div class="node-timer-fill" style="width:90%;background:#6366f1;"></div></div>
+    </div>
+  </div>
+
+  <div id="role-detail" class="card" style="min-height:80px;">
+    <p style="color:#64748b;">👆 点击任意节点查看角色详情</p>
+  </div>
+
+  <table>
+    <tr><th>角色</th><th>职责</th><th>数量</th><th>状态转换</th></tr>
+    <tr>
+      <td><span class="tag ty">👑 Leader</span></td>
+      <td>处理所有写请求，向Follower同步日志，发送心跳维持地位</td>
+      <td><strong style="color:#fbbf24;">同一时刻只有1个</strong></td>
+      <td>选举胜出 → Leader；发现更高term → Follower</td>
+    </tr>
+    <tr>
+      <td><span class="tag tg">👥 Follower</span></td>
+      <td>接收Leader日志，不主动发请求，超时没收到心跳 → 发起选举</td>
+      <td>N-1个（其余节点）</td>
+      <td>超时没收到心跳 → Candidate</td>
+    </tr>
+    <tr>
+      <td><span class="tag tp">✋ Candidate</span></td>
+      <td>选举期间的临时角色，投票给自己，向其他节点请求投票</td>
+      <td>选举期间可能多个</td>
+      <td>获得过半票 → Leader；发现有效Leader → Follower；超时重试</td>
+    </tr>
+  </table>
+
+  <div class="tip">
+    <div class="tip-t">核心思想一句话</div>
+    <p>Raft 用<strong>强Leader</strong>简化一致性：所有写必须经过Leader，Leader保证日志顺序，Follower只是复制Leader的日志。这比Paxos的对等节点模型容易理解得多。</p>
+  </div>
+</div>
+
+<!-- ② Leader选举 -->
+<div id="s-election" class="section">
+  <h1>② Leader 选举过程</h1>
+  <p class="sub">心跳超时触发选举，随机化超时时间防止同时多个Candidate</p>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    <button class="btn btn-yellow" onclick="elecStart()">▶ 演示选举过程</button>
+    <button class="btn btn-red" onclick="elecKillLeader()">💀 杀掉当前Leader</button>
+    <button class="btn btn-gray" onclick="elecReset()">↺ 重置</button>
+  </div>
+
+  <div class="cluster-wrap" id="elec-cluster"></div>
+  <div class="raft-log" id="elec-log">等待操作...</div>
+
+  <h2>选举规则（防止选出过时的Leader）</h2>
+  <div class="card">
+    <p>Follower 收到投票请求时，只有满足以下两个条件才会投票：</p>
+    <p>① <strong>term ≥ 自己的term</strong>（Candidate的任期不能比自己旧）</p>
+    <p>② <strong>Candidate的日志至少和自己一样新</strong>（比较最后一条日志的 term 和 index，防止选出缺少已提交日志的节点）</p>
+    <p>每个节点每个term只能投一票，谁先来投谁（先到先得）。</p>
+    <div class="tip">
+      <div class="tip-t">为什么超时时间要随机？</div>
+      <p>如果所有节点超时时间一样，Leader挂掉后所有节点同时成为Candidate，都给自己投票，平票选不出来。<br>
+      随机超时（150ms~300ms）让某个节点先超时，它先发投票请求，其他节点收到后还没超时，直接投给它，快速完成选举。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ③ 日志复制 -->
+<div id="s-logrepl" class="section">
+  <h1>③ 日志复制</h1>
+  <p class="sub">写请求只到Leader，Leader复制给多数节点后才提交。点击按钮模拟写操作</p>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    <button class="btn btn-yellow" onclick="logWrite()">✏️ 客户端写入</button>
+    <button class="btn btn-red" onclick="logNodeFail()">💀 模拟节点故障</button>
+    <button class="btn btn-green" onclick="logNodeRecover()">✅ 节点恢复</button>
+    <button class="btn btn-gray" onclick="logReset()">↺ 重置</button>
+  </div>
+
+  <div class="repl-grid" id="log-grid"></div>
+  <div class="raft-log" id="log-log">等待操作...</div>
+
+  <div class="card hl" style="margin-top:16px;">
+    <h2 style="margin-top:0;color:#fbbf24;">日志一致性保证</h2>
+    <p>Leader 在发送日志时，会带上前一条日志的 (term, index)，Follower 收到后先检查这个"锚点"是否匹配：</p>
+    <p>• 匹配 → 追加这条日志，回复 OK<br>• 不匹配 → 回复失败，Leader 回退找到分叉点，从那里重新发<br>
+    这叫 <strong>一致性检查（Log Matching）</strong>，保证 Leader 强制覆盖 Follower 的不一致日志。</p>
+    <div class="tip">
+      <div class="tip-t">面试必答：过半提交</div>
+      <p>Leader收到写请求 → 先写自己日志（未提交状态）→ 并发发给所有Follower → 收到超过半数的ACK → 提交日志应用到状态机 → 返回客户端成功 → 下次心跳告知Follower可以提交。<br>
+      只要超过半数节点有这条日志，就算Leader崩了，新Leader一定也有它，不会丢。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ④ 脑裂 -->
+<div id="s-splitbrain" class="section">
+  <h1>④ 脑裂 & 为什么集群要奇数节点</h1>
+  <p class="sub">网络分区导致两个Leader同时存在 — Raft如何解决</p>
+
+  <div class="card" style="margin-bottom:16px;">
+    <p><strong>脑裂</strong> = 集群因网络分区，出现了两个Leader都在接受写请求 → 数据分叉，无法合并。</p>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+    <button class="btn btn-yellow" onclick="showSplit('before')">正常状态</button>
+    <button class="btn btn-red" onclick="showSplit('split')">网络分区！</button>
+    <button class="btn btn-green" onclick="showSplit('recover')">网络恢复</button>
+  </div>
+
+  <div id="split-scene" class="card" style="min-height:200px;"></div>
+
+  <h2>Raft 如何防止脑裂</h2>
+  <div class="card hl">
+    <p><strong style="color:#fbbf24;">过半机制（Quorum）</strong>：写请求只有超过 N/2 个节点确认才算成功。网络分区后：</p>
+    <div class="partition-scene">
+      <div class="partition-group group-a">
+        <div style="font-weight:700;color:#4ade80;margin-bottom:8px;">小分区（2节点）</div>
+        <p style="font-size:12px;">旧Leader + 1个Follower<br>写请求：只有2个节点，无法达到过半（5节点集群需3个）<br><strong style="color:#f87171;">→ 无法提交新写入，自动停止服务</strong></p>
+      </div>
+      <div class="partition-line"></div>
+      <div class="partition-group group-b">
+        <div style="font-weight:700;color:#d8b4fe;margin-bottom:8px;">大分区（3节点）</div>
+        <p style="font-size:12px;">3个Follower，其中一个超时发起选举<br>3/5 过半 → 选出新Leader<br><strong style="color:#4ade80;">→ 正常服务</strong></p>
+      </div>
+    </div>
+    <p>网络恢复后：旧Leader发现有更高term的Leader → 自动降为Follower，同步新Leader的日志。</p>
+  </div>
+
+  <h2>为什么集群要奇数节点？</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin:12px 0;">
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:6px;">3️⃣</div>
+      <div style="font-weight:700;color:#fbbf24;">3节点集群</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px;">过半 = 2票<br>可容忍 1个节点故障<br>2节点集群也能容忍1个故障，<br>但多1个节点只换来了同样的容错</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:6px;">4️⃣</div>
+      <div style="font-weight:700;color:#f87171;">4节点集群（不推荐）</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px;">过半 = 3票<br>可容忍 1个节点故障<br>和3节点容错一样！<br>多了1个节点白费</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:24px;margin-bottom:6px;">5️⃣</div>
+      <div style="font-weight:700;color:#fbbf24;">5节点集群</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px;">过半 = 3票<br>可容忍 2个节点故障<br>容错比3节点强，增加有意义</div>
+    </div>
+  </div>
+  <div class="tip">
+    <div class="tip-t">口诀</div>
+    <p>N个节点，可容忍 (N-1)/2 个故障（取整）。<br>偶数节点 = 和少1个的奇数节点同等容错，却多了一个节点的开销。<br>所以集群 3、5、7 节点，不用 4、6、8。</p>
+  </div>
+</div>
+
+<!-- ⑤ 对比 -->
+<div id="s-compare" class="section">
+  <h1>⑤ Raft vs Paxos vs ZAB</h1>
+  <p class="sub">面试问到一致性算法，能说出三者关系和各自应用就够了</p>
+
+  <table>
+    <tr><th>维度</th><th>Paxos</th><th>Raft</th><th>ZAB</th></tr>
+    <tr><td>提出时间</td><td>1989年（Lamport）</td><td>2013年（斯坦福）</td><td>2010年（Yahoo）</td></tr>
+    <tr><td>复杂度</td><td><span class="tag tr">极复杂，难理解</span></td><td><span class="tag tg">简单，专为可理解性设计</span></td><td><span class="tag ty">中等</span></td></tr>
+    <tr><td>领导者</td><td>没有强Leader，对等节点</td><td><strong>强Leader</strong>，所有写必须经Leader</td><td>强Leader（称为Leader）</td></tr>
+    <tr><td>应用产品</td><td>Chubby（Google内部）</td><td><strong>etcd、Consul、TiKV、CockroachDB</strong></td><td><strong>ZooKeeper</strong>（Kafka老版本元数据）</td></tr>
+    <tr><td>你用过的</td><td>—</td><td>ETCD（分布式锁/配置中心）<br>Nacos底层（部分版本）</td><td>ZooKeeper（老项目注册中心）</td></tr>
+  </table>
+
+  <h2>Raft 和 ZAB 的区别</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+    <div class="card">
+      <div style="font-weight:700;color:#fbbf24;margin-bottom:8px;">⚡ Raft</div>
+      <p style="font-size:12px;">通用分布式共识，任意状态机复制（不只是KV）<br>Leader任期叫 term（全局递增整数）<br>选举：Candidate发起，过半投票获胜<br>日志：Leader强制覆盖Follower不一致的日志</p>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;color:#a5b4fc;margin-bottom:8px;">🦁 ZAB</div>
+      <p style="font-size:12px;">专为ZooKeeper设计，原子广播协议<br>Leader任期叫 epoch（纪元）<br>选举：比较 (epoch, zxid) 最新的当Leader<br>日志：ZXID（高32位epoch+低32位计数器）保证全局顺序</p>
+    </div>
+  </div>
+
+  <h2>面试答题策略</h2>
+  <div class="card hl">
+    <p>业务开发岗不需要手推算法细节，能说清楚以下三点就满分：</p>
+    <p>① <strong>是什么：</strong>分布式系统里让多个节点就某个值达成一致的算法。保证就算有部分节点挂掉，系统仍能正常工作且数据一致。</p>
+    <p>② <strong>Raft的核心：</strong>选主（过半投票）+ 日志复制（Leader强制同步）+ 过半提交（保证不丢数据）。</p>
+    <p>③ <strong>在哪用：</strong>ETCD用Raft，我们用ETCD做分布式锁和服务发现。Nacos/ZooKeeper底层也是类似机制，保证集群配置数据一致。</p>
+  </div>
+</div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'))
+  document.getElementById('s-'+id).classList.add('active')
+  event.target.classList.add('active')
+}
+
+// ① 角色详情
+const roleData={
+  leader:{title:'👑 Leader — 集群的唯一领导者',html:`
+    <p>同一时刻整个集群只能有<strong style="color:#fbbf24;">一个Leader</strong>。</p>
+    <p><strong>职责：</strong><br>① 接收客户端的所有写请求<br>② 把日志复制给所有Follower<br>③ 每隔固定时间（心跳间隔，通常50-150ms）向所有Follower发送心跳，维持自己的地位<br>④ 决定哪些日志可以"提交"（超过半数复制后）</p>
+    <div class="tip"><div class="tip-t">如果Leader收到比自己term更高的请求</div><p>说明已经有新的Leader了，立刻降为Follower，避免脑裂。</p></div>`},
+  follower:{title:'👥 Follower — 跟随者',html:`
+    <p>被动角色，不主动发起请求。</p>
+    <p><strong>职责：</strong><br>① 接收并存储Leader发来的日志<br>② 响应Leader的心跳，重置自己的选举超时计时器<br>③ 如果超时（150-300ms随机）没收到Leader心跳 → 认为Leader挂了 → 变成Candidate</p>
+    <p><strong>超时时间为什么随机？</strong>防止多个Follower同时变成Candidate，导致平票，无法快速选出Leader。</p>`},
+  candidate:{title:'✋ Candidate — 候选人（选举期间）',html:`
+    <p>Follower超时没收到心跳，就变成Candidate，发起新一轮选举。</p>
+    <p><strong>选举流程：</strong><br>① term+1（新任期）<br>② 投票给自己<br>③ 向其他所有节点发送 RequestVote RPC<br>④ 收到过半票数 → 成为Leader，立刻向所有节点发心跳宣告当选<br>⑤ 发现已有有效Leader（term ≥ 自己）→ 降为Follower<br>⑥ 选举超时（又没选出来）→ 重新开始，term再+1</p>`}
+}
+function showRole(k){
+  const d=roleData[k]
+  const el=document.getElementById('role-detail')
+  el.innerHTML=`<h3 style="color:#fbbf24;margin-bottom:10px;">${d.title}</h3>${d.html}`
+  el.classList.remove('ani');void el.offsetWidth;el.classList.add('ani')
+}
+
+// ② 选举
+let elecState={nodes:[],term:1,leaderId:-1}
+function elecInit(){
+  elecState={nodes:[
+    {id:0,role:'follower',term:1,votes:0,timeout:Math.random()*60+20,dead:false},
+    {id:1,role:'follower',term:1,votes:0,timeout:Math.random()*60+60,dead:false},
+    {id:2,role:'follower',term:1,votes:0,timeout:Math.random()*60+80,dead:false},
+    {id:3,role:'follower',term:1,votes:0,timeout:Math.random()*60+40,dead:false},
+    {id:4,role:'follower',term:1,votes:0,timeout:Math.random()*60+70,dead:false},
+  ],term:1,leaderId:-1}
+  elecRenderCluster()
+}
+function elecRenderCluster(){
+  const cluster=document.getElementById('elec-cluster')
+  const icons=['🖥️','💻','🖥️','💻','🖥️']
+  cluster.innerHTML=elecState.nodes.map(n=>{
+    let cls='raft-node '
+    let color='#94a3b8',label='Follower'
+    if(n.dead){cls+='node-dead';label='💀 Dead'}
+    else if(n.role==='leader'){cls+='node-leader';color='#fbbf24';label='Leader'}
+    else if(n.role==='candidate'){cls+='node-candidate';color='#818cf8';label='Candidate'}
+    else{cls+='node-follower';color='#4ade80';label='Follower'}
+    const pct=Math.min(100,n.timeout)
+    const timerColor=n.role==='leader'?'#f59e0b':'#22c55e'
+    return `<div class="${cls}">
+      <div class="node-icon">${icons[n.id]}</div>
+      <div class="node-role" style="color:${color};">节点${n.id}</div>
+      <div style="font-size:11px;color:${color};">${label}</div>
+      <div class="node-term">term=${n.term}${n.votes>0?' votes='+n.votes:''}</div>
+      <div class="node-timer"><div class="node-timer-fill" style="width:${n.dead?0:pct}%;background:${timerColor};"></div></div>
+    </div>`
+  }).join('')
+}
+function elLog(msg,cls=''){const el=document.getElementById('elec-log');el.innerHTML+=`<div class="${cls||''}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+async function elecStart(){
+  document.getElementById('elec-log').innerHTML=''
+  elecInit()
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  elLog('<span class="rl-info">── 集群启动，5个节点都是Follower ──</span>')
+  elLog('各节点随机超时时间不同，等待Leader心跳...')
+  await delay(800)
+  // 找最快超时的节点
+  const alive=elecState.nodes.filter(n=>!n.dead)
+  const first=alive.reduce((a,b)=>a.timeout<b.timeout?a:b)
+  elLog(`<span class="rl-warn">[节点${first.id}]</span> 选举超时！(${Math.round(first.timeout)}ms) 变成Candidate，term+1`)
+  first.role='candidate';first.term++;first.votes=1;elecState.term=first.term
+  elecRenderCluster()
+  await delay(600)
+  elLog(`<span class="rl-warn">[节点${first.id}]</span> 向其他4个节点发送 RequestVote(term=${first.term}, candidateId=${first.id})`)
+  await delay(500)
+  let voteCount=1
+  for(let n of alive.filter(x=>x.id!==first.id)){
+    await delay(300)
+    if(n.term<=first.term){
+      n.term=first.term
+      elLog(`<span class="rl-ok">[节点${n.id}]</span> 投票给 节点${first.id}（term相同，日志够新）`)
+      voteCount++
+      first.votes=voteCount
+      elecRenderCluster()
+      if(voteCount>alive.length/2)break
+    }
+  }
+  await delay(400)
+  elLog(`<span class="rl-ok">[节点${first.id}]</span> 获得 ${voteCount} 票，超过半数(${Math.ceil(alive.length/2+0.1)})！→ 成为Leader 👑`)
+  first.role='leader';elecState.leaderId=first.id
+  elecRenderCluster()
+  await delay(400)
+  elLog('<span class="rl-ok">[Leader]</span> 立刻向所有节点发心跳，宣告当选，其他节点变回Follower')
+  alive.filter(n=>n.id!==first.id).forEach(n=>{n.role='follower'})
+  elecRenderCluster()
+  elLog('<span class="rl-info">选举完成！集群恢复正常。</span>')
+}
+async function elecKillLeader(){
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  if(elecState.leaderId<0){elLog('<span class="rl-red">先演示选举，产生Leader</span>');return}
+  const leader=elecState.nodes[elecState.leaderId]
+  elLog(`<span class="rl-red">💀 Leader 节点${leader.id} 故障！</span>`)
+  leader.dead=true;leader.role='dead'
+  elecRenderCluster()
+  await delay(1000)
+  elLog('<span class="rl-warn">Follower们超时没收到心跳，重新选举...</span>')
+  elecState.leaderId=-1
+  await delay(500)
+  await elecStart()
+}
+function elecReset(){elecInit();document.getElementById('elec-log').innerHTML='等待操作...'}
+elecInit()
+
+// ③ 日志复制
+let logState={nodes:[
+  {id:0,role:'leader',logs:[],dead:false},
+  {id:1,role:'follower',logs:[],dead:false},
+  {id:2,role:'follower',logs:[],dead:false},
+  {id:3,role:'follower',logs:[],dead:false},
+  {id:4,role:'follower',logs:[],dead:false},
+],nextIdx:1}
+function logRender(){
+  const grid=document.getElementById('log-grid')
+  const maxLen=Math.max(...logState.nodes.map(n=>n.logs.length),5)
+  grid.innerHTML=logState.nodes.map(n=>{
+    const isLeader=n.role==='leader'
+    const color=n.dead?'#4a5568':isLeader?'#fbbf24':'#4ade80'
+    const label=n.dead?`💀 节点${n.id}`:`${isLeader?'👑':'👥'} 节点${n.id}`
+    let entries=''
+    for(let i=0;i<maxLen;i++){
+      if(i<n.logs.length){
+        const l=n.logs[i]
+        entries+=`<div class="re ${l.committed?'re-c':'re-u'}">${l.cmd}<br><span style="font-size:9px;">${l.committed?'✓committed':'pending'}</span></div>`
+      } else {
+        entries+=`<div class="re re-empty">-</div>`
+      }
+    }
+    return `<div class="repl-node-row">
+      <div class="repl-node-label" style="color:${color};">${label}</div>
+      <div class="repl-entries">${entries}</div>
+    </div>`
+  }).join('')
+}
+function lLog(msg,cls=''){const el=document.getElementById('log-log');el.innerHTML+=`<div class="${cls||''}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+async function logWrite(){
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  const cmds=['SET x 1','SET y 100','INCR cnt','SET z hello','SET bal 500']
+  const cmd=cmds[logState.nextIdx%cmds.length]
+  const idx=logState.nextIdx++
+  const leader=logState.nodes.find(n=>n.role==='leader'&&!n.dead)
+  if(!leader){lLog('<span class="rl-red">没有Leader！</span>');return}
+  lLog(`<span class="rl-info">[客户端]</span> 发送写请求: ${cmd}`)
+  leader.logs.push({cmd,committed:false})
+  logRender()
+  await delay(500)
+  lLog(`<span class="rl-ok">[Leader]</span> 写入本地日志(index=${idx}, pending)，并发复制给所有Follower`)
+  let acks=1
+  for(let n of logState.nodes.filter(x=>x.id!==leader.id&&!x.dead)){
+    await delay(250)
+    n.logs.push({cmd,committed:false})
+    acks++
+    logRender()
+    lLog(`<span class="rl-ok">[节点${n.id}]</span> 日志追加成功，ACK`)
+    if(acks>logState.nodes.length/2){
+      await delay(300)
+      lLog(`<span class="rl-ok">[Leader]</span> 过半(${acks})节点确认，提交日志！应用到状态机，返回客户端OK`)
+      logState.nodes.forEach(n=>{if(n.logs.length>0)n.logs[n.logs.length-1].committed=true})
+      logRender()
+      break
+    }
+  }
+}
+function logNodeFail(){
+  const alive=logState.nodes.filter(n=>!n.dead&&n.role!=='leader')
+  if(!alive.length){lLog('<span class="rl-red">没有可以故障的Follower了</span>');return}
+  const n=alive[0]
+  n.dead=true
+  lLog(`<span class="rl-red">💀 节点${n.id} 故障（剩余${logState.nodes.filter(x=>!x.dead).length}个节点）</span>`)
+  logRender()
+}
+function logNodeRecover(){
+  const dead=logState.nodes.find(n=>n.dead)
+  if(!dead){lLog('<span class="rl-info">没有故障节点</span>');return}
+  dead.dead=false
+  const leader=logState.nodes.find(n=>n.role==='leader')
+  lLog(`<span class="rl-ok">[节点${dead.id}]</span> 恢复上线，向Leader请求缺失的日志`)
+  const leaderLogs=[...leader.logs]
+  dead.logs=leaderLogs
+  lLog(`<span class="rl-ok">[Leader]</span> 发送缺失的${leaderLogs.length}条日志，节点${dead.id}追上进度 ✅`)
+  logRender()
+}
+function logReset(){
+  logState={nodes:[
+    {id:0,role:'leader',logs:[],dead:false},
+    {id:1,role:'follower',logs:[],dead:false},
+    {id:2,role:'follower',logs:[],dead:false},
+    {id:3,role:'follower',logs:[],dead:false},
+    {id:4,role:'follower',logs:[],dead:false},
+  ],nextIdx:1}
+  document.getElementById('log-log').innerHTML='等待操作...'
+  logRender()
+}
+logRender()
+
+// ④ 脑裂
+const splitScenes={
+  before:`
+    <h3 style="color:#4ade80;margin-bottom:12px;">✅ 正常状态 — 5节点集群</h3>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+      <div class="raft-node node-leader" style="width:90px;">
+        <div class="node-icon">👑</div><div style="font-size:12px;color:#fbbf24;">Leader</div><div style="font-size:10px;color:#64748b;">节点0</div>
+      </div>
+      ${[1,2,3,4].map(i=>`<div class="raft-node node-follower" style="width:90px;"><div class="node-icon">👥</div><div style="font-size:12px;color:#4ade80;">Follower</div><div style="font-size:10px;color:#64748b;">节点${i}</div></div>`).join('')}
+    </div>
+    <p style="text-align:center;margin-top:12px;font-size:13px;color:#94a3b8;">Leader向所有Follower发心跳，集群正常运行</p>`,
+  split:`
+    <h3 style="color:#f87171;margin-bottom:12px;">💥 网络分区！集群分裂成两部分</h3>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:160px;background:#2a1a1a;border:2px solid #ef4444;border-radius:10px;padding:12px;">
+        <div style="color:#f87171;font-weight:700;margin-bottom:8px;">小分区（2节点）</div>
+        <div class="raft-node node-leader" style="width:80px;display:inline-block;margin:4px;"><div style="font-size:18px;">👑</div><div style="font-size:11px;color:#fbbf24;">旧Leader<br>节点0</div></div>
+        <div class="raft-node node-follower" style="width:80px;display:inline-block;margin:4px;"><div style="font-size:18px;">👥</div><div style="font-size:11px;color:#4ade80;">Follower<br>节点1</div></div>
+        <div style="margin-top:8px;font-size:11px;color:#94a3b8;">旧Leader继续发心跳，但写请求无法达到过半(2/5)确认 → <strong style="color:#fbbf24;">自动停止接受写</strong></div>
+      </div>
+      <div style="display:flex;align-items:center;font-size:24px;color:#ef4444;font-weight:700;">|<br>|<br>|</div>
+      <div style="flex:1;min-width:160px;background:#1a2f1a;border:2px solid #22c55e;border-radius:10px;padding:12px;">
+        <div style="color:#4ade80;font-weight:700;margin-bottom:8px;">大分区（3节点）</div>
+        ${[2,3,4].map((i,j)=>`<div class="raft-node ${j===0?'node-candidate':'node-follower'}" style="width:80px;display:inline-block;margin:4px;"><div style="font-size:18px;">${j===0?'✋':'👥'}</div><div style="font-size:11px;color:${j===0?'#818cf8':'#4ade80'}">${j===0?'发起选举':'Follower'}<br>节点${i}</div></div>`).join('')}
+        <div style="margin-top:8px;font-size:11px;color:#94a3b8;">节点2超时，发起选举 → 3/5 过半 → <strong style="color:#4ade80;">选出新Leader</strong>，正常服务</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;padding:8px;background:#2a1a1a;border-radius:6px;font-size:12px;color:#fbbf24;">⚠️ 此时有两个"Leader"，但旧Leader无法提交任何写入（无法过半）。没有脑裂！</div>`,
+  recover:`
+    <h3 style="color:#4ade80;margin-bottom:12px;">✅ 网络恢复 — 旧Leader自动降级</h3>
+    <p style="font-size:13px;margin-bottom:12px;">网络恢复后，旧Leader(节点0)收到新Leader(节点2)发来的心跳，发现 term 比自己高 → 立刻降为Follower。</p>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+      ${[1,0].map(i=>`<div class="raft-node node-follower" style="width:80px;"><div style="font-size:18px;">👥</div><div style="font-size:11px;color:#4ade80;">Follower<br>节点${i}</div></div>`).join('')}
+      <div class="raft-node node-leader" style="width:80px;">
+        <div style="font-size:18px;">👑</div><div style="font-size:11px;color:#fbbf24;">新Leader<br>节点2</div>
+      </div>
+      ${[3,4].map(i=>`<div class="raft-node node-follower" style="width:80px;"><div style="font-size:18px;">👥</div><div style="font-size:11px;color:#4ade80;">Follower<br>节点${i}</div></div>`).join('')}
+    </div>
+    <p style="margin-top:12px;font-size:13px;color:#94a3b8;">旧Leader同步新Leader的日志，回到一致状态。分区期间旧Leader写入的未提交日志被丢弃（因为从未达到过半，客户端早就收到超时错误了）。</p>`
+}
+function showSplit(k){
+  const el=document.getElementById('split-scene')
+  el.innerHTML=splitScenes[k]
+  el.classList.remove('ani');void el.offsetWidth;el.classList.add('ani')
+}
+showSplit('before')
+</script>
+</body>
+</html>

@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>进程 / 线程 / 协程 — 面试可视化</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.nav{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;background:#1a1d2e;border-bottom:1px solid #2d3148;position:sticky;top:0;z-index:100}
+.nav-btn{padding:7px 15px;border-radius:20px;border:1px solid #3d4166;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s}
+.nav-btn.active,.nav-btn:hover{background:#6366f1;color:#fff;border-color:#6366f1}
+.section{display:none;padding:28px 20px;max-width:980px;margin:0 auto}
+.section.active{display:block}
+h1{font-size:24px;font-weight:700;color:#a5b4fc;margin-bottom:6px}
+h2{font-size:18px;color:#818cf8;margin:24px 0 10px}
+.sub{color:#64748b;font-size:13px;margin-bottom:24px}
+p{line-height:1.8;color:#cbd5e1;margin-bottom:10px;font-size:14px}
+.card{background:#1e2235;border:1px solid #2d3148;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.hl{border-color:#6366f1;background:#1e1f3a}
+.tip{background:#1a2f1a;border-left:3px solid #4ade80;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-t{font-size:11px;font-weight:700;color:#4ade80;margin-bottom:5px;letter-spacing:.5px}
+.tip p{color:#86efac;font-size:13px;margin:0}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.tb{font-size:11px;color:#86efac;background:#14532d}.tr{font-size:11px;color:#fca5a5;background:#4c1d1d}.ty{font-size:11px;color:#fbbf24;background:#451a03}.tb2{font-size:11px;color:#93c5fd;background:#1e3a5f}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{background:#2d3148;color:#a5b4fc;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:8px 10px;border-bottom:1px solid #1a1d2e;color:#cbd5e1;vertical-align:top}
+tr:hover td{background:#1e2235}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.ani{animation:fadeIn .35s ease}
+/* ===进程状态机=== */
+.sm-wrap{position:relative;width:100%;height:340px;margin:20px 0}
+.state-node{position:absolute;width:96px;height:56px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px;font-weight:700;cursor:pointer;transition:all .25s;border:2px solid transparent;user-select:none}
+.state-node:hover,.state-node.lit{transform:scale(1.08);border-color:#fff}
+.state-node .sub-label{font-size:10px;font-weight:400;opacity:.7;margin-top:2px}
+.s-new{background:#1e3a5f;color:#93c5fd;left:20px;top:140px}
+.s-ready{background:#14532d;color:#4ade80;left:calc(50% - 48px);top:30px}
+.s-run{background:#451a03;color:#fbbf24;left:calc(50% - 48px);top:140px}
+.s-block{background:#3e1a1a;color:#f87171;right:20px;top:140px}
+.s-term{background:#2d2d2d;color:#94a3b8;left:calc(50% - 48px);top:260px}
+svg.arrows{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.sm-info{background:#131624;border:1px solid #2d3148;border-radius:10px;padding:16px;min-height:80px}
+/* ===三者对比=== */
+.compare-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0}
+@media(max-width:600px){.compare-grid{grid-template-columns:1fr}}
+.cg-card{border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:all .25s;border:2px solid transparent}
+.cg-proc{background:#1e3a5f;border-color:#3b82f6}.cg-thread{background:#1a3e1e;border-color:#22c55e}.cg-coro{background:#2a1a4a;border-color:#a855f7}
+.cg-card:hover{transform:translateY(-3px);filter:brightness(1.15)}
+.cg-title{font-size:18px;font-weight:700;margin-bottom:8px}
+.cg-proc .cg-title{color:#93c5fd}.cg-thread .cg-title{color:#4ade80}.cg-coro .cg-title{color:#d8b4fe}
+.cg-attr{font-size:12px;color:#94a3b8;margin:3px 0}
+.cg-detail{margin-top:12px;padding:14px;background:#131624;border-radius:8px;border:1px solid #2d3148;min-height:120px}
+/* ===IPC=== */
+.ipc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:12px 0}
+.ipc-card{border-radius:8px;padding:12px;cursor:pointer;transition:all .2s;border:1px solid #2d3148;background:#1e2235}
+.ipc-card:hover,.ipc-card.sel{background:#1e1f3a;border-color:#6366f1;transform:translateY(-2px)}
+.ipc-icon{font-size:22px;margin-bottom:6px}
+.ipc-name{font-size:13px;font-weight:700;color:#e2e8f0}
+.ipc-speed{font-size:11px;margin-top:4px}
+.ipc-detail{margin-top:14px;padding:16px;background:#131624;border-radius:10px;border:1px solid #2d3148;min-height:100px}
+/* ===上下文切换=== */
+.ctx-row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.ctx-box{flex:1;min-width:140px;border-radius:10px;padding:14px;text-align:center}
+.ctx-proc{background:#1e3a5f;border:1px solid #3b82f6}
+.ctx-thread{background:#1a3e1e;border:1px solid #22c55e}
+.ctx-coro{background:#2a1a4a;border:1px solid #a855f7}
+.ctx-time{font-size:28px;font-weight:700;margin:6px 0}
+.ctx-bar{height:10px;border-radius:5px;margin:6px 0}
+.ctx-label{font-size:11px;color:#94a3b8;line-height:1.5;text-align:left;margin-top:8px}
+.ctx-item{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px}
+.ctx-check{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+/* ===死锁=== */
+.dl-scene{display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-content:center;margin:16px 0}
+.dl-proc-box{width:100px;height:100px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px;font-weight:700;border:3px solid;transition:all .3s;cursor:pointer}
+.dl-res-box{width:80px;height:80px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;font-weight:600;border:2px dashed;transition:all .3s}
+.dl-legend{margin-top:8px;display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:#94a3b8}
+/* ===GMP (simplified)=== */
+.gmp-scene{margin:16px 0}
+.gmp-row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.gmp-m{background:#1e3a5f;border:1px solid #3b82f6;border-radius:8px;padding:10px;min-width:120px;text-align:center}
+.gmp-p{background:#2a1a4a;border:1px solid #a855f7;border-radius:8px;padding:10px;min-width:100px;text-align:center}
+.gmp-g{background:#14532d;border:1px solid #22c55e;border-radius:6px;padding:4px 8px;font-size:11px;margin:2px;display:inline-block;cursor:pointer;transition:all .2s}
+.gmp-g:hover{transform:scale(1.1);filter:brightness(1.2)}
+.gmp-g.running{background:#451a03;border-color:#fbbf24;color:#fbbf24}
+.gmp-g.syscall{background:#4c1d1d;border-color:#f87171;color:#fca5a5}
+.gmp-label{font-size:11px;color:#94a3b8;margin-bottom:4px}
+.gmp-title{font-size:13px;font-weight:700;margin-bottom:6px}
+.gmp-queue{display:flex;flex-wrap:wrap;gap:3px;min-height:30px}
+.gmp-log{background:#131624;border-radius:8px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;line-height:1.8;min-height:80px;max-height:160px;overflow-y:auto;margin-top:12px}
+.gmp-log .ok{color:#4ade80}.gmp-log .warn{color:#fbbf24}.gmp-log .info{color:#93c5fd}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;margin:4px}
+.btn-blue{background:#3b82f6;color:#fff}.btn-green{background:#22c55e;color:#fff}.btn-gray{background:#374151;color:#d1d5db}
+.btn:hover{opacity:.85;transform:translateY(-1px)}
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <button class="nav-btn active" onclick="show('state')">① 进程状态机</button>
+  <button class="nav-btn" onclick="show('compare')">② 进程vs线程vs协程</button>
+  <button class="nav-btn" onclick="show('ipc')">③ 进程间通信</button>
+  <button class="nav-btn" onclick="show('ctx')">④ 上下文切换</button>
+  <button class="nav-btn" onclick="show('deadlock')">⑤ 死锁</button>
+  <button class="nav-btn" onclick="show('gmp')">⑥ GMP 调度模型</button>
+</div>
+
+<!-- ① 进程状态机 -->
+<div id="s-state" class="section active">
+  <h1>① 进程状态机</h1>
+  <p class="sub">点击状态节点，看状态含义和转换条件</p>
+  <div class="sm-wrap" id="sm-wrap">
+    <div class="state-node s-new" id="n-new" onclick="smClick('new')">🆕 创建<div class="sub-label">New</div></div>
+    <div class="state-node s-ready" id="n-ready" onclick="smClick('ready')">⏳ 就绪<div class="sub-label">Ready</div></div>
+    <div class="state-node s-run" id="n-run" onclick="smClick('run')">▶️ 运行<div class="sub-label">Running</div></div>
+    <div class="state-node s-block" id="n-block" onclick="smClick('block')">🚫 阻塞<div class="sub-label">Blocked</div></div>
+    <div class="state-node s-term" id="n-term" onclick="smClick('term')">💀 终止<div class="sub-label">Terminated</div></div>
+    <svg class="arrows" id="sm-svg"></svg>
+  </div>
+  <div class="sm-info ani" id="sm-info">
+    <p style="color:#64748b;">👆 点击任意状态节点，查看详情</p>
+  </div>
+  <div class="tip" style="margin-top:16px">
+    <div class="tip-t">面试高频陷阱题</div>
+    <p>「阻塞是被强制暂停吗？」→ <strong>不是</strong>！阻塞是进程<strong>主动</strong>发起的等待行为（调用 read/sleep 等）。<br>
+    「运行→阻塞 vs 运行→就绪 有什么区别？」→ 前者是主动等IO，后者是时间片用完被调度器<strong>踢下去</strong>。</p>
+  </div>
+</div>
+
+<!-- ② 进程vs线程vs协程 -->
+<div id="s-compare" class="section">
+  <h1>② 进程 vs 线程 vs 协程</h1>
+  <p class="sub">核心在于：调度主体 + 资源隔离程度。点击各卡片展开对比</p>
+  <div class="compare-grid">
+    <div class="cg-card cg-proc" onclick="showCompare('proc')">
+      <div style="font-size:32px;">🏠</div>
+      <div class="cg-title">进程</div>
+      <div class="cg-attr">调度：操作系统内核</div>
+      <div class="cg-attr">地址空间：独立</div>
+      <div class="cg-attr">切换开销：<span style="color:#f87171;">大</span></div>
+      <div class="cg-attr">数量上限：几千</div>
+    </div>
+    <div class="cg-card cg-thread" onclick="showCompare('thread')">
+      <div style="font-size:32px;">🧵</div>
+      <div class="cg-title">线程</div>
+      <div class="cg-attr">调度：操作系统内核</div>
+      <div class="cg-attr">地址空间：共享进程</div>
+      <div class="cg-attr">切换开销：<span style="color:#fbbf24;">中</span></div>
+      <div class="cg-attr">数量上限：几万</div>
+    </div>
+    <div class="cg-card cg-coro" onclick="showCompare('coro')">
+      <div style="font-size:32px;">⚡</div>
+      <div class="cg-title">协程 / Goroutine</div>
+      <div class="cg-attr">调度：用户态 Runtime</div>
+      <div class="cg-attr">地址空间：共享进程</div>
+      <div class="cg-attr">切换开销：<span style="color:#4ade80;">极小</span></div>
+      <div class="cg-attr">数量上限：百万级</div>
+    </div>
+  </div>
+  <div class="cg-detail ani" id="cg-detail">
+    <p style="color:#64748b;">👆 点击任意卡片展开详情</p>
+  </div>
+  <h2>为什么需要线程？为什么需要协程？</h2>
+  <div class="card">
+    <p>
+      <strong style="color:#93c5fd;">进程</strong> 隔离性最好，崩了不影响别人，但"太重"——fork 要复制页表，切换要刷 TLB。<br>
+      <strong style="color:#4ade80;">线程</strong> 在进程内部，共享地址空间，切换不用换页表，所以更轻。但线程A崩了整个进程都崩。<br>
+      <strong style="color:#d8b4fe;">协程</strong> 把调度搬到用户态，切换只保存几个寄存器，完全不陷入内核，所以最轻。Go 的 goroutine 初始栈只有 2KB，动态扩容，百万级并发不是梦。
+    </p>
+  </div>
+</div>
+
+<!-- ③ IPC -->
+<div id="s-ipc" class="section">
+  <h1>③ 进程间通信（IPC）</h1>
+  <p class="sub">进程之间地址空间隔离，想共享数据需要通过内核。点击各方式查看原理</p>
+  <div class="ipc-grid">
+    <div class="ipc-card" onclick="showIPC('pipe')"><div class="ipc-icon">🔧</div><div class="ipc-name">管道 pipe</div><div class="ipc-speed"><span class="tag tb">中速</span></div></div>
+    <div class="ipc-card" onclick="showIPC('fifo')"><div class="ipc-icon">📋</div><div class="ipc-name">命名管道 FIFO</div><div class="ipc-speed"><span class="tag tb">中速</span></div></div>
+    <div class="ipc-card" onclick="showIPC('shm')"><div class="ipc-icon">⚡</div><div class="ipc-name">共享内存</div><div class="ipc-speed"><span class="tag tb">最快</span></div></div>
+    <div class="ipc-card" onclick="showIPC('mq')"><div class="ipc-icon">📬</div><div class="ipc-name">消息队列</div><div class="ipc-speed"><span class="tag ty">中速</span></div></div>
+    <div class="ipc-card" onclick="showIPC('sem')"><div class="ipc-icon">🚦</div><div class="ipc-name">信号量</div><div class="ipc-speed"><span class="tag ty">同步专用</span></div></div>
+    <div class="ipc-card" onclick="showIPC('signal')"><div class="ipc-icon">📢</div><div class="ipc-name">信号 signal</div><div class="ipc-speed"><span class="tag tr">仅通知</span></div></div>
+    <div class="ipc-card" onclick="showIPC('socket')"><div class="ipc-icon">🌐</div><div class="ipc-name">Socket</div><div class="ipc-speed"><span class="tag tb2">跨机器</span></div></div>
+  </div>
+  <div class="ipc-detail ani" id="ipc-detail">
+    <p style="color:#64748b;">👆 点击任意通信方式查看原理和使用场景</p>
+  </div>
+  <div class="tip">
+    <div class="tip-t">面试记忆口诀</div>
+    <p>速度排名：共享内存 > Socket(本地) > 管道 > 消息队列<br>
+    共享内存最快是因为零拷贝，数据不过内核，直接读写同一块物理内存。<br>
+    但共享内存必须配合信号量/互斥锁，否则有竞态条件。</p>
+  </div>
+</div>
+
+<!-- ④ 上下文切换 -->
+<div id="s-ctx" class="section">
+  <h1>④ 上下文切换开销对比</h1>
+  <p class="sub">进程切换几微秒，线程~1微秒，协程几十纳秒。核心差距来自 TLB 刷新</p>
+  <div class="ctx-row">
+    <div class="ctx-box ctx-proc">
+      <div style="font-size:13px;color:#93c5fd;font-weight:700;">进程切换</div>
+      <div class="ctx-time" style="color:#f87171;">~3μs</div>
+      <div class="ctx-bar" style="background:#ef4444;width:100%;"></div>
+      <div class="ctx-label">
+        <div class="ctx-item"><div class="ctx-check" style="background:#ef4444;"></div>保存/恢复通用寄存器 (~16个)</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#ef4444;"></div>切换页表基址 CR3</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#ef4444;"></div><strong>TLB 全部清空 ← 最贵！</strong></div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#ef4444;"></div>浮点/SIMD 寄存器</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#ef4444;"></div>内核栈切换</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#ef4444;"></div>陷入内核态</div>
+      </div>
+    </div>
+    <div class="ctx-box ctx-thread">
+      <div style="font-size:13px;color:#4ade80;font-weight:700;">线程切换</div>
+      <div class="ctx-time" style="color:#fbbf24;">~1μs</div>
+      <div class="ctx-bar" style="background:#22c55e;width:35%;"></div>
+      <div class="ctx-label">
+        <div class="ctx-item"><div class="ctx-check" style="background:#22c55e;"></div>保存/恢复通用寄存器</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#374151;"></div><span style="color:#4a5568;">不切换页表 (同进程)</span></div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#374151;"></div><span style="color:#4a5568;">TLB 不清空 ← 省了！</span></div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#22c55e;"></div>内核栈切换</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#22c55e;"></div>陷入内核态</div>
+      </div>
+    </div>
+    <div class="ctx-box ctx-coro">
+      <div style="font-size:13px;color:#d8b4fe;font-weight:700;">协程 / Goroutine</div>
+      <div class="ctx-time" style="color:#4ade80;">~200ns</div>
+      <div class="ctx-bar" style="background:#a855f7;width:8%;"></div>
+      <div class="ctx-label">
+        <div class="ctx-item"><div class="ctx-check" style="background:#a855f7;"></div>保存 SP/PC/DX 等 ~14个</div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#374151;"></div><span style="color:#4a5568;">不切换页表</span></div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#374151;"></div><span style="color:#4a5568;">不清空 TLB</span></div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#374151;"></div><span style="color:#4a5568;">不陷入内核！用户态完成</span></div>
+        <div class="ctx-item"><div class="ctx-check" style="background:#374151;"></div><span style="color:#4a5568;">只改 SP 指针切换栈</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card hl" style="margin-top:16px;">
+    <h2 style="margin-top:0;color:#fbbf24;">为什么 TLB 刷新这么贵？</h2>
+    <p>TLB（Translation Lookaside Buffer）是 CPU 芯片里的地址翻译缓存。<br>
+    进程A和进程B的虚拟地址是独立的，切换进程必须清空 TLB。<br>
+    清空后，新进程的每次内存访问都要慢慢查页表（~100ns），直到 TLB 重新"热起来"。<br>
+    一次 TLB miss = 走一趟内存 = ~100ns，而 TLB hit = ~1ns。<strong>差距100倍！</strong></p>
+  </div>
+</div>
+
+<!-- ⑤ 死锁 -->
+<div id="s-deadlock" class="section">
+  <h1>⑤ 死锁</h1>
+  <p class="sub">四个必要条件缺一不可，破坏任意一个就能避免死锁</p>
+  <div class="dl-scene">
+    <div style="text-align:center;">
+      <div id="dl-p1" class="dl-proc-box" style="background:#1e3a5f;border-color:#3b82f6;color:#93c5fd;" onclick="dlClick(0)">
+        🔵 进程A<div style="font-size:10px;margin-top:2px;">持有R1，等R2</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px;align-items:center;justify-content:center;">
+      <div id="dl-r1" class="dl-res-box" style="background:#1a2f1a;border-color:#22c55e;color:#4ade80;">🔒 资源R1<div style="font-size:10px;">被A持有</div></div>
+      <div id="dl-r2" class="dl-res-box" style="background:#3e1a1a;border-color:#ef4444;color:#fca5a5;">🔒 资源R2<div style="font-size:10px;">被B持有</div></div>
+    </div>
+    <div style="text-align:center;">
+      <div id="dl-p2" class="dl-proc-box" style="background:#2a1a4a;border-color:#a855f7;color:#d8b4fe;" onclick="dlClick(1)">
+        🟣 进程B<div style="font-size:10px;margin-top:2px;">持有R2，等R1</div>
+      </div>
+    </div>
+  </div>
+  <div style="text-align:center;font-size:22px;color:#ef4444;margin:4px 0;" id="dl-status">⚠️ 循环等待 → 死锁！</div>
+  <h2>四个必要条件</h2>
+  <table>
+    <tr><th>条件</th><th>含义</th><th>破坏方法</th></tr>
+    <tr>
+      <td><span class="tag tr">互斥</span></td>
+      <td>资源只能被一个进程占用</td>
+      <td>把资源设计为可共享（如只读文件）——但大多数互斥无法破坏</td>
+    </tr>
+    <tr>
+      <td><span class="tag ty">持有并等待</span></td>
+      <td>拿着已有资源，还在等新资源</td>
+      <td>一次性申请所有资源；Go里可以一个事务加所有锁</td>
+    </tr>
+    <tr>
+      <td><span class="tag tb2">不可抢占</span></td>
+      <td>已获得的资源不能被强制拿走</td>
+      <td>设置超时自动释放（Go的 context.WithTimeout）</td>
+    </tr>
+    <tr>
+      <td><span class="tag tr">循环等待</span></td>
+      <td>A等B，B等C，C等A……</td>
+      <td><strong>对资源编号，按序申请（最实用！）</strong></td>
+    </tr>
+  </table>
+  <div class="tip">
+    <div class="tip-t">Go 实战防死锁</div>
+    <p>
+      1. 多个 Mutex 要按固定顺序加锁（如按 ID 从小到大）<br>
+      2. 用 <code>context.WithTimeout</code> 给锁等待设超时<br>
+      3. Channel 死锁：双方都阻塞在收/发 → 加 buffer 或 select + default
+    </p>
+  </div>
+</div>
+
+<!-- ⑥ GMP -->
+<div id="s-gmp" class="section">
+  <h1>⑥ Go GMP 调度模型</h1>
+  <p class="sub">用户态的调度器——让百万 goroutine 跑在少数几个 OS 线程上</p>
+  <div class="card">
+    <p>
+      <strong style="color:#93c5fd;">M（Machine）</strong> = OS线程，内核调度，通常 = CPU核心数<br>
+      <strong style="color:#d8b4fe;">P（Processor）</strong> = 逻辑处理器，有本地G队列，GOMAXPROCS控制数量<br>
+      <strong style="color:#4ade80;">G（Goroutine）</strong> = 用户态协程，初始栈2KB，动态扩容
+    </p>
+  </div>
+  <div class="gmp-scene" id="gmp-scene">
+    <div class="gmp-row" id="gmp-row">
+      <!-- 动态生成 -->
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:flex-start;">
+      <div style="flex:1;min-width:160px;">
+        <div class="gmp-label">全局 G 队列</div>
+        <div style="background:#1e2235;border:1px dashed #3d4166;border-radius:8px;padding:8px;min-height:40px;">
+          <div class="gmp-queue" id="global-q"></div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:160px;">
+        <div class="gmp-label">网络 I/O 等待 (netpoll)</div>
+        <div style="background:#1e2235;border:1px dashed #3d4166;border-radius:8px;padding:8px;min-height:40px;">
+          <div class="gmp-queue" id="net-q"></div>
+        </div>
+      </div>
+    </div>
+    <div class="gmp-log" id="gmp-log">等待操作...</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;">
+    <button class="btn btn-green" onclick="gmpAddG()">+ 新建 G（模拟请求）</button>
+    <button class="btn btn-blue" onclick="gmpSyscall()">G 做系统调用（阻塞）</button>
+    <button class="btn btn-blue" onclick="gmpNetIO()">G 做网络 I/O</button>
+    <button class="btn btn-gray" onclick="gmpSteal()">触发 Work Stealing</button>
+    <button class="btn btn-gray" onclick="gmpReset()">↺ 重置</button>
+  </div>
+  <div class="tip">
+    <div class="tip-t">面试必答：为什么需要 P？</div>
+    <p>没有P的话，每个M都要去全局队列抢G → 全局锁竞争激烈。<br>
+    P的本地队列让大部分G调度不需要加锁。Work Stealing让负载自然均衡。<br>
+    G遇到syscall阻塞 → M与P解绑，P找新M继续跑其他G → M不会白白浪费在等IO上。</p>
+  </div>
+</div>
+
+<script>
+// ===导航===
+function show(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'))
+  document.getElementById('s-'+id).classList.add('active')
+  event.target.classList.add('active')
+  if(id==='state') drawArrows()
+}
+
+// ===进程状态机===
+const smData={
+  new:{title:'🆕 创建（New）',desc:'进程刚被创建，正在分配资源、初始化PCB（进程控制块）。<br><br>触发事件：fork()系统调用<br>下一步：资源分配完毕后 → 就绪',bg:'#1e3a5f'},
+  ready:{title:'⏳ 就绪（Ready）',desc:'进程已具备运行条件，等待CPU调度器选中。<br><br>可以同时有多个就绪进程（就绪队列）<br>转换方向：被调度选中 → 运行；从阻塞状态I/O完成 → 就绪',bg:'#14532d'},
+  run:{title:'▶️ 运行（Running）',desc:'进程正在CPU上执行指令。<br><br>⚠️ 同一时刻，一个CPU只能有一个进程处于Running状态<br>离开原因：①时间片用完 → 就绪  ②主动等待I/O → 阻塞  ③结束 → 终止',bg:'#451a03'},
+  block:{title:'🚫 阻塞（Blocked/Waiting）',desc:'进程<strong>主动</strong>发起等待，放弃CPU。<br><br>常见原因：等待磁盘I/O完成、等待网络数据、sleep()、等待锁<br>注意：<strong>不是被强制暂停，是进程自己主动发起的！</strong><br>I/O完成后 → 就绪队列（不是直接运行）',bg:'#3e1a1a'},
+  term:{title:'💀 终止（Terminated）',desc:'进程执行完毕或被kill，等待父进程回收资源。<br><br>如果父进程不调用wait()回收 → 变成<strong>僵尸进程</strong>（只占PID，危害是耗尽PID号）<br>父进程先退出 → 子进程变成<strong>孤儿进程</strong>，被init(PID 1)接管，无危害',bg:'#2d2d2d'}
+}
+function smClick(key){
+  const d=smData[key]
+  document.getElementById('sm-info').innerHTML=`<h3 style="color:#a5b4fc;margin-bottom:8px;">${d.title}</h3><p style="font-size:13px;color:#cbd5e1;line-height:1.7;">${d.desc}</p>`
+  document.getElementById('sm-info').classList.remove('ani');void document.getElementById('sm-info').offsetWidth;document.getElementById('sm-info').classList.add('ani')
+  document.querySelectorAll('.state-node').forEach(n=>n.classList.remove('lit'))
+  document.getElementById('n-'+key).classList.add('lit')
+}
+function drawArrows(){
+  const wrap=document.getElementById('sm-wrap')
+  const svg=document.getElementById('sm-svg')
+  const W=wrap.offsetWidth,H=wrap.offsetHeight
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`)
+  const nodes={new:[68,168],ready:[W/2,58],run:[W/2,168],block:[W-68,168],term:[W/2,288]}
+  const arrows=[
+    {from:'new',to:'ready',label:'分配资源'},
+    {from:'ready',to:'run',label:'调度器选中'},
+    {from:'run',to:'ready',label:'时间片到'},
+    {from:'run',to:'block',label:'等待I/O'},
+    {from:'block',to:'ready',label:'I/O完成'},
+    {from:'run',to:'term',label:'执行完毕'},
+  ]
+  let html=''
+  arrows.forEach(a=>{
+    const [x1,y1]=nodes[a.from],[x2,y2]=nodes[a.to]
+    const mx=(x1+x2)/2,my=(y1+y2)/2
+    html+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>`
+    html+=`<text x="${mx}" y="${my-4}" text-anchor="middle" fill="#64748b" font-size="10">${a.label}</text>`
+  })
+  svg.innerHTML=`<defs><marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#4a5568"/></marker></defs>${html}`
+}
+window.addEventListener('resize',()=>{if(document.getElementById('s-state').classList.contains('active'))drawArrows()})
+setTimeout(drawArrows,100)
+
+// ===进程vs线程vs协程===
+const cmpData={
+  proc:{title:'🏠 进程',color:'#93c5fd',html:`
+    <p><strong style="color:#93c5fd;">特点：</strong>独立地址空间，互不干扰，崩了不影响别人</p>
+    <p><strong>切换代价：</strong>需要切换页表(CR3寄存器) + 全刷TLB → 几微秒</p>
+    <p><strong>通信方式：</strong>只能通过IPC（管道/共享内存/Socket等）</p>
+    <p><strong>适合场景：</strong>相互隔离的独立服务（如Nginx的worker进程），一个worker崩了不影响其他worker</p>
+    <div style="margin-top:8px;padding:8px;background:#0f1a2e;border-radius:6px;font-size:12px;color:#94a3b8;">
+    fork()创建子进程用的是<strong style="color:#60a5fa;">写时复制(CoW)</strong>：并不立刻复制内存，只在子进程要写入时才复制那一页。
+    </div>`},
+  thread:{title:'🧵 线程',color:'#4ade80',html:`
+    <p><strong style="color:#4ade80;">特点：</strong>共享进程地址空间，一个线程崩了整个进程崩</p>
+    <p><strong>切换代价：</strong>不换页表，不刷TLB，只换栈和寄存器 → ~1微秒</p>
+    <p><strong>通信方式：</strong>直接读写共享内存（但要加锁！）</p>
+    <p><strong>适合场景：</strong>同一服务内的并发处理，如Java的Tomcat线程池</p>
+    <div style="margin-top:8px;padding:8px;background:#0f1a0f;border-radius:6px;font-size:12px;color:#94a3b8;">
+    Linux的线程本质是<strong style="color:#4ade80;">轻量级进程(LWP)</strong>，用clone()系统调用创建，共享地址空间和文件描述符。
+    </div>`},
+  coro:{title:'⚡ Goroutine（协程）',color:'#d8b4fe',html:`
+    <p><strong style="color:#d8b4fe;">特点：</strong>用户态调度，Go runtime 管理，不需要内核参与</p>
+    <p><strong>切换代价：</strong>只保存~14个寄存器，完全在用户态 → ~200纳秒（比线程快5倍）</p>
+    <p><strong>初始栈：</strong>只有 2KB（线程默认8MB！），按需动态扩容到GB级</p>
+    <p><strong>通信方式：</strong>channel（"用通信共享内存，而不是用共享内存通信"）</p>
+    <div style="margin-top:8px;padding:8px;background:#1a0f2e;border-radius:6px;font-size:12px;color:#94a3b8;">
+    Go能轻松开<strong style="color:#d8b4fe;">百万goroutine</strong>的三个原因：①初始栈只有2KB ②用户态切换不陷内核 ③GMP调度把G均分到M上
+    </div>`}
+}
+function showCompare(k){
+  const d=cmpData[k]
+  const el=document.getElementById('cg-detail')
+  el.innerHTML=`<h3 style="color:${d.color};margin-bottom:10px;">${d.title}</h3>${d.html}`
+  el.classList.remove('ani');void el.offsetWidth;el.classList.add('ani')
+}
+
+// ===IPC===
+const ipcData={
+  pipe:{icon:'🔧',name:'管道 pipe',html:`<strong>原理：</strong>内核维护的一个环形缓冲区（通常64KB）。<br><strong>限制：</strong>半双工（只能单向）、只能父子进程间使用、字节流（没有消息边界）<br><strong>使用：</strong><code>ps aux | grep nginx</code> 就是管道，ps的stdout → grep的stdin<br><strong>本质：</strong>写端写数据到内核缓冲，读端从内核缓冲读，数据经过内核，有2次拷贝`},
+  fifo:{icon:'📋',name:'命名管道 FIFO',html:`<strong>原理：</strong>在文件系统创建一个特殊的"管道文件"，任意进程都可以打开<br><strong>比pipe更灵活：</strong>不需要父子关系，任意两个进程通过文件名找到同一个FIFO<br><strong>限制：</strong>同样是半双工、字节流，还是要通过内核缓冲`},
+  shm:{icon:'⚡',name:'共享内存',html:`<strong style="color:#4ade80;">最快的IPC方式</strong> — 零拷贝！<br><br>原理：两个进程的页表都映射到同一块物理内存（mmap同一个文件或匿名映射）<br>读写就是直接访问内存，数据不需要经过内核<br><br><strong style="color:#f87171;">必须配合同步机制：</strong>信号量/互斥锁，否则会产生竞态条件<br><br>典型应用：Kafka消息存储（mmap磁盘文件），共享内存数据库（Redis AOF重写）`},
+  mq:{icon:'📬',name:'消息队列',html:`原理：内核维护的消息链表，消息有类型标记<br><br>比管道的优势：<br>① 有消息边界（不是字节流），可以按类型读取<br>② 不需要父子关系<br>③ 消息持久到内核，发送方不需要接收方在线<br><br>缺点：每条消息都要从用户态拷贝到内核，再从内核拷贝到接收方 → 2次拷贝`},
+  sem:{icon:'🚦',name:'信号量 semaphore',html:`<strong>不是用来传数据的</strong>，只做同步控制！<br><br>本质是内核维护的一个计数器：<br>- P操作（down）：计数-1，如果=0则阻塞<br>- V操作（up）：计数+1，唤醒等待的进程<br><br>典型用法：配合共享内存做互斥访问控制（相当于进程间的Mutex）<br>二值信号量(0/1) = 互斥锁，计数信号量 = 资源池控制`},
+  signal:{icon:'📢',name:'信号 signal',html:`<strong>只能通知事件，不能传数据</strong>（最多带一个int）<br><br>常见信号：<br>SIGKILL(9)：强制杀死，不可屏蔽<br>SIGTERM(15)：优雅退出请求，可以捕获处理<br>SIGINT：Ctrl+C<br>SIGCHLD：子进程状态变化通知<br><br>Go里用 <code>os/signal.Notify</code> 捕获信号做优雅退出（graceful shutdown）`},
+  socket:{icon:'🌐',name:'Socket',html:`<strong>最通用的IPC</strong>，支持本机进程间和跨机器通信<br><br>Unix Domain Socket（本地socket）：<br>- 比TCP socket快，不需要经过网络协议栈<br>- Nginx与PHP-FPM之间默认用Unix socket通信<br>- Docker与宿主机的通信用 /var/run/docker.sock<br><br>微服务之间的gRPC/HTTP通信本质就是TCP Socket`}
+}
+function showIPC(k){
+  const d=ipcData[k]
+  const el=document.getElementById('ipc-detail')
+  el.innerHTML=`<div style="font-size:20px;margin-bottom:8px;">${d.icon} <strong style="color:#a5b4fc;">${d.name}</strong></div><p style="font-size:13px;color:#cbd5e1;line-height:1.8;">${d.html}</p>`
+  el.classList.remove('ani');void el.offsetWidth;el.classList.add('ani')
+  document.querySelectorAll('.ipc-card').forEach(c=>c.classList.remove('sel'))
+  event.currentTarget.classList.add('sel')
+}
+
+// ===死锁===
+function dlClick(i){
+  const msgs=['进程A：我拿着R1，我要等R2，但R2被B拿着……死锁了😢','进程B：我拿着R2，我要等R1，但R1被A拿着……死锁了😢']
+  document.getElementById('dl-status').textContent=msgs[i]
+}
+
+// ===GMP===
+let gState={ps:[{gs:[],label:'P0'},{gs:[],label:'P1'}],ms:[{p:0,g:null},{p:1,g:null}],gid:1,globalQ:[],netQ:[]}
+function gmpLog(msg,cls=''){const el=document.getElementById('gmp-log');el.innerHTML+=`<div class="${cls}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+function gmpRender(){
+  const row=document.getElementById('gmp-row')
+  let h=''
+  gState.ms.forEach((m,i)=>{
+    const p=gState.ps[m.p]
+    const runG=m.g?`<div class="gmp-g running">G${m.g} ▶</div>`:''
+    const qGs=p.gs.map(g=>`<div class="gmp-g">G${g}</div>`).join('')
+    h+=`<div style="display:flex;gap:8px;align-items:flex-start;">
+      <div class="gmp-m"><div class="gmp-title" style="color:#93c5fd;">M${i}</div>${runG||'<div style="font-size:11px;color:#4a5568;">空闲</div>'}</div>
+      <div class="gmp-p"><div class="gmp-title" style="color:#d8b4fe;">P${i}</div><div class="gmp-label">本地队列</div><div class="gmp-queue">${qGs}</div></div>
+    </div>`
+  })
+  row.innerHTML=h
+  document.getElementById('global-q').innerHTML=gState.globalQ.map(g=>`<div class="gmp-g">G${g}</div>`).join('')
+  document.getElementById('net-q').innerHTML=gState.netQ.map(g=>`<div class="gmp-g syscall">G${g}</div>`).join('')
+}
+function gmpAddG(){
+  const id=gState.gid++
+  // 优先放P0本地队列
+  const p=gState.ps.find(p=>p.gs.length<4)||null
+  if(p){p.gs.push(id);gmpLog(`<span class="ok">[new]</span> G${id} 创建，放入 ${p.label} 本地队列`)}
+  else{gState.globalQ.push(id);gmpLog(`<span class="warn">[new]</span> G${id} 创建，本地队列满，放入全局队列`)}
+  // 如果M有空闲，立刻调度
+  gState.ms.forEach((m,i)=>{
+    if(!m.g){
+      const curP=gState.ps[m.p]
+      if(curP.gs.length>0){m.g=curP.gs.shift();gmpLog(`<span class="info">[schedule]</span> M${i} 从 ${curP.label} 取 G${m.g} 开始执行`)}
+    }
+  })
+  gmpRender()
+}
+function gmpSyscall(){
+  const m=gState.ms.find(m=>m.g)
+  if(!m){gmpLog('<span style="color:#f87171;">[syscall]</span> 没有正在运行的G');return}
+  const gid=m.g
+  gmpLog(`<span class="warn">[syscall]</span> G${gid} 进入系统调用（阻塞），M${gState.ms.indexOf(m)} 与 P${m.p} 解绑`)
+  gmpLog(`<span class="info">[schedule]</span> P${m.p} 找新的M继续跑队列里的G`)
+  m.g=null
+  const p=gState.ps[m.p]
+  if(p.gs.length>0){const newG=p.gs.shift();const newM=gState.ms.indexOf(m);gState.ms[newM].g=newG;gmpLog(`<span class="ok">[resume]</span> M${newM} 继续执行 G${newG}`)}
+  gmpRender()
+}
+function gmpNetIO(){
+  const m=gState.ms.find(m=>m.g)
+  if(!m){gmpLog('<span style="color:#f87171;">[netio]</span> 没有正在运行的G');return}
+  const gid=m.g
+  gmpLog(`<span class="info">[netio]</span> G${gid} 做网络I/O，注册到 netpoll(epoll)，goroutine 挂起`)
+  gmpLog(`<span class="ok">[schedule]</span> M${gState.ms.indexOf(m)} 继续跑队列里的其他G（不阻塞！）`)
+  gState.netQ.push(gid);m.g=null
+  const p=gState.ps[m.p]
+  if(p.gs.length>0){const newG=p.gs.shift();const mi=gState.ms.indexOf(m);gState.ms[mi].g=newG;gmpLog(`<span class="ok">[schedule]</span> G${newG} 被调度上M${mi}`)}
+  // 模拟netpoll返回
+  setTimeout(()=>{
+    const idx=gState.netQ.indexOf(gid)
+    if(idx>=0){gState.netQ.splice(idx,1);gState.ps[0].gs.push(gid);gmpLog(`<span class="ok">[netpoll]</span> epoll返回，G${gid} 网络数据就绪，重新放入P0队列`);gmpRender()}
+  },2000)
+  gmpRender()
+}
+function gmpSteal(){
+  const maxP=gState.ps.reduce((a,b)=>a.gs.length>b.gs.length?a:b)
+  const minP=gState.ps.reduce((a,b)=>a.gs.length<b.gs.length?a:b)
+  if(maxP===minP||maxP.gs.length-minP.gs.length<2){gmpLog('<span style="color:#64748b;">[steal]</span> 队列负载均衡，无需偷取');return}
+  const stolen=maxP.gs.splice(0,Math.floor(maxP.gs.length/2))
+  minP.gs.push(...stolen)
+  gmpLog(`<span class="warn">[steal]</span> Work Stealing: ${minP.label} 从 ${maxP.label} 偷取 G[${stolen.join(',')}]`)
+  gmpRender()
+}
+function gmpReset(){
+  gState={ps:[{gs:[],label:'P0'},{gs:[],label:'P1'}],ms:[{p:0,g:null},{p:1,g:null}],gid:1,globalQ:[],netQ:[]}
+  document.getElementById('gmp-log').innerHTML='等待操作...\n'
+  gmpRender()
+}
+gmpRender()
+</script>
+</body>
+</html>

@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Redis 底层原理 — 面试可视化</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.nav{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;background:#1a1d2e;border-bottom:1px solid #2d3148;position:sticky;top:0;z-index:100}
+.nav-btn{padding:7px 15px;border-radius:20px;border:1px solid #3d4166;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s}
+.nav-btn.active,.nav-btn:hover{background:#dc2626;color:#fff;border-color:#dc2626}
+.section{display:none;padding:28px 20px;max-width:980px;margin:0 auto}
+.section.active{display:block}
+h1{font-size:24px;font-weight:700;color:#fca5a5;margin-bottom:6px}
+h2{font-size:17px;color:#f87171;margin:22px 0 10px}
+.sub{color:#64748b;font-size:13px;margin-bottom:22px}
+p{line-height:1.8;color:#cbd5e1;margin-bottom:10px;font-size:14px}
+.card{background:#1e2235;border:1px solid #2d3148;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.hl{border-color:#dc2626;background:#1f1a1a}
+.tip{background:#2a1a1a;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-t{font-size:11px;font-weight:700;color:#ef4444;margin-bottom:5px;letter-spacing:.5px}
+.tip p{color:#fca5a5;font-size:13px;margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{background:#2d3148;color:#fca5a5;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:8px 10px;border-bottom:1px solid #1a1d2e;color:#cbd5e1;vertical-align:top}
+tr:hover td{background:#1e2235}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.tg{color:#86efac;background:#14532d}.tr{color:#fca5a5;background:#4c1d1d}.ty{color:#fbbf24;background:#451a03}.tb{color:#93c5fd;background:#1e3a5f}.tp{color:#d8b4fe;background:#2d1a4a}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;margin:4px}
+.btn-red{background:#dc2626;color:#fff}.btn-blue{background:#3b82f6;color:#fff}.btn-green{background:#22c55e;color:#fff}.btn-gray{background:#374151;color:#d1d5db}
+.btn:hover{opacity:.85;transform:translateY(-1px)}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.ani{animation:fadeIn .3s ease}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes slidein{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* 数据结构 */
+.ds-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin:12px 0}
+.ds-card{border-radius:10px;padding:14px;cursor:pointer;border:2px solid transparent;transition:all .25s;text-align:center}
+.ds-card:hover,.ds-card.sel{transform:translateY(-3px);border-color:#fff;filter:brightness(1.15)}
+.ds-detail{margin-top:12px;padding:16px;background:#131624;border-radius:10px;border:1px solid #2d3148;min-height:140px}
+
+/* 持久化 */
+.persist-compare{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}
+@media(max-width:580px){.persist-compare{grid-template-columns:1fr}}
+.persist-card{border-radius:10px;padding:16px;border:2px solid}
+.rdb-card{background:#1a2f1a;border-color:#22c55e}
+.aof-card{background:#1a2f4a;border-color:#3b82f6}
+.persist-step{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px;color:#cbd5e1}
+.persist-icon{flex-shrink:0;font-size:14px}
+.persist-bar{height:8px;border-radius:4px;margin:3px 0;transition:width .8s ease}
+.aof-log{background:#131624;border-radius:6px;padding:8px;font-family:'Courier New',monospace;font-size:11px;color:#93c5fd;line-height:1.8;margin:8px 0;max-height:100px;overflow-y:auto}
+
+/* 缓存三大问题 */
+.prob-tabs{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+.prob-tab{padding:8px 16px;border-radius:8px;border:1px solid #3d4166;background:#1e2235;cursor:pointer;font-size:13px;transition:all .2s}
+.prob-tab.sel{background:#dc2626;color:#fff;border-color:#dc2626}
+.prob-scene{background:#131624;border-radius:10px;padding:20px;min-height:220px;margin:12px 0;border:1px solid #2d3148}
+.req-flow{display:flex;align-items:center;gap:8px;margin:10px 0;flex-wrap:wrap}
+.req-box{border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;text-align:center;min-width:80px}
+.req-arrow{font-size:16px;color:#4a5568}
+.req-arrow.red{color:#ef4444;animation:pulse .8s infinite}
+.req-arrow.green{color:#22c55e}
+
+/* 主从复制 */
+.repl-scene{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0;justify-content:center}
+.redis-node{border-radius:12px;padding:16px;text-align:center;min-width:130px}
+.master-node{background:#2a1a1a;border:2px solid #ef4444}
+.slave-node{background:#1a2f1a;border:2px solid #22c55e}
+.node-title{font-size:12px;font-weight:700;margin-bottom:8px}
+.node-data{font-family:'Courier New',monospace;font-size:11px;color:#94a3b8;line-height:1.8}
+.repl-arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:20px;gap:4px}
+.repl-log{background:#131624;border-radius:8px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;line-height:1.9;min-height:100px;max-height:160px;overflow-y:auto;margin-top:12px}
+.repl-log .ok{color:#4ade80}.repl-log .info{color:#93c5fd}.repl-log .warn{color:#fbbf24}
+
+/* 单线程模型 */
+.single-thread-scene{display:flex;flex-direction:column;gap:12px;margin:16px 0}
+.st-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.st-box{border-radius:8px;padding:12px;font-size:12px;flex:1;min-width:100px}
+.st-arrow{font-size:18px;color:#4a5568;flex-shrink:0}
+.conn-queue{background:#1a2f4a;border:1px solid #3b82f6;border-radius:8px;padding:10px;min-height:60px}
+.conn-item{display:inline-block;padding:4px 8px;border-radius:5px;background:#1e3a5f;border:1px solid #3b82f6;font-size:11px;margin:2px;animation:slidein .2s ease}
+.event-loop{background:#2a1a1a;border:1px solid #ef4444;border-radius:8px;padding:12px;text-align:center}
+.cmd-executor{background:#14532d;border:1px solid #22c55e;border-radius:8px;padding:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="nav">
+  <button class="nav-btn active" onclick="show('ds')">① 数据结构</button>
+  <button class="nav-btn" onclick="show('persist')">② 持久化</button>
+  <button class="nav-btn" onclick="show('cache3')">③ 缓存三大问题</button>
+  <button class="nav-btn" onclick="show('repl')">④ 主从复制</button>
+  <button class="nav-btn" onclick="show('single')">⑤ 单线程模型</button>
+</div>
+
+<!-- ① 数据结构 -->
+<div id="s-ds" class="section active">
+  <h1>① Redis 核心数据结构</h1>
+  <p class="sub">5种基础类型 + 底层实现。点击查看底层细节和使用场景</p>
+  <div class="ds-grid">
+    <div class="ds-card" style="background:#2a1a1a;border-color:#ef4444;" onclick="showDS('string')">
+      <div style="font-size:26px;">📝</div>
+      <div style="font-weight:700;color:#fca5a5;">String</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">SDS</div>
+    </div>
+    <div class="ds-card" style="background:#1a2f4a;" onclick="showDS('hash')">
+      <div style="font-size:26px;">🗂️</div>
+      <div style="font-weight:700;color:#93c5fd;">Hash</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">ziplist/hashtable</div>
+    </div>
+    <div class="ds-card" style="background:#1a2f1a;" onclick="showDS('list')">
+      <div style="font-size:26px;">📋</div>
+      <div style="font-weight:700;color:#4ade80;">List</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">quicklist</div>
+    </div>
+    <div class="ds-card" style="background:#2d1a4a;" onclick="showDS('set')">
+      <div style="font-size:26px;">🔵</div>
+      <div style="font-weight:700;color:#d8b4fe;">Set</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">intset/hashtable</div>
+    </div>
+    <div class="ds-card" style="background:#451a03;" onclick="showDS('zset')">
+      <div style="font-size:26px;">🏆</div>
+      <div style="font-weight:700;color:#fbbf24;">ZSet</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">ziplist/skiplist</div>
+    </div>
+    <div class="ds-card" style="background:#1a3e3e;" onclick="showDS('bitmap')">
+      <div style="font-size:26px;">🔢</div>
+      <div style="font-weight:700;color:#2dd4bf;">Bitmap</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">基于String</div>
+    </div>
+  </div>
+  <div class="ds-detail ani" id="ds-detail">
+    <p style="color:#64748b;">👆 点击任意数据类型查看底层实现和使用场景</p>
+  </div>
+  <div class="tip" style="margin-top:12px;">
+    <div class="tip-t">底层切换规律</div>
+    <p>Redis 的数据结构会根据元素数量和大小自动切换底层实现：<br>
+    小数据量用紧凑结构（ziplist/intset），省内存；元素多了自动升级到哈希表/跳表，保证性能。</p>
+  </div>
+</div>
+
+<!-- ② 持久化 -->
+<div id="s-persist" class="section">
+  <h1>② RDB vs AOF 持久化</h1>
+  <p class="sub">两种持久化各有优缺点，生产推荐混合使用</p>
+
+  <div class="persist-compare">
+    <div class="persist-card rdb-card">
+      <h2 style="margin-top:0;color:#4ade80;">📸 RDB — 快照</h2>
+      <div class="persist-step"><span class="persist-icon">⏰</span>定时触发（bgsave / 满足条件自动触发）</div>
+      <div class="persist-step"><span class="persist-icon">🍴</span>fork子进程生成快照（CoW，不阻塞主进程）</div>
+      <div class="persist-step"><span class="persist-icon">💾</span>生成 dump.rdb 二进制文件</div>
+      <div class="persist-step"><span class="persist-icon">🚀</span>恢复：直接加载二进制，快！</div>
+      <div style="margin-top:10px;">
+        <span class="tag tg">文件小（压缩）</span>
+        <span class="tag tg">恢复快</span>
+        <span class="tag tr">最多丢分钟级数据</span>
+        <span class="tag ty">fork时有短暂停顿</span>
+      </div>
+    </div>
+    <div class="persist-card aof-card">
+      <h2 style="margin-top:0;color:#93c5fd;">📝 AOF — 日志</h2>
+      <div class="persist-step"><span class="persist-icon">✍️</span>每条写命令执行后追加到文件</div>
+      <div class="persist-step"><span class="persist-icon">💽</span>刷盘策略：always/everysec/no</div>
+      <div class="persist-step"><span class="persist-icon">♻️</span>BGREWRITEAOF 定期重写压缩文件</div>
+      <div class="persist-step"><span class="persist-icon">🔄</span>恢复：重放所有命令，慢</div>
+      <div style="margin-top:10px;">
+        <span class="tag tg">最多丢1秒数据</span>
+        <span class="tag tb">可读性好</span>
+        <span class="tag tr">文件大</span>
+        <span class="tag ty">恢复慢</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+    <button class="btn btn-green" onclick="playRDB()">▶ 演示 RDB bgsave</button>
+    <button class="btn btn-blue" onclick="playAOF()">▶ 演示 AOF 写入</button>
+    <button class="btn btn-gray" onclick="resetPersist()">↺ 重置</button>
+  </div>
+
+  <div id="persist-anim" class="card" style="min-height:100px;">
+    <p style="color:#64748b;">点击演示按钮查看过程</p>
+  </div>
+
+  <div class="card hl" style="margin-top:12px;">
+    <h2 style="margin-top:0;color:#fbbf24;">混合持久化（Redis 4.0+，推荐）</h2>
+    <p>AOF重写时，文件开头写入RDB内容（快照），后面追加增量的AOF命令。<br>
+    恢复时：先加载RDB部分（快），再重放AOF增量（少），两全其美！</p>
+    <div style="font-family:'Courier New',monospace;font-size:12px;background:#131624;padding:12px;border-radius:8px;color:#94a3b8;">
+      <div style="color:#4ade80;">[RDB二进制内容] ← 快照，快速恢复到某个时间点</div>
+      <div style="color:#93c5fd;">SET key1 val1     ← 快照之后的增量AOF命令</div>
+      <div style="color:#93c5fd;">INCR counter       </div>
+      <div style="color:#93c5fd;">HSET order status paid</div>
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:#94a3b8;">配置：<code style="color:#a5b4fc;">aof-use-rdb-preamble yes</code></div>
+  </div>
+
+  <table>
+    <tr><th>刷盘策略（AOF）</th><th>丢数据风险</th><th>性能</th><th>推荐场景</th></tr>
+    <tr><td>always（每次写都刷）</td><td><span class="tag tg">几乎不丢</span></td><td><span class="tag tr">最慢</span></td><td>极重要数据，极少用</td></tr>
+    <tr><td><strong>everysec（每秒刷）</strong></td><td><span class="tag ty">最多丢1秒</span></td><td><span class="tag tg">好</span></td><td><strong>推荐，平衡安全和性能</strong></td></tr>
+    <tr><td>no（交给OS）</td><td><span class="tag tr">可能丢数秒</span></td><td><span class="tag tg">最快</span></td><td>不关心数据安全</td></tr>
+  </table>
+</div>
+
+<!-- ③ 缓存三大问题 -->
+<div id="s-cache3" class="section">
+  <h1>③ 缓存三大问题</h1>
+  <p class="sub">穿透 / 击穿 / 雪崩 — 面试必考，一定要能区分并说出解决方案</p>
+
+  <div class="prob-tabs">
+    <div class="prob-tab sel" onclick="showProb('penetration',this)">🔍 缓存穿透</div>
+    <div class="prob-tab" onclick="showProb('breakdown',this)">💥 缓存击穿</div>
+    <div class="prob-tab" onclick="showProb('avalanche',this)">❄️ 缓存雪崩</div>
+  </div>
+
+  <div class="prob-scene" id="prob-scene">
+    <!-- 穿透默认显示 -->
+  </div>
+
+  <div class="tip">
+    <div class="tip-t">三者区别一句话</div>
+    <p>
+      <strong>穿透</strong> = 查询不存在的key → 每次都打DB（恶意攻击）<br>
+      <strong>击穿</strong> = 一个热点key过期 → 瞬间大量请求打DB（突然热点）<br>
+      <strong>雪崩</strong> = 大量key同时过期 / Redis宕机 → DB被全打崩（规模更大）
+    </p>
+  </div>
+</div>
+
+<!-- ④ 主从复制 -->
+<div id="s-repl" class="section">
+  <h1>④ 主从复制流程</h1>
+  <p class="sub">从库第一次连接主库时做全量同步，之后做增量同步</p>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    <button class="btn btn-red" onclick="replFull()">▶ 全量同步（首次连接）</button>
+    <button class="btn btn-blue" onclick="replIncr()">▶ 增量同步（正常运行）</button>
+    <button class="btn btn-green" onclick="replReconn()">▶ 断线重连</button>
+    <button class="btn btn-gray" onclick="replReset()">↺ 重置</button>
+  </div>
+
+  <div class="repl-scene">
+    <div class="redis-node master-node">
+      <div class="node-title" style="color:#f87171;">👑 Master（主库）</div>
+      <div class="node-data" id="master-data">key1: 100<br>key2: hello<br>key3: [1,2,3]</div>
+      <div style="margin-top:8px;font-size:11px;color:#64748b;" id="master-status">状态: 正常运行</div>
+    </div>
+    <div class="repl-arrow" id="repl-arrow">
+      <div style="font-size:12px;color:#4a5568;text-align:center;">等待</div>
+      <div style="font-size:24px;color:#4a5568;">→</div>
+    </div>
+    <div class="redis-node slave-node">
+      <div class="node-title" style="color:#4ade80;">📡 Slave（从库）</div>
+      <div class="node-data" id="slave-data" style="color:#4a5568;">空</div>
+      <div style="margin-top:8px;font-size:11px;color:#64748b;" id="slave-status">状态: 等待同步</div>
+    </div>
+  </div>
+
+  <div class="repl-log" id="repl-log">等待操作...</div>
+
+  <h2>哨兵模式 vs Cluster 集群</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+    <div class="card">
+      <div style="font-size:14px;font-weight:700;color:#fbbf24;margin-bottom:8px;">🛡️ 哨兵（Sentinel）</div>
+      <p style="font-size:12px;">3个哨兵节点 + 1主N从。哨兵监控主库，主库故障自动选新主（raft投票），通知客户端新地址。<br><strong>适合：</strong>数据量不大但需要高可用。不解决数据分片问题。</p>
+    </div>
+    <div class="card">
+      <div style="font-size:14px;font-weight:700;color:#a5b4fc;margin-bottom:8px;">🌐 Cluster 集群</div>
+      <p style="font-size:12px;">16384个哈希槽分配给N个主节点，key通过CRC16取模找槽。每个主节点有若干从节点。<br><strong>适合：</strong>数据量大需要水平扩容，同时具备高可用。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ⑤ 单线程模型 -->
+<div id="s-single" class="section">
+  <h1>⑤ Redis 单线程模型</h1>
+  <p class="sub">为什么单线程还这么快？关键在 epoll + 内存操作</p>
+
+  <div class="card hl" style="margin-bottom:16px;">
+    <p>Redis 6.0 之前：<strong>完全单线程</strong>（网络IO + 命令执行全是单线程）<br>
+    Redis 6.0 之后：<strong>网络IO多线程 + 命令执行单线程</strong>（多线程只用来读写网络数据，命令执行还是串行）</p>
+  </div>
+
+  <div class="single-thread-scene">
+    <div class="st-row">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;flex:2;" id="conn-pool">
+        <div style="font-size:12px;color:#94a3b8;width:100%;margin-bottom:4px;">客户端连接（epoll监听所有fd）</div>
+      </div>
+      <div class="st-arrow">→</div>
+      <div class="st-box event-loop" style="flex:1.2;">
+        <div style="font-size:12px;font-weight:700;color:#f87171;">📡 I/O多路复用</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">epoll_wait 等待就绪fd</div>
+        <div style="font-size:11px;color:#fbbf24;margin-top:4px;" id="epoll-status">等待事件...</div>
+      </div>
+      <div class="st-arrow">→</div>
+      <div class="st-box" style="background:#1e2235;border:1px solid #2d3148;flex:1;">
+        <div style="font-size:12px;font-weight:700;color:#a5b4fc;">📬 事件队列</div>
+        <div id="event-queue" style="margin-top:6px;min-height:30px;"></div>
+      </div>
+      <div class="st-arrow">→</div>
+      <div class="st-box cmd-executor" style="flex:1.2;">
+        <div style="font-size:12px;font-weight:700;color:#4ade80;">⚡ 命令执行（单线程）</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">纯内存操作，微秒级</div>
+        <div style="font-size:11px;color:#4ade80;margin-top:4px;" id="exec-status">就绪</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+    <button class="btn btn-red" onclick="stAddConn()">+ 模拟客户端连接</button>
+    <button class="btn btn-blue" onclick="stSendCmd()">发送命令</button>
+    <button class="btn btn-gray" onclick="stReset()">↺ 重置</button>
+  </div>
+
+  <div id="st-log" class="repl-log">等待操作...</div>
+
+  <h2>单线程为什么快？</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:8px;">
+    <div class="card" style="text-align:center;">
+      <div style="font-size:22px;margin-bottom:6px;">⚡</div>
+      <div style="font-weight:700;font-size:13px;color:#fca5a5;">纯内存访问</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">内存读写 ~100ns，磁盘随机IO ~10ms，差10万倍</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:22px;margin-bottom:6px;">🚫</div>
+      <div style="font-weight:700;font-size:13px;color:#fca5a5;">无锁竞争</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">单线程不需要加锁，省去锁竞争、上下文切换开销</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:22px;margin-bottom:6px;">📡</div>
+      <div style="font-weight:700;font-size:13px;color:#fca5a5;">epoll IO复用</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">一个线程处理万级连接，不需要线程池</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:22px;margin-bottom:6px;">🏎️</div>
+      <div style="font-weight:700;font-size:13px;color:#fca5a5;">高效数据结构</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">SDS、跳表、压缩列表专门优化，O(1)~O(logN)</div>
+    </div>
+  </div>
+
+  <div class="tip">
+    <div class="tip-t">单线程的缺点</div>
+    <p>慢命令会阻塞所有其他命令！比如 KEYS *（全量扫描）、大key的DEL、SORT复杂排序。<br>
+    线上 <strong>禁止用 KEYS *</strong>，改用 SCAN 游标分批扫描。大key删除用 UNLINK（异步删除）。</p>
+  </div>
+</div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'))
+  document.getElementById('s-'+id).classList.add('active')
+  event.target.classList.add('active')
+  if(id==='cache3')showProb('penetration',document.querySelector('.prob-tab'))
+}
+
+// ① 数据结构
+const dsData={
+  string:{title:'📝 String — SDS（简单动态字符串）',color:'#fca5a5',bg:'#2a1a1a',html:`
+    <p>底层是 <strong>SDS（Simple Dynamic String）</strong>，不是C字符串。</p>
+    <div style="background:#0f1117;border-radius:8px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;margin:8px 0;">
+      struct SDS {<br>
+      &nbsp;&nbsp;int len;     // 已用长度（O(1)获取长度）<br>
+      &nbsp;&nbsp;int free;    // 剩余空间（预分配，避免频繁realloc）<br>
+      &nbsp;&nbsp;char buf[];  // 数据（可存二进制，不依赖\\0结尾）<br>
+      }
+    </div>
+    <p><strong>为什么不用C字符串？</strong>C字符串获取长度O(n)，二进制不安全，修改需重新分配内存。SDS全部解决了。</p>
+    <p><strong>支付场景：</strong>余额缓存 <code>SET user:1:balance 1000</code>，分布式锁 value，token存储。</p>
+    <p><strong>计数器：</strong><code>INCR / DECR</code> 原子操作，底层是整数类型（REDIS_ENCODING_INT），速度极快。</p>`},
+  hash:{title:'🗂️ Hash — ziplist / hashtable',color:'#93c5fd',bg:'#1a2f4a',html:`
+    <p>小数据量用 <strong>ziplist（压缩列表）</strong>，节省内存；超过阈值升级为 <strong>hashtable</strong>。</p>
+    <p>升级条件：字段数 > 128 或 任一字段值 > 64字节。</p>
+    <p><strong>hashtable 渐进式 rehash：</strong>扩容时不一次性迁移，而是同时维护两张表（ht[0]旧，ht[1]新），每次操作迁移一部分，避免长时间阻塞。</p>
+    <p><strong>支付场景：</strong><code>HSET order:123 status paid amount 100 user_id 456</code><br>
+    不用序列化整个对象，单独更新字段，比String存JSON高效。</p>`},
+  list:{title:'📋 List — quicklist（快速链表）',color:'#4ade80',bg:'#1a2f1a',html:`
+    <p>底层是 <strong>quicklist</strong> = 双向链表 + 每个节点是一个ziplist（压缩列表）。</p>
+    <p>两端都是O(1)：LPUSH/RPUSH/LPOP/RPOP都很快。中间查找O(n)。</p>
+    <p><strong>作为队列：</strong>LPUSH生产 + RPOP消费，或者用 BLPOP（阻塞消费，有数据才返回，不用轮询）。</p>
+    <p><strong>支付场景：</strong>回调失败重试队列 <code>LPUSH retry:queue {orderId: xxx}</code>，消费者 BRPOP 阻塞消费。<br>
+    注意：List做消息队列没有ACK机制，消费失败会丢消息，重要场景建议用 Stream 或专业MQ。</p>`},
+  set:{title:'🔵 Set — intset / hashtable',color:'#d8b4fe',bg:'#2d1a4a',html:`
+    <p>元素全是整数且数量小(<128) → <strong>intset（整数集合）</strong>；否则 → <strong>hashtable</strong>。</p>
+    <p>支持集合运算：SUNION（并集）、SINTER（交集）、SDIFF（差集）。</p>
+    <p><strong>去重：</strong>SADD 同一个元素多次只保留一个，天然去重。</p>
+    <p><strong>支付场景：</strong></p>
+    <p>• 去重：<code>SADD paid:orders 123</code>，SADD相同orderId只会添加一次，防重复处理<br>
+    • 抽奖：<code>SRANDMEMBER winners 10</code> 随机取N个不重复的中奖用户<br>
+    • 统计：今日支付用户ID集合，SCARD 获取总数</p>`},
+  zset:{title:'🏆 ZSet — ziplist / skiplist + hashtable',color:'#fbbf24',bg:'#451a03',html:`
+    <p>小数据量用 <strong>ziplist</strong>，超过阈值用 <strong>跳表（skiplist）+ 哈希表</strong>。</p>
+    <p>跳表：多层有序链表，查找O(logN)。哈希表：O(1)查找score。两者结合既有序又快。</p>
+    <div style="background:#0f1117;border-radius:6px;padding:8px;font-size:11px;color:#94a3b8;font-family:'Courier New',monospace;margin:8px 0;">
+      Level4: 1 ----→ 10 --------→ 50<br>
+      Level3: 1 → 3 → 10 → 20 → 50<br>
+      Level2: 1 → 2 → 3 → 5 → 10 → 15 → 20 → 50<br>
+      Level1: 1 → 2 → 3 → 4 → 5 → ... → 50  (底层完整链表)
+    </div>
+    <p><strong>支付场景（最常用！）：</strong></p>
+    <p>• 延迟队列：<code>ZADD delay:queue {timestamp} {orderId}</code>，定时 ZRANGEBYSCORE 扫超时订单<br>
+    • 排行榜：<code>ZADD rank:merchant score merchantId</code>，ZREVRANGE 取TOP N<br>
+    • 限流：滑动窗口限流，用时间戳作score</p>`},
+  bitmap:{title:'🔢 Bitmap — 基于String实现',color:'#2dd4bf',bg:'#1a3e3e',html:`
+    <p>本质是String，但把每个bit当做一个布尔值使用。1亿个bit只需要约12MB。</p>
+    <p>SETBIT key offset 0/1：设置某位<br>GETBIT key offset：获取某位<br>BITCOUNT key：统计值为1的bit数量</p>
+    <p><strong>支付场景：</strong></p>
+    <p>• 用户签到：<code>SETBIT sign:userId 天数 1</code>，一年的签到记录只需要46字节<br>
+    • 日活统计：<code>SETBIT dau:20240101 userId 1</code>，BITCOUNT 得到当天活跃用户数<br>
+    • 布隆过滤器：多个bitmap按不同hash函数实现，防缓存穿透</p>`}
+}
+function showDS(k){
+  const d=dsData[k]
+  const el=document.getElementById('ds-detail')
+  el.innerHTML=`<h3 style="color:${d.color};margin-bottom:10px;">${d.title}</h3>${d.html}`
+  el.classList.remove('ani');void el.offsetWidth;el.classList.add('ani')
+  document.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('sel'))
+  event.currentTarget.classList.add('sel')
+}
+
+// ② 持久化
+let persistTimer=null
+function playRDB(){
+  clearInterval(persistTimer)
+  const el=document.getElementById('persist-anim')
+  const steps=[
+    {t:'BGSAVE触发',d:'主进程fork出子进程（Copy-on-Write）。fork期间会短暂停顿，大内存实例fork可能卡几百ms！',c:'#22c55e'},
+    {t:'子进程生成快照',d:'子进程遍历内存数据，写入临时文件temp.rdb。主进程继续处理请求，修改的页通过CoW复制。',c:'#4ade80'},
+    {t:'快照写完，原子替换',d:'子进程完成，temp.rdb 重命名为 dump.rdb，原子替换旧文件。',c:'#4ade80'},
+    {t:'完成！',d:'dump.rdb 就是此刻的内存快照。重启时加载它，快速恢复到这个时间点。',c:'#86efac'},
+  ]
+  let i=0
+  el.innerHTML=`<h3 style="color:#4ade80;margin-bottom:10px;">📸 RDB bgsave 流程</h3>`
+  persistTimer=setInterval(()=>{
+    if(i>=steps.length){clearInterval(persistTimer);return}
+    const s=steps[i]
+    el.innerHTML+=`<div style="display:flex;gap:10px;align-items:flex-start;padding:8px;background:#14532d22;border-radius:6px;margin-bottom:6px;animation:fadeIn .3s ease;">
+      <span style="color:${s.c};font-weight:700;flex-shrink:0;">步骤${i+1}</span>
+      <div><div style="color:${s.c};font-weight:600;font-size:13px;">${s.t}</div><div style="font-size:12px;color:#94a3b8;margin-top:3px;">${s.d}</div></div>
+    </div>`
+    i++
+  },800)
+}
+function playAOF(){
+  clearInterval(persistTimer)
+  const el=document.getElementById('persist-anim')
+  el.innerHTML=`<h3 style="color:#93c5fd;margin-bottom:10px;">📝 AOF 写入与重写</h3>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">模拟执行命令，观察AOF文件内容：</div>
+    <div class="aof-log" id="aof-content"></div>
+    <div id="aof-size" style="font-size:12px;color:#64748b;margin-top:6px;"></div>`
+  const cmds=['SET balance 1000','INCR counter','SET balance 900','SET balance 800','HSET order:1 status paid','SET balance 700','SET balance 600','SET balance 500']
+  let i=0,aofContent=''
+  persistTimer=setInterval(()=>{
+    if(i>=cmds.length){
+      clearInterval(persistTimer)
+      document.getElementById('aof-size').innerHTML='文件增大，触发BGREWRITEAOF重写...<br>重写后：<span style="color:#4ade80;">SET balance 500</span> (只保留最终状态，中间的balance变化全删了！)'
+      return
+    }
+    aofContent+=`*3\r\n$3\r\nSET\r\n... (${cmds[i]})\n`
+    document.getElementById('aof-content').textContent=aofContent
+    document.getElementById('aof-content').scrollTop=9999
+    document.getElementById('aof-size').innerHTML=`AOF文件：${(aofContent.length*2/1024).toFixed(1)} KB | 执行了 ${i+1} 条命令`
+    i++
+  },600)
+}
+function resetPersist(){
+  clearInterval(persistTimer)
+  document.getElementById('persist-anim').innerHTML='<p style="color:#64748b;">点击演示按钮查看过程</p>'
+}
+
+// ③ 缓存三大问题
+const probData={
+  penetration:{
+    title:'🔍 缓存穿透 — 查询不存在的数据',
+    scene:`
+    <p style="margin-bottom:12px;font-size:13px;">攻击者用大量不存在的 orderId 查询 → 缓存miss → 全部打到数据库</p>
+    <div class="req-flow">
+      <div class="req-box" style="background:#3e1a1a;border:1px solid #ef4444;color:#fca5a5;">😈 恶意请求<br>id=-1</div>
+      <span class="req-arrow">→</span>
+      <div class="req-box" style="background:#2d1a1a;border:1px solid #7f1d1d;color:#f87171;">Redis<br>❌ miss</div>
+      <span class="req-arrow red">→→→</span>
+      <div class="req-box" style="background:#4c1d1d;border:2px solid #ef4444;color:#fca5a5;">MySQL<br>😰 压力爆炸</div>
+    </div>
+    <h2>解决方案：</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+      <div style="background:#1a2f1a;border-radius:8px;padding:12px;border:1px solid #22c55e;">
+        <div style="color:#4ade80;font-weight:700;font-size:13px;margin-bottom:6px;">✅ 方案1：缓存空值</div>
+        <div style="font-size:12px;color:#94a3b8;">查DB不存在也缓存 null，设置短TTL（5分钟）。<br>优点：简单。缺点：占内存，攻击者每次用新ID还是会穿透。</div>
+      </div>
+      <div style="background:#1a2f4a;border-radius:8px;padding:12px;border:1px solid #3b82f6;">
+        <div style="color:#93c5fd;font-weight:700;font-size:13px;margin-bottom:6px;">✅ 方案2：布隆过滤器</div>
+        <div style="font-size:12px;color:#94a3b8;">所有合法ID存入布隆过滤器。请求先查布隆过滤器，说不存在直接返回404，不查缓存和DB。<br>缺点：有少量误判，删除困难。</div>
+      </div>
+    </div>`,
+  },
+  breakdown:{
+    title:'💥 缓存击穿 — 热点key突然过期',
+    scene:`
+    <p style="margin-bottom:12px;font-size:13px;">某个超热点key（比如热门商品）缓存刚好过期，瞬间大量并发全部打到DB</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <div class="req-box" style="background:#1a2f4a;border:1px solid #3b82f6;color:#93c5fd;font-size:11px;">1000并发<br>请求</div>
+      <span class="req-arrow">→</span>
+      <div class="req-box" style="background:#3e1a1a;border:2px solid #ef4444;color:#fca5a5;">Redis<br>❌ 过期了！</div>
+      <span class="req-arrow red">→→→</span>
+      <div class="req-box" style="background:#4c1d1d;border:2px solid #ef4444;color:#fca5a5;">MySQL<br>😱 1000个<br>查询同时来</div>
+    </div>
+    <h2>解决方案：</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+      <div style="background:#14532d;border-radius:8px;padding:12px;border:1px solid #22c55e;">
+        <div style="color:#4ade80;font-weight:700;font-size:13px;margin-bottom:6px;">✅ 方案1：互斥锁</div>
+        <div style="font-size:12px;color:#94a3b8;">缓存miss后加分布式锁，只让一个请求查DB，其他等待。查完回写缓存，后续命中缓存。<br>但有等待延迟，需注意锁超时。</div>
+      </div>
+      <div style="background:#451a03;border-radius:8px;padding:12px;border:1px solid #f59e0b;">
+        <div style="color:#fbbf24;font-weight:700;font-size:13px;margin-bottom:6px;">✅ 方案2：永不过期</div>
+        <div style="font-size:12px;color:#94a3b8;">热点key不设TTL，后台异步线程定时刷新。对一致性要求不高的场景适用（如排行榜）。</div>
+      </div>
+    </div>`,
+  },
+  avalanche:{
+    title:'❄️ 缓存雪崩 — 大面积缓存失效',
+    scene:`
+    <p style="margin-bottom:12px;font-size:13px;">大量key同一时间过期，或Redis整体宕机，所有请求涌向DB，DB扛不住崩溃</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <div class="req-box" style="background:#1a2f4a;border:1px solid #3b82f6;color:#93c5fd;font-size:11px;">大量请求</div>
+      <span class="req-arrow">→</span>
+      <div class="req-box" style="background:#3e1a1a;border:2px solid #ef4444;color:#fca5a5;">Redis<br>💥 大量过期<br>或宕机</div>
+      <span class="req-arrow red">→→→</span>
+      <div class="req-box" style="background:#4c1d1d;border:2px solid #ef4444;color:#fca5a5;">MySQL<br>☠️ 崩了</div>
+    </div>
+    <h2>解决方案（需多管齐下）：</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+      <div style="background:#1a2f1a;border-radius:8px;padding:10px;border:1px solid #22c55e;">
+        <div style="color:#4ade80;font-weight:700;font-size:12px;margin-bottom:4px;">✅ 过期时间加随机值</div>
+        <div style="font-size:11px;color:#94a3b8;">TTL = 基础时间 + random(0, 5分钟)，让不同key在不同时间失效</div>
+      </div>
+      <div style="background:#1a2f4a;border-radius:8px;padding:10px;border:1px solid #3b82f6;">
+        <div style="color:#93c5fd;font-weight:700;font-size:12px;margin-bottom:4px;">✅ Redis 高可用集群</div>
+        <div style="font-size:11px;color:#94a3b8;">哨兵/Cluster，主节点挂了自动切从，不单点</div>
+      </div>
+      <div style="background:#451a03;border-radius:8px;padding:10px;border:1px solid #f59e0b;">
+        <div style="color:#fbbf24;font-weight:700;font-size:12px;margin-bottom:4px;">✅ 服务熔断降级</div>
+        <div style="font-size:11px;color:#94a3b8;">缓存宕机时接口直接降级返回默认值，保护DB不被打崩</div>
+      </div>
+      <div style="background:#2d1a4a;border-radius:8px;padding:10px;border:1px solid #a855f7;">
+        <div style="color:#d8b4fe;font-weight:700;font-size:12px;margin-bottom:4px;">✅ 本地缓存兜底</div>
+        <div style="font-size:11px;color:#94a3b8;">Caffeine/Guava本地缓存，Redis挂了还有本地缓存扛</div>
+      </div>
+    </div>`,
+  }
+}
+function showProb(k,el){
+  document.querySelectorAll('.prob-tab').forEach(t=>t.classList.remove('sel'))
+  if(el)el.classList.add('sel')
+  const d=probData[k]
+  const scene=document.getElementById('prob-scene')
+  scene.innerHTML=`<h2 style="margin-top:0;color:#fca5a5;">${d.title}</h2>${d.scene}`
+  scene.classList.remove('ani');void scene.offsetWidth;scene.classList.add('ani')
+}
+showProb('penetration',null)
+
+// ④ 主从复制
+function rLog(msg,cls=''){const el=document.getElementById('repl-log');el.innerHTML+=`<div class="${cls}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+async function replFull(){
+  replReset()
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  rLog('<span class="info">── 全量同步开始 ──</span>')
+  rLog('<span class="info">[从库]</span> 发送 PSYNC ? -1（第一次不知道主库runid）')
+  await delay(600)
+  rLog('<span class="ok">[主库]</span> 返回 FULLRESYNC {runid} {offset}')
+  document.getElementById('repl-arrow').innerHTML='<div style="font-size:11px;color:#fbbf24;text-align:center;">FULLRESYNC</div><div style="font-size:24px;color:#fbbf24;">→</div>'
+  await delay(600)
+  rLog('<span class="ok">[主库]</span> 执行 BGSAVE，生成 RDB 快照')
+  rLog('<span class="warn">[主库]</span> 期间新写命令先缓冲到 repl_backlog_buffer')
+  await delay(800)
+  rLog('<span class="ok">[主库]</span> 发送 RDB 文件给从库')
+  document.getElementById('repl-arrow').innerHTML='<div style="font-size:11px;color:#4ade80;text-align:center;">发送RDB</div><div style="font-size:24px;color:#4ade80;">→</div>'
+  await delay(700)
+  rLog('<span class="ok">[从库]</span> 清空旧数据，加载 RDB，数据同步到快照时间点')
+  document.getElementById('slave-data').style.color='#4ade80'
+  document.getElementById('slave-data').innerHTML='key1: 100<br>key2: hello<br>key3: [1,2,3]'
+  await delay(600)
+  rLog('<span class="ok">[主库]</span> 发送缓冲期间的增量命令（repl buffer）')
+  document.getElementById('repl-arrow').innerHTML='<div style="font-size:11px;color:#4ade80;text-align:center;">增量命令</div><div style="font-size:24px;color:#4ade80;">→</div>'
+  await delay(600)
+  rLog('<span class="ok">[完成]</span> 全量同步完成，切换为增量同步模式 ✅')
+  document.getElementById('slave-status').textContent='状态: 同步完成，等待增量'
+  document.getElementById('repl-arrow').innerHTML='<div style="font-size:11px;color:#22c55e;text-align:center;">已同步</div><div style="font-size:24px;color:#22c55e;">↔</div>'
+}
+async function replIncr(){
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  rLog('<span class="info">── 增量同步 ──</span>')
+  rLog('<span class="info">[主库]</span> 收到写命令: SET balance 500')
+  await delay(400)
+  rLog('<span class="ok">[主库]</span> 写入本地，同时将命令写入 replication buffer')
+  document.getElementById('master-data').innerHTML='key1: 100<br>key2: hello<br><strong style="color:#fbbf24;">balance: 500</strong>'
+  await delay(500)
+  rLog('<span class="ok">[主库→从库]</span> 异步发送命令: SET balance 500')
+  await delay(500)
+  rLog('<span class="ok">[从库]</span> 执行命令，数据与主库一致')
+  document.getElementById('slave-data').innerHTML='key1: 100<br>key2: hello<br><strong style="color:#4ade80;">balance: 500</strong>'
+}
+async function replReconn(){
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  rLog('<span class="warn">── 断线重连 ──</span>')
+  rLog('<span class="warn">[从库]</span> 发送 PSYNC {runid} {offset}（带上已同步到的偏移量）')
+  await delay(600)
+  rLog('<span class="ok">[主库]</span> 检查 repl_backlog_buffer：offset 是否还在缓冲区里？')
+  await delay(500)
+  rLog('<span class="ok">[主库]</span> 在的话，只发送 offset 之后的增量命令（CONTINUE）')
+  rLog('<span class="warn">[主库]</span> 不在的话（缓冲区满了被覆盖），只能做全量同步')
+  rLog('<span class="info">[结论]</span> repl_backlog_size 建议设大点（默认1MB，生产改成100MB+）')
+}
+function replReset(){
+  document.getElementById('repl-log').innerHTML='等待操作...'
+  document.getElementById('slave-data').style.color='#4a5568'
+  document.getElementById('slave-data').innerHTML='空'
+  document.getElementById('slave-status').textContent='状态: 等待同步'
+  document.getElementById('master-data').innerHTML='key1: 100<br>key2: hello<br>key3: [1,2,3]'
+  document.getElementById('repl-arrow').innerHTML='<div style="font-size:12px;color:#4a5568;text-align:center;">等待</div><div style="font-size:24px;color:#4a5568;">→</div>'
+}
+
+// ⑤ 单线程
+let stConns=[],stCmds=[],stConnId=1
+function stLog(msg,cls=''){const el=document.getElementById('st-log');el.innerHTML+=`<div class="${cls||''}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+function stRender(){
+  const pool=document.getElementById('conn-pool')
+  let h='<div style="font-size:12px;color:#94a3b8;width:100%;margin-bottom:4px;">客户端连接（epoll监听所有fd）</div>'
+  stConns.forEach(c=>{
+    h+=`<div class="conn-item" style="color:#93c5fd;">客户端${c}</div>`
+  })
+  if(!stConns.length)h+='<div style="font-size:11px;color:#4a5568;">暂无连接</div>'
+  pool.innerHTML=h
+}
+function stAddConn(){
+  const id=stConnId++
+  stConns.push(id)
+  stRender()
+  stLog(`<span class="info">[epoll_ctl]</span> 客户端${id} 连接，注册到epoll，fd=${id+2}`)
+  document.getElementById('epoll-status').textContent=`监听 ${stConns.length} 个连接`
+}
+function stSendCmd(){
+  if(!stConns.length){stLog('<span style="color:#f87171;">先添加客户端连接</span>');return}
+  const client=stConns[Math.floor(Math.random()*stConns.length)]
+  const cmds=['GET balance','SET counter 100','INCR pv','HGET order:1 status','ZADD queue 1706000000 order:99']
+  const cmd=cmds[Math.floor(Math.random()*cmds.length)]
+  stLog(`<span class="info">[epoll_wait]</span> 客户端${client} 发来请求: ${cmd}`)
+  document.getElementById('epoll-status').textContent='发现就绪事件！'
+  const eq=document.getElementById('event-queue')
+  const item=document.createElement('div')
+  item.style.cssText='font-size:11px;color:#a5b4fc;padding:2px 6px;background:#1e2235;border-radius:4px;margin-bottom:3px;animation:slidein .2s ease'
+  item.textContent=`客户端${client}: ${cmd}`
+  eq.appendChild(item)
+  setTimeout(()=>{
+    document.getElementById('exec-status').textContent=`执行: ${cmd}`
+    document.getElementById('exec-status').style.color='#fbbf24'
+    stLog(`<span class="ok">[执行]</span> 单线程执行: ${cmd}，结果: OK`)
+    setTimeout(()=>{
+      item.remove()
+      document.getElementById('exec-status').textContent='就绪'
+      document.getElementById('exec-status').style.color='#4ade80'
+      document.getElementById('epoll-status').textContent=`监听 ${stConns.length} 个连接`
+    },500)
+  },300)
+}
+function stReset(){
+  stConns=[];stConnId=1
+  stRender()
+  document.getElementById('st-log').innerHTML='等待操作...'
+  document.getElementById('event-queue').innerHTML=''
+  document.getElementById('epoll-status').textContent='等待事件...'
+  document.getElementById('exec-status').textContent='就绪'
+}
+</script>
+</body>
+</html>

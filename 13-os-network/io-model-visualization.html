@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Linux I/O 模型 — 面试可视化</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.nav{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;background:#1a1d2e;border-bottom:1px solid #2d3148;position:sticky;top:0;z-index:100}
+.nav-btn{padding:7px 15px;border-radius:20px;border:1px solid #3d4166;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s}
+.nav-btn.active,.nav-btn:hover{background:#6366f1;color:#fff;border-color:#6366f1}
+.section{display:none;padding:28px 20px;max-width:980px;margin:0 auto}
+.section.active{display:block}
+h1{font-size:24px;font-weight:700;color:#a5b4fc;margin-bottom:6px}
+h2{font-size:17px;color:#818cf8;margin:22px 0 10px}
+.sub{color:#64748b;font-size:13px;margin-bottom:22px}
+p{line-height:1.8;color:#cbd5e1;margin-bottom:10px;font-size:14px}
+.card{background:#1e2235;border:1px solid #2d3148;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.hl{border-color:#6366f1;background:#1e1f3a}
+.tip{background:#1a2f1a;border-left:3px solid #4ade80;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-t{font-size:11px;font-weight:700;color:#4ade80;margin-bottom:5px;letter-spacing:.5px}
+.tip p{color:#86efac;font-size:13px;margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{background:#2d3148;color:#a5b4fc;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:8px 10px;border-bottom:1px solid #1a1d2e;color:#cbd5e1;vertical-align:top}
+tr:hover td{background:#1e2235}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.tg{color:#86efac;background:#14532d}.tr{color:#fca5a5;background:#4c1d1d}.ty{color:#fbbf24;background:#451a03}.tb{color:#93c5fd;background:#1e3a5f}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;margin:4px}
+.btn-blue{background:#3b82f6;color:#fff}.btn-green{background:#22c55e;color:#fff}.btn-gray{background:#374151;color:#d1d5db}.btn-purple{background:#7c3aed;color:#fff}
+.btn:hover{opacity:.85;transform:translateY(-1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.ani{animation:fadeIn .3s ease}
+@keyframes flow{0%{opacity:0;transform:translateX(-8px)}30%{opacity:1}100%{opacity:1;transform:translateX(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+/* ===== IO五模型 ===== */
+.io-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:16px 0}
+.io-card{border-radius:10px;padding:14px;cursor:pointer;border:2px solid transparent;transition:all .25s;text-align:center}
+.io-card:hover,.io-card.sel{transform:translateY(-3px);border-color:#6366f1;filter:brightness(1.15)}
+.io-stage{display:flex;align-items:center;gap:0;margin:20px 0;flex-wrap:wrap}
+.io-phase{flex:1;min-width:120px;border-radius:8px;padding:12px;text-align:center;position:relative;transition:all .4s}
+.io-phase .ph-label{font-size:11px;color:#94a3b8;margin-bottom:4px}
+.io-phase .ph-status{font-size:13px;font-weight:700}
+.io-arrow{font-size:20px;color:#4a5568;padding:0 6px;flex-shrink:0}
+.prog-bar{height:6px;border-radius:3px;margin-top:8px;transition:width .8s ease}
+.io-log{background:#131624;border-radius:8px;padding:12px 14px;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;line-height:1.9;min-height:100px;max-height:180px;overflow-y:auto;margin-top:12px}
+.io-log .ok{color:#4ade80}.io-log .wait{color:#fbbf24;animation:pulse 1.2s infinite}.io-log .err{color:#f87171}.io-log .info{color:#93c5fd}
+
+/* ===== epoll ===== */
+.epoll-container{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}
+.fd-pool{flex:1;min-width:200px;background:#131624;border-radius:10px;padding:14px;border:1px solid #2d3148}
+.fd-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;margin-bottom:5px;font-size:12px;cursor:pointer;transition:all .25s;border:1px solid transparent}
+.fd-item.active-fd{background:#1a3a5f;border-color:#3b82f6}
+.fd-item.ready-fd{background:#14532d;border-color:#22c55e;animation:pulse .8s 3}
+.fd-item.idle-fd{background:#1e2235}
+.fd-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ready-list{flex:1;min-width:180px;background:#1a3e1a;border-radius:10px;padding:14px;border:1px solid #22c55e;min-height:120px}
+.ready-item{background:#22c55e;color:#0a1a0a;border-radius:5px;padding:5px 10px;font-size:12px;font-weight:700;margin-bottom:5px;animation:fadeIn .3s ease}
+.selector-box{background:#1e1f3a;border:1px solid #6366f1;border-radius:10px;padding:14px;text-align:center;min-width:140px}
+
+/* ===== ET/LT ===== */
+.trig-scene{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}
+.trig-box{flex:1;min-width:200px;border-radius:10px;padding:16px;border:2px solid}
+.lt-box{background:#1a2f1a;border-color:#22c55e}
+.et-box{background:#1a1f3a;border-color:#6366f1}
+.buf-bar{height:28px;border-radius:5px;display:flex;align-items:center;padding:0 10px;font-size:12px;font-weight:700;transition:width .5s ease;margin:8px 0;white-space:nowrap;overflow:hidden}
+.notif-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;margin:3px 2px}
+.trig-log{background:#131624;border-radius:6px;padding:8px;font-family:'Courier New',monospace;font-size:11px;line-height:1.8;min-height:80px;color:#94a3b8;margin-top:8px}
+
+/* ===== 零拷贝 ===== */
+.zc-compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:600px){.zc-compare{grid-template-columns:1fr}}
+.zc-path{border-radius:10px;padding:16px}
+.zc-trad{background:#1a1e3e;border:1px solid #3b4fd8}
+.zc-send{background:#1a3e1e;border:1px solid #22a843}
+.zc-step{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.zc-icon{font-size:16px;width:22px;flex-shrink:0}
+.zc-text{font-size:12px;color:#cbd5e1;line-height:1.5}
+.copy-tag{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:4px}
+.cpu-copy{background:#7f1d1d;color:#fca5a5}
+.dma-copy{background:#1e3a5f;color:#93c5fd}
+.no-copy{background:#14532d;color:#86efac}
+.zc-anim-wrap{margin-top:20px;background:#131624;border-radius:10px;padding:16px;border:1px solid #2d3148}
+.zc-lane{display:flex;align-items:center;gap:8px;margin:10px 0;flex-wrap:wrap}
+.zc-node{border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;text-align:center;min-width:90px;flex-shrink:0}
+.zc-conn{height:3px;flex:1;min-width:20px;border-radius:2px;position:relative;overflow:hidden}
+.zc-conn::after{content:'';position:absolute;top:0;left:-100%;height:100%;width:50%;border-radius:2px;animation:none}
+.zc-conn.flowing::after{animation:slide 1s linear infinite}
+@keyframes slide{from{left:-60%}to{left:110%}}
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <button class="nav-btn active" onclick="show('models')">① 五种 I/O 模型</button>
+  <button class="nav-btn" onclick="show('epoll')">② select/poll/epoll</button>
+  <button class="nav-btn" onclick="show('etlt')">③ ET vs LT 触发</button>
+  <button class="nav-btn" onclick="show('zerocopy')">④ 零拷贝</button>
+</div>
+
+<!-- ① 五种IO模型 -->
+<div id="s-models" class="section active">
+  <h1>① 五种 I/O 模型</h1>
+  <p class="sub">用"等外卖"来理解。点击模型卡片，看动态流程演示</p>
+
+  <div class="io-grid">
+    <div class="io-card" style="background:#1e3a5f;" onclick="playModel('blocking')">
+      <div style="font-size:28px;">😐</div>
+      <div style="font-weight:700;color:#93c5fd;margin:6px 0;">阻塞 I/O</div>
+      <div style="font-size:11px;color:#64748b;">站在门口等外卖<br>什么也不能做</div>
+    </div>
+    <div class="io-card" style="background:#1a3e1e;" onclick="playModel('nonblocking')">
+      <div style="font-size:28px;">🔄</div>
+      <div style="font-weight:700;color:#4ade80;margin:6px 0;">非阻塞 I/O</div>
+      <div style="font-size:11px;color:#64748b;">每隔一会出去问<br>"到了没？"</div>
+    </div>
+    <div class="io-card" style="background:#2a1a4a;" onclick="playModel('multiplex')">
+      <div style="font-size:28px;">📡</div>
+      <div style="font-weight:700;color:#d8b4fe;margin:6px 0;">I/O 多路复用</div>
+      <div style="font-size:11px;color:#64748b;">雇一个人盯着<br>多个门同时等</div>
+    </div>
+    <div class="io-card" style="background:#3e2a0a;" onclick="playModel('signal')">
+      <div style="font-size:28px;">🔔</div>
+      <div style="font-weight:700;color:#fbbf24;margin:6px 0;">信号驱动 I/O</div>
+      <div style="font-size:11px;color:#64748b;">外卖到了给你打电话<br>但你还得自己下楼取</div>
+    </div>
+    <div class="io-card" style="background:#1a3e3e;" onclick="playModel('async')">
+      <div style="font-size:28px;">🚀</div>
+      <div style="font-weight:700;color:#2dd4bf;margin:6px 0;">异步 I/O</div>
+      <div style="font-size:11px;color:#64748b;">直接送到你手里<br>你完全不用管</div>
+    </div>
+  </div>
+
+  <div id="model-stage" class="card" style="min-height:220px;">
+    <p style="color:#64748b;text-align:center;padding:30px 0;">👆 点击上方任意模型查看动态演示</p>
+  </div>
+
+  <div class="tip">
+    <div class="tip-t">面试关键区分</div>
+    <p>
+      前4种模型（阻塞/非阻塞/多路复用/信号驱动）：<strong>数据拷贝阶段都是同步的</strong>，都需要进程自己调 recvfrom 把数据从内核拷到用户态。<br>
+      只有<strong>异步I/O</strong>：连数据拷贝也由内核完成，完成后才通知你。<br>
+      Linux的AIO实现不完善，实际生产主要用 epoll（多路复用）。
+    </p>
+  </div>
+
+  <table>
+    <tr><th>模型</th><th>等待阶段</th><th>数据拷贝</th><th>典型系统调用</th><th>实际使用</th></tr>
+    <tr><td>阻塞 I/O</td><td><span class="tag tr">阻塞</span></td><td><span class="tag tr">同步</span></td><td>recvfrom</td><td>简单小程序</td></tr>
+    <tr><td>非阻塞 I/O</td><td><span class="tag tg">不阻塞（轮询）</span></td><td><span class="tag tr">同步</span></td><td>recvfrom(EAGAIN)</td><td>很少单独用，配合IO多路复用</td></tr>
+    <tr><td>I/O 多路复用</td><td><span class="tag ty">阻塞在select/epoll</span></td><td><span class="tag tr">同步</span></td><td>epoll_wait+recvfrom</td><td><strong>主流！</strong>Nginx/Redis/Go runtime</td></tr>
+    <tr><td>信号驱动</td><td><span class="tag tg">不阻塞</span></td><td><span class="tag tr">同步</span></td><td>sigaction+recvfrom</td><td>很少用</td></tr>
+    <tr><td>异步 I/O</td><td><span class="tag tg">不阻塞</span></td><td><span class="tag tg">异步</span></td><td>aio_read</td><td>Linux AIO不完善，Windows IOCP成熟</td></tr>
+  </table>
+</div>
+
+<!-- ② select/poll/epoll -->
+<div id="s-epoll" class="section">
+  <h1>② select / poll / epoll 对比</h1>
+  <p class="sub">从 C10K 问题理解为什么需要 epoll。点击按钮模拟连接到达</p>
+
+  <div class="card hl" style="margin-bottom:20px;">
+    <p><strong>C10K 问题：</strong>一台服务器同时服务 10000 个客户端连接。<br>
+    select/poll 每次调用都要把所有fd从用户态拷到内核态，内核扫描一遍，再把结果拷回来 — O(n)。<br>
+    10000个连接，大部分时候只有几十个活跃，却要扫10000次，极度浪费。</p>
+  </div>
+
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+    <button class="btn btn-blue" onclick="epollAddFd()">+ 注册 fd</button>
+    <button class="btn btn-green" onclick="epollTrigger()">模拟数据到达</button>
+    <button class="btn btn-gray" onclick="epollReset()">↺ 重置</button>
+    <select id="ep-mode" style="padding:8px 12px;border-radius:8px;background:#2d3148;color:#e2e8f0;border:1px solid #3d4166;font-size:13px;">
+      <option value="epoll">epoll（当前演示）</option>
+      <option value="select">select 模式对比</option>
+    </select>
+  </div>
+
+  <div class="epoll-container">
+    <div class="fd-pool" id="fd-pool">
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;font-weight:700;">📋 已注册的 fd 列表</div>
+      <div id="fd-list"></div>
+    </div>
+    <div class="selector-box" id="selector-box">
+      <div style="font-size:12px;color:#a5b4fc;font-weight:700;margin-bottom:8px;">🔭 epoll 实例</div>
+      <div style="font-size:11px;color:#64748b;">内核红黑树<br>管理所有注册fd</div>
+      <div id="ep-stats" style="margin-top:8px;font-size:12px;color:#94a3b8;">fd数: 0</div>
+      <div id="ep-scan" style="font-size:11px;margin-top:6px;"></div>
+    </div>
+    <div class="ready-list">
+      <div style="font-size:12px;color:#4ade80;font-weight:700;margin-bottom:8px;">✅ 就绪 fd 列表</div>
+      <div id="ready-list"></div>
+      <div id="ready-empty" style="font-size:11px;color:#4a5568;margin-top:8px;">等待数据到达...</div>
+    </div>
+  </div>
+
+  <div id="epoll-log" class="io-log" style="margin-top:8px;">等待操作...</div>
+
+  <table style="margin-top:20px;">
+    <tr><th>维度</th><th>select</th><th>poll</th><th>epoll</th></tr>
+    <tr><td>fd上限</td><td><span class="tag tr">1024（FD_SETSIZE）</span></td><td><span class="tag ty">无上限</span></td><td><span class="tag tg">无上限</span></td></tr>
+    <tr><td>内核数据结构</td><td>bitmap（固定大小）</td><td>数组</td><td><span class="tag tg">红黑树 + 就绪链表</span></td></tr>
+    <tr><td>每次调用开销</td><td><span class="tag tr">O(n) 拷贝+扫描</span></td><td><span class="tag tr">O(n) 拷贝+扫描</span></td><td><span class="tag tg">O(活跃fd数)</span></td></tr>
+    <tr><td>返回就绪fd</td><td>全量返回，需遍历</td><td>全量返回，需遍历</td><td><span class="tag tg">只返回就绪的</span></td></tr>
+    <tr><td>fd变更</td><td>每次重新设置</td><td>每次重新设置</td><td><span class="tag tg">epoll_ctl 增删改</span></td></tr>
+    <tr><td>适用场景</td><td>fd少且几乎全活跃</td><td>fd少</td><td><span class="tag tg">fd多但活跃少（C10K+）</span></td></tr>
+  </table>
+
+  <div class="tip" style="margin-top:16px;">
+    <div class="tip-t">Go runtime 的 net poller</div>
+    <p>Go 把 epoll 封装在 runtime 里对用户透明：<br>
+    goroutine 读网络数据 → fd没数据 → 注册到 epoll，goroutine <strong>挂起</strong>（gopark）<br>
+    → epoll_wait 返回就绪 → 把 goroutine 放回 P 的本地队列 → 被调度继续执行<br>
+    这就是为什么 Go 的网络 I/O 不阻塞 OS 线程，一个M可以服务无数个 goroutine。</p>
+  </div>
+</div>
+
+<!-- ③ ET vs LT -->
+<div id="s-etlt" class="section">
+  <h1>③ ET（边缘触发）vs LT（水平触发）</h1>
+  <p class="sub">epoll 的两种工作模式，理解错了就会漏读数据。点击按钮模拟数据到达和读取</p>
+
+  <div class="card" style="margin-bottom:16px;">
+    <p>
+      <strong style="color:#4ade80;">LT（Level Triggered，水平触发）</strong>：缓冲区有数据就一直通知你，像水位报警器，水位高就一直响。<br>
+      <strong style="color:#818cf8;">ET（Edge Triggered，边缘触发）</strong>：只在数据从无到有的那一刻通知一次，之后不再通知，像上升沿触发。
+    </p>
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+    <button class="btn btn-blue" onclick="trigArrive()">📦 数据到达（100字节）</button>
+    <button class="btn btn-green" onclick="trigReadPart('lt')">📖 LT方式：读50字节</button>
+    <button class="btn btn-purple" onclick="trigReadPart('et')">📖 ET方式：读50字节</button>
+    <button class="btn btn-green" onclick="trigReadAll('lt')">📖 LT方式：一次读完</button>
+    <button class="btn btn-purple" onclick="trigReadAll('et')">📖 ET方式：循环读到EAGAIN</button>
+    <button class="btn btn-gray" onclick="trigReset()">↺ 重置</button>
+  </div>
+
+  <div class="trig-scene">
+    <div class="trig-box lt-box">
+      <div style="font-size:14px;font-weight:700;color:#4ade80;margin-bottom:10px;">✅ LT 水平触发（默认）</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">内核缓冲区剩余：</div>
+      <div class="buf-bar" id="lt-bar" style="background:#22c55e;width:0%;">0 字节</div>
+      <div style="font-size:12px;color:#94a3b8;margin:8px 0 4px;">epoll通知：</div>
+      <div id="lt-notifs" style="min-height:28px;"></div>
+      <div class="trig-log" id="lt-log">等待数据...</div>
+    </div>
+    <div class="trig-box et-box">
+      <div style="font-size:14px;font-weight:700;color:#818cf8;margin-bottom:10px;">⚡ ET 边缘触发</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">内核缓冲区剩余：</div>
+      <div class="buf-bar" id="et-bar" style="background:#6366f1;width:0%;">0 字节</div>
+      <div style="font-size:12px;color:#94a3b8;margin:8px 0 4px;">epoll通知：</div>
+      <div id="et-notifs" style="min-height:28px;"></div>
+      <div class="trig-log" id="et-log">等待数据...</div>
+    </div>
+  </div>
+
+  <div class="card hl" style="margin-top:16px;">
+    <h2 style="margin-top:0;color:#fbbf24;">ET 模式的大坑 ⚠️</h2>
+    <p>ET 模式只通知一次，所以<strong>必须循环读直到 EAGAIN（返回-1且errno=EAGAIN）</strong>，否则剩余数据永远不会被通知！</p>
+    <p>因此ET模式必须配合<strong>非阻塞 fd</strong>，不然循环read时如果没数据会卡在那里。</p>
+    <table style="margin-top:10px;">
+      <tr><th></th><th>LT（默认）</th><th>ET</th></tr>
+      <tr><td>通知时机</td><td>缓冲区有数据就持续通知</td><td>仅在数据到来时通知一次</td></tr>
+      <tr><td>编程难度</td><td><span class="tag tg">简单安全</span></td><td><span class="tag ty">需循环读+非阻塞fd</span></td></tr>
+      <tr><td>效率</td><td>相对多一些通知调用</td><td><span class="tag tg">通知次数少，效率更高</span></td></tr>
+      <tr><td>谁在用</td><td>Redis（简单安全，单线程不怕）</td><td>Nginx（追求极致性能）</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ④ 零拷贝 -->
+<div id="s-zerocopy" class="section">
+  <h1>④ 零拷贝技术</h1>
+  <p class="sub">把文件发送到网络，传统方式要拷贝4次，sendfile只需2次。点击"开始演示"看数据流动</p>
+
+  <div class="zc-compare">
+    <div class="zc-path zc-trad">
+      <h2 style="margin-top:0;color:#93c5fd;">传统 read + write</h2>
+      <div class="zc-step"><div class="zc-icon">💾</div><div class="zc-text">①磁盘读数据<span class="copy-tag dma-copy">DMA拷贝</span></div></div>
+      <div class="zc-step"><div class="zc-icon">⬇️</div><div class="zc-text">②内核页缓存→用户缓冲区<span class="copy-tag cpu-copy">CPU拷贝①</span></div></div>
+      <div class="zc-step"><div class="zc-icon">⬆️</div><div class="zc-text">③用户缓冲区→Socket缓冲区<span class="copy-tag cpu-copy">CPU拷贝②</span></div></div>
+      <div class="zc-step"><div class="zc-icon">📡</div><div class="zc-text">④Socket缓冲区→网卡<span class="copy-tag dma-copy">DMA拷贝</span></div></div>
+      <div style="margin-top:12px;padding:8px;background:#0f1117;border-radius:6px;font-size:12px;color:#f87171;">
+        总计：<strong>4次拷贝（2次CPU）</strong><br>
+        上下文切换：4次（read进/出 + write进/出）
+      </div>
+    </div>
+    <div class="zc-path zc-send">
+      <h2 style="margin-top:0;color:#4ade80;">sendfile（Linux 2.4+）</h2>
+      <div class="zc-step"><div class="zc-icon">💾</div><div class="zc-text">①磁盘读数据<span class="copy-tag dma-copy">DMA拷贝</span></div></div>
+      <div class="zc-step"><div class="zc-icon">➡️</div><div class="zc-text">②页缓存→Socket缓冲区<span class="copy-tag no-copy">DMA gather零CPU拷贝</span></div></div>
+      <div class="zc-step"><div class="zc-icon">📡</div><div class="zc-text">③Socket缓冲区→网卡<span class="copy-tag dma-copy">DMA拷贝</span></div></div>
+      <div style="margin-top:12px;padding:8px;background:#0f1117;border-radius:6px;font-size:12px;color:#4ade80;">
+        总计：<strong>2次拷贝（0次CPU拷贝）</strong><br>
+        上下文切换：2次（sendfile进/出）<br>
+        数据全程在内核态，用户态只发指令
+      </div>
+    </div>
+  </div>
+
+  <div class="zc-anim-wrap" id="zc-anim-wrap">
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+      <button class="btn btn-blue" onclick="zcPlay('trad')" id="btn-trad">▶ 演示传统方式</button>
+      <button class="btn btn-green" onclick="zcPlay('sendfile')" id="btn-sf">▶ 演示 sendfile</button>
+      <button class="btn btn-gray" onclick="zcReset()">↺ 重置</button>
+    </div>
+    <div id="zc-stage">
+      <div style="display:flex;flex-direction:column;gap:10px;" id="zc-nodes">
+        <!-- 动态渲染 -->
+      </div>
+    </div>
+    <div id="zc-log" class="io-log" style="margin-top:12px;">点击演示按钮查看数据流动...</div>
+  </div>
+
+  <h2>谁在用零拷贝？</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;">
+    <div class="card" style="text-align:center;padding:14px;">
+      <div style="font-size:22px;margin-bottom:6px;">📬</div>
+      <div style="font-weight:700;font-size:13px;">Kafka</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">消费消息用 sendfile，磁盘数据直接到网卡，不过用户态</div>
+    </div>
+    <div class="card" style="text-align:center;padding:14px;">
+      <div style="font-size:22px;margin-bottom:6px;">🌐</div>
+      <div style="font-weight:700;font-size:13px;">Nginx</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">静态文件服务用 sendfile，sendfile on 开启</div>
+    </div>
+    <div class="card" style="text-align:center;padding:14px;">
+      <div style="font-size:22px;margin-bottom:6px;">🗺️</div>
+      <div style="font-weight:700;font-size:13px;">mmap</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Kafka索引文件、SQLite、共享内存IPC都用mmap映射</div>
+    </div>
+    <div class="card" style="text-align:center;padding:14px;">
+      <div style="font-size:22px;margin-bottom:6px;">🔌</div>
+      <div style="font-weight:700;font-size:13px;">splice</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">两个fd间零拷贝传输，数据在内核管道缓冲区流动</div>
+    </div>
+  </div>
+
+  <div class="tip">
+    <div class="tip-t">面试一句话</div>
+    <p>零拷贝不是"完全不拷贝"，是<strong>减少CPU参与的拷贝</strong>。DMA拷贝（硬件直接传）是免不了的。<br>
+    sendfile让数据不过用户态，省掉2次CPU拷贝，还减少了2次内核/用户态上下文切换。</p>
+  </div>
+</div>
+
+<script>
+// 导航
+function show(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'))
+  document.getElementById('s-'+id).classList.add('active')
+  event.target.classList.add('active')
+}
+
+// ① 五种IO模型
+const modelData={
+  blocking:{
+    title:'😐 阻塞 I/O',color:'#93c5fd',
+    steps:[
+      {icon:'📱',text:'应用程序调用 recvfrom',phase:'用户态',status:'发起请求',color:'#1e3a5f'},
+      {icon:'⬇️',text:'陷入内核态，等待数据就绪',phase:'内核等待',status:'⏳ 阻塞中...',color:'#3e2a1a',blink:true},
+      {icon:'📦',text:'网络数据到达，内核缓冲区有数据',phase:'内核',status:'数据就绪！',color:'#14532d'},
+      {icon:'📋',text:'内核把数据拷贝到用户缓冲区',phase:'拷贝',status:'CPU拷贝',color:'#1a2f4a'},
+      {icon:'✅',text:'recvfrom 返回，应用继续执行',phase:'用户态',status:'完成！',color:'#14532d'},
+    ],
+    summary:'整个过程用户线程<strong style="color:#f87171;">完全阻塞</strong>，什么都不能做。简单但浪费线程资源。',
+  },
+  nonblocking:{
+    title:'🔄 非阻塞 I/O',color:'#4ade80',
+    steps:[
+      {icon:'📱',text:'调用 recvfrom，设置非阻塞',phase:'用户态',status:'发起请求',color:'#1e3a5f'},
+      {icon:'↩️',text:'没数据！内核立刻返回 EAGAIN',phase:'内核',status:'EAGAIN',color:'#3e1a1a'},
+      {icon:'🔄',text:'应用可以做别的事，然后再问',phase:'用户态',status:'轮询中...',color:'#1a3e1e',blink:true},
+      {icon:'↩️',text:'又没数据...EAGAIN（重复多次）',phase:'内核',status:'EAGAIN×N',color:'#3e1a1a'},
+      {icon:'📦',text:'数据终于到了！返回成功',phase:'内核',status:'数据就绪！',color:'#14532d'},
+      {icon:'📋',text:'内核拷贝数据到用户态',phase:'拷贝',status:'CPU拷贝',color:'#1a2f4a'},
+      {icon:'✅',text:'完成',phase:'用户态',status:'完成！',color:'#14532d'},
+    ],
+    summary:'不阻塞但需要<strong style="color:#fbbf24;">不断轮询</strong>，大量浪费CPU在无意义的询问上。实际很少单独使用。',
+  },
+  multiplex:{
+    title:'📡 I/O 多路复用',color:'#d8b4fe',
+    steps:[
+      {icon:'📡',text:'调用 epoll_wait 监听多个 fd',phase:'用户态',status:'注册监听',color:'#1e3a5f'},
+      {icon:'⏳',text:'阻塞在 epoll_wait，等待任意fd就绪',phase:'内核epoll',status:'⏳ 等待中',color:'#2a1a4a',blink:true},
+      {icon:'🔔',text:'某个fd数据到达，epoll_wait返回',phase:'内核',status:'就绪！返回fd',color:'#14532d'},
+      {icon:'📱',text:'应用调用 recvfrom 读取就绪的fd',phase:'用户态',status:'读取数据',color:'#1e3a5f'},
+      {icon:'📋',text:'内核拷贝数据到用户态',phase:'拷贝',status:'CPU拷贝',color:'#1a2f4a'},
+      {icon:'✅',text:'一个线程服务了多个连接！',phase:'用户态',status:'完成！',color:'#14532d'},
+    ],
+    summary:'<strong style="color:#d8b4fe;">一个线程监控N个fd</strong>，有就绪的才去读，不浪费线程。这是 Nginx/Redis/Go 的核心机制。',
+  },
+  signal:{
+    title:'🔔 信号驱动 I/O',color:'#fbbf24',
+    steps:[
+      {icon:'📱',text:'注册 SIGIO 信号处理函数',phase:'用户态',status:'注册信号',color:'#1e3a5f'},
+      {icon:'🔓',text:'调用返回，应用可以干别的！',phase:'用户态',status:'不阻塞！',color:'#14532d'},
+      {icon:'⏳',text:'内核等待数据到达...',phase:'内核等待',status:'等待中',color:'#2a1a0a',blink:true},
+      {icon:'🔔',text:'数据就绪！内核发送 SIGIO 信号',phase:'内核',status:'发信号！',color:'#451a03'},
+      {icon:'📋',text:'应用收到信号，调用 recvfrom',phase:'用户态',status:'信号处理',color:'#1e3a5f'},
+      {icon:'📋',text:'内核拷贝数据到用户态（仍然同步）',phase:'拷贝',status:'CPU拷贝',color:'#1a2f4a'},
+      {icon:'✅',text:'完成',phase:'用户态',status:'完成！',color:'#14532d'},
+    ],
+    summary:'等待阶段不阻塞，但<strong style="color:#fbbf24;">数据拷贝仍然同步</strong>。信号处理函数里还是要自己调 recvfrom。实际用得很少。',
+  },
+  async:{
+    title:'🚀 异步 I/O（真正的异步）',color:'#2dd4bf',
+    steps:[
+      {icon:'📱',text:'调用 aio_read，告诉内核：完成后通知我',phase:'用户态',status:'发起请求',color:'#1e3a5f'},
+      {icon:'🔓',text:'立刻返回，应用继续执行！',phase:'用户态',status:'不阻塞！',color:'#14532d'},
+      {icon:'⏳',text:'内核自己等待数据，自己拷贝...',phase:'内核',status:'内核全权处理',color:'#1a3e3e',blink:true},
+      {icon:'📋',text:'内核把数据直接拷贝到用户缓冲区',phase:'内核拷贝',status:'无需你参与！',color:'#1a3e3e'},
+      {icon:'🔔',text:'发送完成信号通知应用',phase:'完成通知',status:'数据已在你的缓冲区！',color:'#14532d'},
+      {icon:'✅',text:'应用直接使用数据，无需再调recvfrom',phase:'用户态',status:'直接用！',color:'#14532d'},
+    ],
+    summary:'真正的异步：<strong style="color:#2dd4bf;">连数据拷贝也由内核完成</strong>。应用完全不管，等通知就行。Linux AIO实现不完善，Windows IOCP才真正好用。',
+  },
+}
+let modelTimer=null
+function playModel(key){
+  if(modelTimer)clearInterval(modelTimer)
+  document.querySelectorAll('.io-card').forEach(c=>c.classList.remove('sel'))
+  event.currentTarget.classList.add('sel')
+  const d=modelData[key]
+  const stage=document.getElementById('model-stage')
+  stage.innerHTML=`<h2 style="color:${d.color};margin-top:0;">${d.title}</h2><div id="steps-wrap"></div><div id="model-summary" style="margin-top:12px;padding:10px 12px;background:#131624;border-radius:8px;font-size:13px;color:#cbd5e1;display:none;"></div>`
+  const wrap=document.getElementById('steps-wrap')
+  let idx=0
+  function addStep(){
+    if(idx>=d.steps.length){
+      const sum=document.getElementById('model-summary')
+      sum.innerHTML=d.summary;sum.style.display='block'
+      return
+    }
+    const s=d.steps[idx]
+    const div=document.createElement('div')
+    div.style.cssText=`display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;background:${s.color};margin-bottom:5px;animation:fadeIn .3s ease;`
+    div.innerHTML=`<span style="font-size:18px;">${s.icon}</span><div style="flex:1;"><div style="font-size:12px;font-weight:700;color:#e2e8f0;">${s.text}</div><div style="font-size:11px;color:#94a3b8;margin-top:2px;">${s.phase}</div></div><span style="font-size:12px;font-weight:700;color:${s.blink?'#fbbf24':'#a5b4fc'};${s.blink?'animation:pulse 1s infinite':''}">${s.status}</span>`
+    wrap.appendChild(div)
+    idx++
+  }
+  addStep()
+  modelTimer=setInterval(addStep,900)
+}
+
+// ② epoll
+let epState={fds:[],readyFds:[],nextId:3}
+function epLog(msg,cls=''){const el=document.getElementById('epoll-log');el.innerHTML+=`<div class="${cls||''}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+function epollRender(){
+  const list=document.getElementById('fd-list')
+  const mode=document.getElementById('ep-mode').value
+  list.innerHTML=epState.fds.map(fd=>{
+    const cls=epState.readyFds.includes(fd.id)?'fd-item ready-fd':'fd-item idle-fd'
+    return `<div class="${cls}"><div class="fd-dot" style="background:${epState.readyFds.includes(fd.id)?'#22c55e':'#4a5568'}"></div><span>fd${fd.id} (${fd.type})</span><span style="margin-left:auto;font-size:10px;color:${epState.readyFds.includes(fd.id)?'#4ade80':'#4a5568'}">${epState.readyFds.includes(fd.id)?'就绪':'等待'}</span></div>`
+  }).join('')
+  document.getElementById('ep-stats').textContent=`fd数: ${epState.fds.length}`
+  const ready=document.getElementById('ready-list')
+  const empty=document.getElementById('ready-empty')
+  if(epState.readyFds.length>0){
+    empty.style.display='none'
+    ready.innerHTML=epState.readyFds.map(id=>`<div class="ready-item">fd${id} 有数据！</div>`).join('')
+  } else {
+    empty.style.display='block';ready.innerHTML=''
+  }
+  const scan=document.getElementById('ep-scan')
+  if(mode==='select'){
+    scan.innerHTML=`<div style="color:#f87171;font-size:11px;">select模式：需扫描全部${epState.fds.length}个fd</div>`
+  } else {
+    scan.innerHTML=`<div style="color:#4ade80;font-size:11px;">epoll：只返回就绪的${epState.readyFds.length}个</div>`
+  }
+}
+function epollAddFd(){
+  const types=['TCP连接','HTTP请求','定时器','pipe']
+  const t=types[epState.fds.length%types.length]
+  const fd={id:epState.nextId++,type:t}
+  epState.fds.push(fd)
+  const mode=document.getElementById('ep-mode').value
+  if(mode==='epoll'){
+    epLog(`<span class="info">[epoll_ctl]</span> EPOLL_CTL_ADD fd${fd.id}(${t}) → 插入红黑树 O(logN)`)
+  } else {
+    epLog(`<span class="err">[select]</span> 重新设置 fd_set，把fd${fd.id}加入bitmap，下次调用要传所有${epState.fds.length}个fd`)
+  }
+  epollRender()
+}
+function epollTrigger(){
+  if(epState.fds.length===0){epLog('<span class="err">先注册一些fd</span>');return}
+  const idx=Math.floor(Math.random()*epState.fds.length)
+  const fd=epState.fds[idx]
+  if(!epState.readyFds.includes(fd.id))epState.readyFds.push(fd.id)
+  const mode=document.getElementById('ep-mode').value
+  if(mode==='epoll'){
+    epLog(`<span class="ok">[event]</span> fd${fd.id}(${fd.type}) 数据到达 → 内核将其加入就绪链表`)
+    epLog(`<span class="ok">[epoll_wait]</span> 返回1个就绪fd，无需遍历全部${epState.fds.length}个 <span style="color:#4ade80;">O(1)</span>`)
+  } else {
+    epLog(`<span class="err">[select]</span> fd${fd.id} 就绪，但返回整个fd_set，需遍历全部${epState.fds.length}个fd才能找到就绪的 <span style="color:#f87171;">O(N)</span>`)
+  }
+  epollRender()
+  setTimeout(()=>{
+    const i=epState.readyFds.indexOf(fd.id)
+    if(i>-1)epState.readyFds.splice(i,1)
+    epollRender()
+  },2500)
+}
+function epollReset(){
+  epState={fds:[],readyFds:[],nextId:3}
+  document.getElementById('epoll-log').innerHTML='等待操作...'
+  epollRender()
+}
+epollRender()
+
+// ③ ET/LT
+let trigState={buf:0}
+function trigLog(id,msg,cls=''){const el=document.getElementById(id+'-log');el.innerHTML+=`<div style="color:${cls}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+function trigNotif(id,msg,color){
+  const el=document.getElementById(id+'-notifs')
+  const span=document.createElement('span')
+  span.className='notif-badge'
+  span.style.cssText=`background:${color}22;color:${color};border:1px solid ${color}`
+  span.textContent=msg
+  el.appendChild(span)
+  setTimeout(()=>span.remove(),3000)
+}
+function trigUpdateBar(){
+  const pct=Math.min(100,trigState.buf)
+  const ltBar=document.getElementById('lt-bar')
+  const etBar=document.getElementById('et-bar')
+  ltBar.style.width=pct+'%';ltBar.textContent=trigState.buf+' 字节'
+  etBar.style.width=pct+'%';etBar.textContent=trigState.buf+' 字节'
+  // LT持续通知
+  if(trigState.buf>0){
+    trigNotif('lt','📢 有数据！通知','#22c55e')
+  }
+}
+function trigArrive(){
+  const was=trigState.buf
+  trigState.buf=100
+  trigUpdateBar()
+  trigLog('lt',`数据到达！缓冲区: ${trigState.buf}字节`,'#4ade80')
+  trigLog('et',`数据到达！缓冲区: ${trigState.buf}字节`,'#4ade80')
+  // ET只通知一次
+  trigNotif('et','⚡ 数据到达！仅通知一次','#818cf8')
+  if(was===0){
+    trigLog('et','ET: 从无到有，触发一次通知 ← 必须一次读完！','#fbbf24')
+  }
+}
+function trigReadPart(mode){
+  if(trigState.buf<=0){trigLog(mode,'缓冲区为空，没有数据可读','#f87171');return}
+  const read=Math.min(50,trigState.buf)
+  trigState.buf-=read
+  trigLog(mode,`读取了${read}字节，缓冲区剩余: ${trigState.buf}字节`,'#93c5fd')
+  if(mode==='lt'){
+    if(trigState.buf>0)trigNotif('lt','📢 还有数据！继续通知','#22c55e')
+    trigLog('lt',trigState.buf>0?`LT: 缓冲区非空，epoll会继续通知你 ✅`:`LT: 缓冲区空了，停止通知`,'#4ade80')
+  } else {
+    trigLog('et',`ET: 不再通知！剩余${trigState.buf}字节如果不继续读就丢了 ⚠️`,'#f87171')
+    trigNotif('et','⚠️ 不再通知！请循环读完','#ef4444')
+  }
+  trigUpdateBar()
+  document.getElementById('lt-bar').style.width=Math.min(100,trigState.buf)+'%'
+  document.getElementById('et-bar').style.width=Math.min(100,trigState.buf)+'%'
+  document.getElementById('lt-bar').textContent=trigState.buf+' 字节'
+  document.getElementById('et-bar').textContent=trigState.buf+' 字节'
+}
+function trigReadAll(mode){
+  if(trigState.buf<=0){trigLog(mode,'缓冲区为空','#f87171');return}
+  if(mode==='lt'){
+    trigLog('lt',`读取全部${trigState.buf}字节，完成`,'#4ade80')
+  } else {
+    trigLog('et',`循环read直到EAGAIN，读完全部${trigState.buf}字节 ✅`,'#4ade80')
+    trigLog('et','ET正确用法：while(read()!=-1 || errno!=EAGAIN) {...}','#d8b4fe')
+  }
+  trigState.buf=0
+  trigUpdateBar()
+  document.getElementById('lt-bar').style.width='0%';document.getElementById('lt-bar').textContent='0 字节'
+  document.getElementById('et-bar').style.width='0%';document.getElementById('et-bar').textContent='0 字节'
+}
+function trigReset(){
+  trigState.buf=0
+  ;['lt','et'].forEach(id=>{
+    document.getElementById(id+'-log').textContent='等待数据...'
+    document.getElementById(id+'-notifs').innerHTML=''
+    document.getElementById(id+'-bar').style.width='0%'
+    document.getElementById(id+'-bar').textContent='0 字节'
+  })
+}
+
+// ④ 零拷贝动画
+const zcNodes={
+  trad:[
+    {id:'disk',label:'💾 磁盘',bg:'#1a1a2e',color:'#93c5fd'},
+    {id:'kbuf',label:'📋 内核页缓存',bg:'#1a2f4a',color:'#60a5fa'},
+    {id:'ubuf',label:'📁 用户缓冲区',bg:'#2a1a4a',color:'#d8b4fe'},
+    {id:'sock',label:'🔌 Socket缓冲区',bg:'#1a3a2a',color:'#4ade80'},
+    {id:'nic',label:'📡 网卡',bg:'#2a1a1a',color:'#f87171'},
+  ],
+  sendfile:[
+    {id:'disk',label:'💾 磁盘',bg:'#1a1a2e',color:'#93c5fd'},
+    {id:'kbuf',label:'📋 内核页缓存',bg:'#1a2f4a',color:'#60a5fa'},
+    {id:'sock',label:'🔌 Socket缓冲区',bg:'#1a3a2a',color:'#4ade80'},
+    {id:'nic',label:'📡 网卡',bg:'#2a1a1a',color:'#f87171'},
+  ]
+}
+const zcConns={
+  trad:[
+    {label:'DMA拷贝',color:'#3b82f6',tag:'dma'},
+    {label:'CPU拷贝①',color:'#ef4444',tag:'cpu'},
+    {label:'CPU拷贝②',color:'#ef4444',tag:'cpu'},
+    {label:'DMA拷贝',color:'#3b82f6',tag:'dma'},
+  ],
+  sendfile:[
+    {label:'DMA拷贝',color:'#3b82f6',tag:'dma'},
+    {label:'DMA gather（无CPU）',color:'#22c55e',tag:'zero'},
+    {label:'DMA拷贝',color:'#3b82f6',tag:'dma'},
+  ]
+}
+function zcRender(type){
+  const nodes=zcNodes[type],conns=zcConns[type]
+  let html='<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">'
+  nodes.forEach((n,i)=>{
+    html+=`<div class="zc-node" id="zn-${n.id}" style="background:${n.bg};color:${n.color};border:1px solid ${n.color}40;">${n.label}</div>`
+    if(i<conns.length){
+      const c=conns[i]
+      html+=`<div style="display:flex;flex-direction:column;align-items:center;min-width:60px;flex:1;">
+        <div style="font-size:10px;color:${c.color};margin-bottom:2px;">${c.label}</div>
+        <div class="zc-conn" id="zc-conn-${i}" style="background:${c.color}33;"><div style="height:100%;width:0%;background:${c.color};border-radius:2px;transition:width .6s ease;" id="zc-prog-${i}"></div></div>
+      </div>`
+    }
+  })
+  html+='</div>'
+  document.getElementById('zc-nodes').innerHTML=html
+}
+function zcLog(msg,cls=''){const el=document.getElementById('zc-log');el.innerHTML+=`<div style="color:${cls||'#94a3b8'}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+async function zcPlay(type){
+  document.getElementById('btn-trad').disabled=true
+  document.getElementById('btn-sf').disabled=true
+  document.getElementById('zc-log').innerHTML=''
+  zcRender(type)
+  const conns=zcConns[type]
+  const delay=ms=>new Promise(r=>setTimeout(r,ms))
+  if(type==='trad'){
+    zcLog('▶ 传统 read+write 方式，数据从磁盘到网卡需要4次拷贝','#93c5fd')
+    await delay(400)
+    zcLog('[步骤1] 磁盘 → 内核页缓存 (DMA拷贝，硬件完成)','#3b82f6')
+    document.getElementById('zc-prog-0').style.width='100%';await delay(700)
+    zcLog('[步骤2] 内核页缓存 → 用户缓冲区 (CPU拷贝①，最浪费！)','#ef4444')
+    document.getElementById('zc-prog-1').style.width='100%';await delay(700)
+    zcLog('[步骤3] 用户缓冲区 → Socket缓冲区 (CPU拷贝②)','#ef4444')
+    document.getElementById('zc-prog-2').style.width='100%';await delay(700)
+    zcLog('[步骤4] Socket缓冲区 → 网卡 (DMA拷贝，硬件完成)','#3b82f6')
+    document.getElementById('zc-prog-3').style.width='100%';await delay(700)
+    zcLog('✅ 完成！共 4次拷贝，2次CPU参与，4次上下文切换','#fbbf24')
+  } else {
+    zcLog('▶ sendfile 方式，数据不经过用户态，只需2次拷贝','#4ade80')
+    await delay(400)
+    zcLog('[步骤1] 磁盘 → 内核页缓存 (DMA拷贝)','#3b82f6')
+    document.getElementById('zc-prog-0').style.width='100%';await delay(700)
+    zcLog('[步骤2] 页缓存 → Socket缓冲区 (DMA gather，零CPU拷贝！)','#22c55e')
+    document.getElementById('zc-prog-1').style.width='100%';await delay(700)
+    zcLog('[步骤3] Socket缓冲区 → 网卡 (DMA拷贝)','#3b82f6')
+    document.getElementById('zc-prog-2').style.width='100%';await delay(700)
+    zcLog('✅ 完成！共 2次拷贝，0次CPU参与，2次上下文切换 🚀','#4ade80')
+  }
+  document.getElementById('btn-trad').disabled=false
+  document.getElementById('btn-sf').disabled=false
+}
+function zcReset(){
+  document.getElementById('zc-nodes').innerHTML=''
+  document.getElementById('zc-log').innerHTML='点击演示按钮查看数据流动...'
+  document.getElementById('btn-trad').disabled=false
+  document.getElementById('btn-sf').disabled=false
+}
+</script>
+</body>
+</html>

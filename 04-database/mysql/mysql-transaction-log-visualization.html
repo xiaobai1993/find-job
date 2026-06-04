@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MySQL 事务 & 三大日志 — 面试可视化</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.nav{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;background:#1a1d2e;border-bottom:1px solid #2d3148;position:sticky;top:0;z-index:100}
+.nav-btn{padding:7px 15px;border-radius:20px;border:1px solid #3d4166;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;transition:all .2s}
+.nav-btn.active,.nav-btn:hover{background:#6366f1;color:#fff;border-color:#6366f1}
+.section{display:none;padding:28px 20px;max-width:980px;margin:0 auto}
+.section.active{display:block}
+h1{font-size:24px;font-weight:700;color:#a5b4fc;margin-bottom:6px}
+h2{font-size:17px;color:#818cf8;margin:22px 0 10px}
+.sub{color:#64748b;font-size:13px;margin-bottom:22px}
+p{line-height:1.8;color:#cbd5e1;margin-bottom:10px;font-size:14px}
+.card{background:#1e2235;border:1px solid #2d3148;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.hl{border-color:#6366f1;background:#1e1f3a}
+.tip{background:#1a2f1a;border-left:3px solid #4ade80;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-t{font-size:11px;font-weight:700;color:#4ade80;margin-bottom:5px;letter-spacing:.5px}
+.tip p{color:#86efac;font-size:13px;margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{background:#2d3148;color:#a5b4fc;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:8px 10px;border-bottom:1px solid #1a1d2e;color:#cbd5e1;vertical-align:top}
+tr:hover td{background:#1e2235}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.tg{color:#86efac;background:#14532d}.tr{color:#fca5a5;background:#4c1d1d}.ty{color:#fbbf24;background:#451a03}.tb{color:#93c5fd;background:#1e3a5f}.tp{color:#d8b4fe;background:#2d1a4a}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;margin:4px}
+.btn-blue{background:#3b82f6;color:#fff}.btn-green{background:#22c55e;color:#fff}.btn-gray{background:#374151;color:#d1d5db}.btn-red{background:#ef4444;color:#fff}.btn-yellow{background:#f59e0b;color:#000}
+.btn:hover{opacity:.85;transform:translateY(-1px)}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.ani{animation:fadeIn .3s ease}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes flowRight{0%{transform:translateX(-100%)}100%{transform:translateX(200%)}}
+
+/* ===UPDATE流程=== */
+.flow-wrap{position:relative;margin:20px 0}
+.step-row{display:flex;gap:10px;margin-bottom:8px;align-items:flex-start;flex-wrap:wrap}
+.step-box{border-radius:10px;padding:12px 14px;min-width:140px;flex:1;transition:all .35s;border:2px solid transparent;opacity:.4}
+.step-box.active{opacity:1;border-color:#fff;transform:scale(1.03)}
+.step-box.done{opacity:.8;border-color:#2d3148}
+.step-num{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-bottom:6px}
+.step-title{font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px}
+.step-desc{font-size:11px;color:#94a3b8;line-height:1.6}
+.flow-log{background:#131624;border-radius:8px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#94a3b8;line-height:1.9;min-height:120px;max-height:200px;overflow-y:auto;margin-top:12px}
+.fl-ok{color:#4ade80}.fl-warn{color:#fbbf24}.fl-info{color:#93c5fd}.fl-red{color:#f87171}
+
+/* ===MVCC版本链=== */
+.version-chain{display:flex;align-items:center;gap:0;overflow-x:auto;padding:10px 0;margin:12px 0;flex-wrap:nowrap}
+.ver-node{border-radius:10px;padding:12px;min-width:130px;flex-shrink:0;text-align:center;cursor:pointer;transition:all .25s;border:2px solid transparent;position:relative}
+.ver-node:hover,.ver-node.sel{transform:scale(1.05);border-color:#fff}
+.ver-arrow{font-size:20px;color:#4a5568;padding:0 4px;flex-shrink:0;margin-top:10px}
+.trx-badge{font-size:10px;padding:2px 6px;border-radius:6px;margin-top:4px;display:inline-block}
+.vis-mark{position:absolute;top:-8px;right:-8px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;}
+
+/* ===ReadView=== */
+.rv-scene{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}
+.rv-box{flex:1;min-width:220px;border-radius:10px;padding:16px;border:2px solid}
+.rv-rc{background:#1a1e3e;border-color:#3b82f6}
+.rv-rr{background:#1a2f1a;border-color:#22c55e}
+.sql-line{background:#131624;border-radius:6px;padding:8px 10px;font-family:'Courier New',monospace;font-size:11px;color:#a5b4fc;margin:6px 0;cursor:pointer;transition:all .2s;border:1px solid transparent}
+.sql-line:hover,.sql-line.active-sql{border-color:#6366f1;background:#1e1f3a}
+.rv-indicator{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;margin:4px 0}
+.rv-alive{background:#14532d;color:#4ade80}
+.rv-dead{background:#4c1d1d;color:#fca5a5}
+
+/* ===崩溃恢复=== */
+.crash-scene{margin:16px 0}
+.timeline{display:flex;flex-direction:column;gap:0;position:relative}
+.tl-item{display:flex;gap:12px;align-items:flex-start;padding:10px 0;cursor:pointer}
+.tl-item:hover .tl-box{border-color:#6366f1}
+.tl-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;margin-top:4px;border:2px solid}
+.tl-line{width:2px;height:20px;background:#2d3148;margin-left:6px}
+.tl-box{flex:1;background:#1e2235;border:1px solid #2d3148;border-radius:8px;padding:10px 12px;transition:border-color .2s}
+.tl-title{font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:3px}
+.tl-desc{font-size:12px;color:#94a3b8;line-height:1.6}
+.crash-bolt{font-size:28px;text-align:center;padding:8px;animation:pulse .6s infinite}
+.recovery-panel{background:#131624;border-radius:10px;padding:16px;margin-top:12px;border:1px solid #2d3148;display:none}
+.recovery-panel.show{display:block}
+</style>
+</head>
+<body>
+<div class="nav">
+  <button class="nav-btn active" onclick="show('update')">① UPDATE执行流程</button>
+  <button class="nav-btn" onclick="show('logs')">② 三大日志对比</button>
+  <button class="nav-btn" onclick="show('mvcc')">③ MVCC版本链</button>
+  <button class="nav-btn" onclick="show('readview')">④ ReadView & RC/RR</button>
+  <button class="nav-btn" onclick="show('crash')">⑤ 崩溃恢复</button>
+</div>
+
+<!-- ① UPDATE执行流程 -->
+<div id="s-update" class="section active">
+  <h1>① 一条 UPDATE 的完整执行流程</h1>
+  <p class="sub">从 SQL 到持久化，每一步都有讲究。点击"下一步"逐步演示</p>
+
+  <div class="card" style="margin-bottom:16px;">
+    <p>执行语句：<code style="color:#a5b4fc;font-size:14px;">UPDATE accounts SET balance = balance - 100 WHERE id = 1;</code></p>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+    <button class="btn btn-blue" onclick="updateNext()" id="btn-next">▶ 下一步</button>
+    <button class="btn btn-gray" onclick="updateReset()">↺ 重置</button>
+    <span id="step-counter" style="padding:8px 12px;font-size:13px;color:#64748b;display:flex;align-items:center;">步骤 0 / 8</span>
+  </div>
+
+  <div id="steps-container" class="flow-wrap"></div>
+  <div class="flow-log" id="flow-log">点击"下一步"开始演示...</div>
+
+  <div class="tip" style="margin-top:16px;">
+    <div class="tip-t">核心记忆口诀</div>
+    <p>undo → 改Buffer Pool → redo(prepare) → binlog → commit → redo(commit)<br>
+    先写undo（能回滚） → 改内存（脏页） → redo保证持久性 → binlog用于主从复制 → 两阶段提交</p>
+  </div>
+</div>
+
+<!-- ② 三大日志对比 -->
+<div id="s-logs" class="section">
+  <h1>② 三大日志对比</h1>
+  <p class="sub">undo log / redo log / binlog 各司其职，缺一不可</p>
+
+  <table>
+    <tr><th>维度</th><th><span class="tag tp">undo log</span></th><th><span class="tag tg">redo log</span></th><th><span class="tag ty">binlog</span></th></tr>
+    <tr><td>所属层</td><td>InnoDB 引擎层</td><td>InnoDB 引擎层</td><td>MySQL Server 层（所有引擎通用）</td></tr>
+    <tr><td>主要作用</td><td>事务回滚 + MVCC版本链</td><td>崩溃恢复（保证持久性）</td><td>主从复制 + 数据恢复</td></tr>
+    <tr><td>写入时机</td><td>事务执行 DML <strong>之前</strong></td><td>数据页修改后（prepare阶段）</td><td>事务<strong>提交时</strong>一次性写入</td></tr>
+    <tr><td>日志形式</td><td>每次修改的逆操作（UPDATE记旧值）</td><td>物理日志（记录哪页哪偏移改成什么）</td><td>逻辑日志（SQL语句 或 行变化）</td></tr>
+    <tr><td>大小</td><td>事务结束后可被purge回收</td><td><strong>循环写</strong>，固定大小（4个1GB文件）</td><td>追加写，可配置定期清理</td></tr>
+    <tr><td>崩溃后角色</td><td>回滚未提交事务</td><td>重做已提交但未刷盘的事务</td><td>不参与崩溃恢复，用于重放同步</td></tr>
+  </table>
+
+  <div class="card hl" style="margin-top:16px;">
+    <h2 style="margin-top:0;color:#fbbf24;">为什么需要两阶段提交？</h2>
+    <p>如果不做两阶段提交，redo log 和 binlog 可能不一致：</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <div style="flex:1;min-width:200px;background:#3e1a1a;border-radius:8px;padding:12px;border:1px solid #7f1d1d;">
+        <div style="font-size:12px;color:#fca5a5;font-weight:700;margin-bottom:6px;">❌ 先写redo，崩溃，没写binlog</div>
+        <div style="font-size:12px;color:#9ca3af;">重启后：InnoDB按redo恢复，数据有修改。但binlog没有这条记录，从库同步后数据不一致。</div>
+      </div>
+      <div style="flex:1;min-width:200px;background:#3e1a1a;border-radius:8px;padding:12px;border:1px solid #7f1d1d;">
+        <div style="font-size:12px;color:#fca5a5;font-weight:700;margin-bottom:6px;">❌ 先写binlog，崩溃，没写redo</div>
+        <div style="font-size:12px;color:#9ca3af;">重启后：InnoDB回滚事务（没redo），数据回到旧值。但binlog有记录，从库同步后多了这条，主从不一致。</div>
+      </div>
+    </div>
+    <div style="background:#14532d;border-radius:8px;padding:12px;margin-top:8px;">
+      <div style="font-size:12px;color:#4ade80;font-weight:700;margin-bottom:6px;">✅ 两阶段提交解决方案</div>
+      <div style="font-size:12px;color:#86efac;">redo log(prepare) → binlog → redo log(commit)<br>
+      崩溃恢复时：redo有prepare但没commit → 检查binlog是否有记录 → 有就提交，没有就回滚。主从永远一致。</div>
+    </div>
+  </div>
+
+  <h2>redo log 为什么用循环写？</h2>
+  <div class="card">
+    <p>redo log 只有 4 个 1GB 的文件（共4GB），写满就从头覆盖。</p>
+    <div style="background:#131624;border-radius:8px;padding:14px;margin:10px 0;text-align:center;">
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;">redo log 循环结构</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;">
+        <div style="width:60px;height:60px;border-radius:50%;border:3px solid #6366f1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:#a5b4fc;">ib_log<br>file0</div>
+        <div style="color:#4a5568;font-size:20px;">→</div>
+        <div style="width:60px;height:60px;border-radius:50%;border:3px solid #6366f1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:#a5b4fc;">ib_log<br>file1</div>
+        <div style="color:#4a5568;font-size:20px;">→</div>
+        <div style="width:60px;height:60px;border-radius:50%;border:3px dashed #4a5568;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10px;color:#64748b;">...更多<br>文件</div>
+        <div style="color:#6366f1;font-size:20px;">↩</div>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:#94a3b8;">
+        write pos（写入位置）追着 checkpoint（已刷盘位置）跑<br>
+        write pos 追上 checkpoint → 必须先推进 checkpoint（把脏页刷盘）才能继续写
+      </div>
+    </div>
+    <div class="tip">
+      <div class="tip-t">WAL（Write-Ahead Log）原则</div>
+      <p>先写日志（redo log），再改数据页。这样崩溃了可以用日志恢复，不用每次都同步刷数据页到磁盘（顺序写比随机写快很多）。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ③ MVCC版本链 -->
+<div id="s-mvcc" class="section">
+  <h1>③ MVCC 版本链</h1>
+  <p class="sub">每次修改都保留旧版本，形成链表，读历史版本不加锁</p>
+
+  <div class="card" style="margin-bottom:16px;">
+    <p>每行数据有两个隐藏字段：<strong style="color:#a5b4fc;">DB_TRX_ID</strong>（最后修改它的事务ID）和 <strong style="color:#a5b4fc;">DB_ROLL_PTR</strong>（回滚指针，指向undo log里的上一个版本）。</p>
+    <p>每次修改时，新版本放在数据页，旧版本写入 undo log，通过回滚指针串成一条链。</p>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    <button class="btn btn-blue" onclick="mvccUpdate(10)">事务10: balance=800→700</button>
+    <button class="btn btn-blue" onclick="mvccUpdate(20)">事务20: balance=700→600</button>
+    <button class="btn btn-blue" onclick="mvccUpdate(30)">事务30: balance=600→500</button>
+    <button class="btn btn-gray" onclick="mvccReset()">↺ 重置</button>
+  </div>
+
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">← 最新版本（数据页）&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;旧版本（undo log）→</div>
+  <div class="version-chain" id="version-chain">
+    <div class="ver-node" style="background:#14532d;border:2px solid #22c55e;" onclick="showVer('init')">
+      <div style="font-size:11px;color:#94a3b8;">当前版本</div>
+      <div style="font-weight:700;color:#4ade80;font-size:15px;">balance=800</div>
+      <div class="trx-badge" style="background:#1a3a2a;color:#4ade80;">trx_id=5</div>
+    </div>
+  </div>
+  <div id="ver-detail" class="card" style="min-height:60px;margin-top:8px;">
+    <p style="color:#64748b;">👆 点击版本节点查看详情</p>
+  </div>
+
+  <h2>版本可见性判断（MVCC核心）</h2>
+  <div class="card">
+    <p style="font-size:13px;">读取某一行时，按以下规则判断哪个版本对当前事务可见：</p>
+    <div style="background:#131624;border-radius:8px;padding:14px;margin:10px 0;font-family:'Courier New',monospace;font-size:12px;line-height:2;">
+      <div style="color:#4ade80;">如果 trx_id &lt; min_trx_id&nbsp;&nbsp;→ <span style="color:#4ade80;">可见</span>（创建ReadView前就提交了）</div>
+      <div style="color:#f87171;">如果 trx_id >= max_trx_id&nbsp;→ <span style="color:#f87171;">不可见</span>（创建ReadView后才开启）</div>
+      <div style="color:#fbbf24;">如果在 m_ids 里&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <span style="color:#f87171;">不可见</span>（还没提交的活跃事务）</div>
+      <div style="color:#4ade80;">不在 m_ids 里&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <span style="color:#4ade80;">可见</span>（已提交）</div>
+      <div style="color:#94a3b8;margin-top:4px;">不可见？沿 ROLL_PTR 指针往链表后面找，直到找到第一个可见版本</div>
+    </div>
+  </div>
+
+  <div id="mvcc-log" class="flow-log" style="margin-top:12px;">等待操作...</div>
+</div>
+
+<!-- ④ ReadView & RC/RR -->
+<div id="s-readview" class="section">
+  <h1>④ Read View — RC 和 RR 的本质区别</h1>
+  <p class="sub">同样的MVCC机制，只因Read View创建时机不同，产生了完全不同的行为</p>
+
+  <div class="card hl" style="margin-bottom:16px;">
+    <p>
+      <strong style="color:#3b82f6;">RC（读已提交）</strong>：每次 SELECT 都重新创建一个 Read View → 每次都能看到别人最新提交的数据 → 不可重复读<br>
+      <strong style="color:#22c55e;">RR（可重复读）</strong>：整个事务只在第一次 SELECT 时创建 Read View，之后复用 → 永远看同一个快照 → 可重复读
+    </p>
+  </div>
+
+  <div class="rv-scene">
+    <div class="rv-box rv-rc">
+      <div style="font-size:14px;font-weight:700;color:#60a5fa;margin-bottom:12px;">🔵 RC 隔离级别</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">点击SQL查看此时的Read View状态：</div>
+      <div class="sql-line" onclick="rcStep(0)">BEGIN;</div>
+      <div class="sql-line" onclick="rcStep(1)">SELECT balance FROM accounts WHERE id=1; -- ① 第一次查</div>
+      <div style="font-size:11px;color:#f59e0b;padding:4px 8px;margin:4px 0;">-- 此时事务B提交了 balance=600 的修改 --</div>
+      <div class="sql-line" onclick="rcStep(2)">SELECT balance FROM accounts WHERE id=1; -- ② 第二次查</div>
+      <div class="sql-line" onclick="rcStep(3)">COMMIT;</div>
+      <div id="rc-result" style="margin-top:10px;min-height:60px;background:#131624;border-radius:8px;padding:10px;font-size:12px;color:#94a3b8;">
+        点击SQL查看Read View变化
+      </div>
+    </div>
+    <div class="rv-box rv-rr">
+      <div style="font-size:14px;font-weight:700;color:#4ade80;margin-bottom:12px;">🟢 RR 隔离级别</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">点击SQL查看此时的Read View状态：</div>
+      <div class="sql-line" onclick="rrStep(0)">BEGIN;</div>
+      <div class="sql-line" onclick="rrStep(1)">SELECT balance FROM accounts WHERE id=1; -- ① 第一次查</div>
+      <div style="font-size:11px;color:#f59e0b;padding:4px 8px;margin:4px 0;">-- 此时事务B提交了 balance=600 的修改 --</div>
+      <div class="sql-line" onclick="rrStep(2)">SELECT balance FROM accounts WHERE id=1; -- ② 第二次查</div>
+      <div class="sql-line" onclick="rrStep(3)">COMMIT;</div>
+      <div id="rr-result" style="margin-top:10px;min-height:60px;background:#131624;border-radius:8px;padding:10px;font-size:12px;color:#94a3b8;">
+        点击SQL查看Read View变化
+      </div>
+    </div>
+  </div>
+
+  <h2>Read View 的四个关键属性</h2>
+  <table>
+    <tr><th>属性</th><th>含义</th><th>用于判断</th></tr>
+    <tr><td><code style="color:#a5b4fc;">m_ids</code></td><td>生成ReadView时所有活跃（未提交）的事务ID列表</td><td>在列表里 = 还未提交 = 不可见</td></tr>
+    <tr><td><code style="color:#a5b4fc;">min_trx_id</code></td><td>m_ids 中最小的事务ID</td><td>trx_id < 此值 = 肯定已提交 = 可见</td></tr>
+    <tr><td><code style="color:#a5b4fc;">max_trx_id</code></td><td>下一个将分配的事务ID（当前最大+1）</td><td>trx_id >= 此值 = 还没开启 = 不可见</td></tr>
+    <tr><td><code style="color:#a5b4fc;">creator_trx_id</code></td><td>创建此ReadView的事务ID</td><td>= 自己修改的，永远可见</td></tr>
+  </table>
+
+  <div class="tip">
+    <div class="tip-t">长事务危害（RR下）</div>
+    <p>RR隔离级别下，Read View 活到事务结束。<br>
+    如果有个事务开启后一直不提交（比如忘了COMMIT），它的 min_trx_id 会阻止 purge 线程清理 undo log。<br>
+    期间产生的所有版本都无法删除 → undo log 膨胀 → 磁盘爆满！<br>
+    这就是为什么要避免长事务，线上一定要设置 innodb_lock_wait_timeout。</p>
+  </div>
+</div>
+
+<!-- ⑤ 崩溃恢复 -->
+<div id="s-crash" class="section">
+  <h1>⑤ 崩溃恢复流程</h1>
+  <p class="sub">MySQL 崩溃重启后，靠 redo log + undo log 保证数据一致性。点击各崩溃点查看恢复策略</p>
+
+  <div class="card" style="margin-bottom:16px;">
+    <p>正常提交流程：<code style="color:#a5b4fc;">undo写入 → 改Buffer Pool → redo(prepare) → binlog写入 → redo(commit)</code></p>
+    <p>MySQL 重启后，会扫描 redo log，根据 redo 和 binlog 的状态决定每个事务的命运。</p>
+  </div>
+
+  <div class="crash-scene">
+    <div class="timeline" id="crash-timeline">
+      <div class="tl-item" onclick="showCrash(0)">
+        <div><div class="tl-dot" style="background:#1e3a5f;border-color:#3b82f6;"></div><div class="tl-line"></div></div>
+        <div class="tl-box"><div class="tl-title" style="color:#93c5fd;">步骤1：写 undo log</div><div class="tl-desc">记录旧值，保证可以回滚</div></div>
+      </div>
+      <div class="tl-item" onclick="showCrash(1)">
+        <div><div class="tl-dot" style="background:#1e3a5f;border-color:#3b82f6;"></div><div class="tl-line"></div></div>
+        <div class="tl-box"><div class="tl-title" style="color:#93c5fd;">步骤2：修改 Buffer Pool 脏页</div><div class="tl-desc">内存里的数据页被修改，还未刷盘</div></div>
+      </div>
+      <div class="tl-item" onclick="showCrash(2)">
+        <div><div class="tl-dot" style="background:#451a03;border-color:#f59e0b;"></div><div class="tl-line"></div></div>
+        <div class="tl-box"><div class="tl-title" style="color:#fbbf24;">步骤3：写 redo log（prepare状态）</div><div class="tl-desc">持久化修改意图到磁盘，还未提交</div></div>
+      </div>
+      <div class="tl-item" onclick="showCrash(3)">
+        <div><div class="tl-dot" style="background:#451a03;border-color:#f59e0b;"></div><div class="tl-line"></div></div>
+        <div class="tl-box"><div class="tl-title" style="color:#fbbf24;">步骤4：写 binlog</div><div class="tl-desc">主从复制的日志，一次性写入</div></div>
+      </div>
+      <div class="tl-item" onclick="showCrash(4)">
+        <div><div class="tl-dot" style="background:#14532d;border-color:#22c55e;"></div><div class="tl-line"></div></div>
+        <div class="tl-box"><div class="tl-title" style="color:#4ade80;">步骤5：redo log 标记 commit ✅</div><div class="tl-desc">事务正式提交，一切完成</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="recovery-panel show" id="crash-detail">
+    <div style="font-size:13px;color:#94a3b8;">👆 点击任意步骤，看在此处崩溃后如何恢复</div>
+  </div>
+
+  <div class="tip" style="margin-top:16px;">
+    <div class="tip-t">一句话总结崩溃恢复规则</div>
+    <p>
+      redo有commit标记 → <span style="color:#4ade80;">直接提交（重放redo）</span><br>
+      redo有prepare但binlog也有 → <span style="color:#4ade80;">提交（两阶段提交达成一致）</span><br>
+      redo有prepare但binlog没有 → <span style="color:#f87171;">回滚（用undo log撤销）</span><br>
+      redo都没有 → <span style="color:#f87171;">回滚（事务从未开始）</span>
+    </p>
+  </div>
+</div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'))
+  document.getElementById('s-'+id).classList.add('active')
+  event.target.classList.add('active')
+}
+
+// ① UPDATE流程
+const updateSteps=[
+  {title:'① 写 undo log',desc:'记录旧值 balance=1000，用于回滚和MVCC。必须在改数据前写！',bg:'#2d1a4a',num:'#a855f7',
+   log:'[undo] 写入 undo log: balance(id=1) 旧值=1000，trx_id=42\n[undo] undo log 存储在 undo tablespace，持久化到磁盘'},
+  {title:'② 修改 Buffer Pool 脏页',desc:'在内存中找到id=1这行，把balance从1000改为900。此时数据页是"脏页"，未刷盘。',bg:'#1e3a5f',num:'#3b82f6',
+   log:'[buffer pool] 加载页 Page(table=accounts,page=3) 到内存\n[buffer pool] 修改 balance: 1000 → 900，标记为脏页\n[buffer pool] 此时磁盘上还是旧值！'},
+  {title:'③ 写 redo log（prepare状态）',desc:'把"对Page3的修改"写入redo log，标记为prepare。顺序写磁盘，很快。',bg:'#1a3e1e',num:'#22c55e',
+   log:'[redo] 写入 redo log: PAGE_ID=3, OFFSET=xxx, NEW_VAL=900\n[redo] redo log 状态: PREPARE（还没提交）\n[redo] 顺序追加写，比随机写数据页快得多 (WAL原则)'},
+  {title:'④ 写 binlog',desc:'将这条SQL的变更写入binlog，用于主从复制。事务提交时一次性写入。',bg:'#451a03',num:'#f59e0b',
+   log:'[binlog] 写入 binlog: UPDATE accounts SET balance=900 WHERE id=1\n[binlog] binlog格式: ROW格式（记录行变化，推荐）\n[binlog] 也可以是STATEMENT格式（记录SQL语句）'},
+  {title:'⑤ redo log 标记 COMMIT',desc:'redo log 状态从 prepare 改为 commit，两阶段提交完成！',bg:'#1a3e3e',num:'#2dd4bf',
+   log:'[redo] redo log 状态: PREPARE → COMMIT ✅\n[redo] 两阶段提交完成，事务正式提交\n[txn] 事务42提交成功，返回客户端'},
+  {title:'⑥ Buffer Pool 脏页异步刷盘',desc:'后台刷脏线程（checkpoint）定期把脏页写到磁盘，不阻塞事务。',bg:'#1a1e3e',num:'#4a6fa5',
+   log:'[checkpoint] 后台线程异步将脏页刷到磁盘\n[checkpoint] 推进 checkpoint 位置，释放 redo log 空间\n[checkpoint] 这个过程不阻塞新事务！'},
+  {title:'⑦ purge 线程清理 undo log',desc:'当没有任何事务还在引用旧版本时，purge线程异步删除undo log。',bg:'#2a1a0a',num:'#92400e',
+   log:'[purge] 检查：是否还有活跃的 Read View 引用 trx_id=42 的版本？\n[purge] 没有 → 可以安全删除 undo log\n[purge] RR隔离级别下长事务会阻止purge，导致undo膨胀！'},
+  {title:'✅ 完成！',desc:'客户端收到成功响应。整个过程保证了ACID中的A（原子性）、C（一致性）、D（持久性）。',bg:'#14532d',num:'#22c55e',
+   log:'[done] 事务完成！\n[acid] A(原子性): undo保证可回滚\n[acid] I(隔离性): MVCC + 锁\n[acid] D(持久性): redo log WAL保证\n[acid] C(一致性): 由AID共同保证'},
+]
+let curStep=-1
+function updateNext(){
+  if(curStep>=updateSteps.length-1){updateReset();return}
+  curStep++
+  renderSteps()
+  const s=updateSteps[curStep]
+  const log=document.getElementById('flow-log')
+  log.innerHTML+=`<div class="fl-info">── 步骤${curStep+1} ──</div>`
+  s.log.split('\n').forEach(l=>log.innerHTML+=`<div>${l}</div>`)
+  log.scrollTop=log.scrollHeight
+  document.getElementById('step-counter').textContent=`步骤 ${curStep+1} / ${updateSteps.length}`
+  if(curStep>=updateSteps.length-1)document.getElementById('btn-next').textContent='↺ 重新演示'
+}
+function renderSteps(){
+  const container=document.getElementById('steps-container')
+  let h=''
+  const cols=Math.ceil(updateSteps.length/2)
+  for(let row=0;row<2;row++){
+    h+='<div class="step-row">'
+    for(let col=0;col<cols;col++){
+      const i=row*cols+col
+      if(i>=updateSteps.length)break
+      const s=updateSteps[i]
+      const cls=i===curStep?'active':i<curStep?'done':''
+      h+=`<div class="step-box ${cls}" style="background:${s.bg}">
+        <div class="step-num" style="background:${s.num};color:#fff;">${i+1}</div>
+        <div class="step-title">${s.title}</div>
+        <div class="step-desc">${s.desc}</div>
+      </div>`
+    }
+    h+='</div>'
+  }
+  container.innerHTML=h
+}
+function updateReset(){
+  curStep=-1
+  renderSteps()
+  document.getElementById('flow-log').innerHTML='点击"下一步"开始演示...'
+  document.getElementById('step-counter').textContent='步骤 0 / '+updateSteps.length
+  document.getElementById('btn-next').textContent='▶ 下一步'
+}
+renderSteps()
+
+// ③ MVCC
+let mvccChain=[{bal:800,trx:5,label:'原始版本'}]
+let mvccLog=''
+function mvccLog2(msg,cls=''){const el=document.getElementById('mvcc-log');el.innerHTML+=`<div style="color:${cls||'#94a3b8'}">${msg}</div>`;el.scrollTop=el.scrollHeight}
+function mvccRender(){
+  const chain=document.getElementById('version-chain')
+  const colors=['#14532d','#1a2f4a','#2a1a0a','#1a1e3e','#2d1a1a']
+  const bcolors=['#22c55e','#3b82f6','#f59e0b','#6366f1','#ef4444']
+  let h=''
+  mvccChain.forEach((v,i)=>{
+    const c=colors[i%colors.length],bc=bcolors[i%bcolors.length]
+    const isLatest=i===0
+    h+=`<div class="ver-node" style="background:${c};border:2px solid ${isLatest?bc:'#2d3148'};" onclick="showVer(${i})">
+      <div style="font-size:10px;color:#94a3b8;">${isLatest?'当前版本':'undo log'}</div>
+      <div style="font-weight:700;color:${bc};font-size:14px;">balance=${v.bal}</div>
+      <div class="trx-badge" style="background:${c};color:${bc};border:1px solid ${bc}40;">trx_id=${v.trx}</div>
+      <div style="font-size:10px;color:#4a5568;margin-top:3px;">${v.label}</div>
+    </div>`
+    if(i<mvccChain.length-1)h+=`<div class="ver-arrow">→<br><span style="font-size:9px;color:#4a5568;">ROLL_PTR</span></div>`
+  })
+  chain.innerHTML=h
+}
+function showVer(i){
+  const v=mvccChain[i]
+  const el=document.getElementById('ver-detail')
+  el.innerHTML=`<h3 style="color:#a5b4fc;margin-bottom:8px;">版本详情 (index=${i})</h3>
+  <p style="font-size:13px;"><strong>balance = ${v.bal}</strong>，由事务 ${v.trx} 写入</p>
+  <p style="font-size:13px;">DB_ROLL_PTR → ${i<mvccChain.length-1?'指向 undo log 里 balance='+mvccChain[i+1].bal+' 的版本':'null（原始版本，无更旧版本）'}</p>
+  <p style="font-size:13px;color:#94a3b8;">
+    ${i===0?'这是数据页里的当前版本，最新数据':'这个版本存在 undo tablespace 里，通过回滚指针串联'}</p>`
+  el.classList.remove('ani');void el.offsetWidth;el.classList.add('ani')
+}
+function mvccUpdate(trxId){
+  const old=mvccChain[0].bal
+  const newBal=old-100
+  mvccChain.unshift({bal:newBal,trx:trxId,label:'事务'+trxId+'修改'})
+  mvccRender()
+  mvccLog2(`[事务${trxId}] 修改 balance: ${old} → ${newBal}`,'#4ade80')
+  mvccLog2(`[undo] 旧值 balance=${old} 存入 undo log，DB_ROLL_PTR 指向它`,'#a5b4fc')
+  mvccLog2(`[mvcc] 版本链现在有 ${mvccChain.length} 个版本，读历史版本沿链往后找`,'#94a3b8')
+}
+function mvccReset(){
+  mvccChain=[{bal:800,trx:5,label:'原始版本'}]
+  document.getElementById('mvcc-log').innerHTML='等待操作...'
+  document.getElementById('ver-detail').innerHTML='<p style="color:#64748b;">👆 点击版本节点查看详情</p>'
+  mvccRender()
+}
+mvccRender()
+
+// ④ ReadView
+const rcSteps=[
+  {rv:'尚未创建Read View',res:'事务开始，尚未执行任何SQL',color:'#64748b'},
+  {rv:'新建 Read View\nm_ids=[15,20], min=15, max=21\n（此时事务B=20未提交）',res:'查询结果：balance=800（trx_id=5，可见：5 < min_trx_id=15）',color:'#4ade80'},
+  {rv:'⭐ RC关键：重新创建新的Read View！\n新m_ids=[15], min=15, max=22\n（事务B=20已提交，不再活跃）',res:'查询结果：balance=600（trx_id=20，已不在m_ids中，可见！）\n→ 不可重复读！',color:'#fbbf24'},
+  {rv:'Read View 销毁',res:'事务提交完成',color:'#64748b'},
+]
+const rrSteps=[
+  {rv:'尚未创建Read View',res:'事务开始，尚未执行任何SQL',color:'#64748b'},
+  {rv:'新建 Read View\nm_ids=[15,20], min=15, max=21\n（首次SELECT时创建，之后复用）',res:'查询结果：balance=800（trx_id=5，可见：5 < min_trx_id=15）',color:'#4ade80'},
+  {rv:'⭐ RR关键：复用第一次的 Read View！\nm_ids=[15,20]（事务B=20还在列表里！）',res:'查询结果：仍然是balance=800（trx_id=20在m_ids里，不可见！走版本链找到旧值）\n→ 可重复读！',color:'#4ade80'},
+  {rv:'Read View 销毁（事务结束才销毁）',res:'事务提交完成，RR级别下长事务危害大！',color:'#64748b'},
+]
+function rcStep(i){
+  document.querySelectorAll('.rv-rc .sql-line').forEach((s,j)=>s.classList.toggle('active-sql',j===i))
+  const s=rcSteps[i]
+  document.getElementById('rc-result').innerHTML=`
+    <div class="rv-indicator ${s.color==='#64748b'?'':'rv-alive'}" style="background:${s.color}22;color:${s.color};border:1px solid ${s.color};">[RC] Read View 状态</div>
+    <div style="font-family:'Courier New',monospace;font-size:11px;color:#a5b4fc;margin:6px 0;white-space:pre;">${s.rv}</div>
+    <div style="font-size:12px;color:#e2e8f0;margin-top:6px;">${s.res}</div>`
+}
+function rrStep(i){
+  document.querySelectorAll('.rv-rr .sql-line').forEach((s,j)=>s.classList.toggle('active-sql',j===i))
+  const s=rrSteps[i]
+  document.getElementById('rr-result').innerHTML=`
+    <div class="rv-indicator ${s.color==='#64748b'?'':'rv-alive'}" style="background:${s.color}22;color:${s.color};border:1px solid ${s.color};">[RR] Read View 状态</div>
+    <div style="font-family:'Courier New',monospace;font-size:11px;color:#a5b4fc;margin:6px 0;white-space:pre;">${s.rv}</div>
+    <div style="font-size:12px;color:#e2e8f0;margin-top:6px;">${s.res}</div>`
+}
+
+// ⑤ 崩溃恢复
+const crashData=[
+  {title:'崩溃点1：undo写完，还没改Buffer Pool',bg:'#3e1a1a',
+   rec:'<div style="color:#f87171;font-weight:700;margin-bottom:6px;">💥 崩溃在此处</div><p style="font-size:13px;">redo log 里没有任何记录。<br>重启后：InnoDB扫描redo log，没找到此事务的记录 → <strong style="color:#4ade80;">什么都不用做，数据从未被修改过</strong>。<br>undo log 虽然存在但因为没有对应的数据修改，无需回滚。<br><span style="color:#4ade80;">结果：数据安全，事务未提交，自动回滚。</span></p>'},
+  {title:'崩溃点2：改了Buffer Pool，还没写redo',bg:'#3e1a1a',
+   rec:'<div style="color:#f87171;font-weight:700;margin-bottom:6px;">💥 崩溃在此处</div><p style="font-size:13px;">Buffer Pool里的修改在崩溃时丢失（内存易失），磁盘上是旧值。<br>redo log 没有记录这个修改。<br>重启后：磁盘数据是旧值，redo里没有，undo里有旧值。<br><strong style="color:#4ade80;">结果：数据自动保持一致，无需任何操作。Buffer Pool丢失影响性能但不影响正确性。</strong></p>'},
+  {title:'崩溃点3：redo(prepare)写完，binlog未写',bg:'#451a03',
+   rec:'<div style="color:#fbbf24;font-weight:700;margin-bottom:6px;">💥 崩溃在此处（两阶段提交的关键！）</div><p style="font-size:13px;">redo log 有 PREPARE 状态的记录，但 binlog 里没有这条事务。<br>重启后扫描 redo log：发现 prepare 状态的事务 → 检查 binlog → 没有找到 → <strong style="color:#f87171;">回滚！</strong><br>使用 undo log 将数据恢复到旧值。<br><span style="color:#f87171;">结果：事务回滚，主从一致（binlog没有这条记录，从库也没有）。</span></p>'},
+  {title:'崩溃点4：binlog写完，redo commit未写',bg:'#451a03',
+   rec:'<div style="color:#fbbf24;font-weight:700;margin-bottom:6px;">💥 崩溃在此处（两阶段提交的关键！）</div><p style="font-size:13px;">redo log 有 PREPARE 状态，binlog 也写入了。<br>重启后扫描 redo log：发现 prepare 状态 → 检查 binlog → 找到了！→ <strong style="color:#4ade80;">提交！</strong><br>重放 redo log 让修改生效，并将 redo 状态改为 COMMIT。<br><span style="color:#4ade80;">结果：事务提交，主从一致（binlog有记录，从库也能同步）。</span></p>'},
+  {title:'正常完成：redo commit已写',bg:'#14532d',
+   rec:'<div style="color:#4ade80;font-weight:700;margin-bottom:6px;">✅ 正常提交完成</div><p style="font-size:13px;">redo log 有 COMMIT 标记，事务已完成。<br>如果 Buffer Pool 的脏页还没刷盘就崩溃：重启后重放 redo log，把修改刷到磁盘。<br><span style="color:#4ade80;">结果：数据完整，事务提交成功。</span></p>'},
+]
+function showCrash(i){
+  const d=crashData[i]
+  const panel=document.getElementById('crash-detail')
+  panel.innerHTML=`<div style="background:${d.bg};border-radius:8px;padding:14px;">${d.rec}</div>`
+  panel.classList.add('show')
+  panel.classList.remove('ani');void panel.offsetWidth;panel.classList.add('ani')
+}
+</script>
+</body>
+</html>
