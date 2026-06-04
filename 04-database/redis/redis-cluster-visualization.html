@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redis 集群 & 哨兵 - 动态可视化</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+h1 { text-align: center; padding: 24px; font-size: 22px; color: #f85149; border-bottom: 1px solid #21262d; }
+.tabs { display: flex; gap: 4px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #21262d; flex-wrap: wrap; }
+.tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; background: #21262d; color: #8b949e; transition: all .2s; font-size: 13px; }
+.tab.active { background: #f85149; color: #fff; }
+.tab:hover:not(.active) { background: #30363d; color: #e6edf3; }
+.section { display: none; padding: 20px; }
+.section.active { display: block; }
+.card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.card h3 { color: #f85149; margin-bottom: 12px; font-size: 15px; }
+.btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 4px; transition: all .2s; }
+.btn-red { background: #b91c1c; color: #fff; } .btn-red:hover { background: #dc2626; }
+.btn-blue { background: #1f6feb; color: #fff; } .btn-blue:hover { background: #388bfd; }
+.btn-green { background: #238636; color: #fff; } .btn-green:hover { background: #2ea043; }
+.btn-orange { background: #9e6a03; color: #fff; } .btn-orange:hover { background: #bb8009; }
+.btn-gray { background: #30363d; color: #e6edf3; } .btn-gray:hover { background: #3d444d; }
+.btn-purple { background: #6e40c9; color: #fff; } .btn-purple:hover { background: #8957e5; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-red { background: #3a1a1a; color: #f85149; }
+.badge-blue { background: #1f3a5f; color: #58a6ff; }
+.badge-green { background: #1a3a2a; color: #3fb950; }
+.badge-orange { background: #3a2a00; color: #e3b341; }
+.badge-purple { background: #2a1a4a; color: #bc8cff; }
+.badge-gray { background: #21262d; color: #8b949e; }
+.log-box { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; min-height: 80px; max-height: 220px; overflow-y: auto; }
+.log-line { margin: 2px 0; color: #3fb950; }
+.log-line.warn { color: #e3b341; }
+.log-line.err { color: #f85149; }
+.log-line.info { color: #58a6ff; }
+.log-line.gray { color: #8b949e; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.flex { display: flex; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
+.flex-wrap { flex-wrap: wrap; } .mt-8 { margin-top: 8px; } .mb-8 { margin-bottom: 8px; }
+.text-sm { font-size: 12px; } .text-muted { color: #8b949e; }
+.text-red { color: #f85149; } .text-green { color: #3fb950; }
+.text-blue { color: #58a6ff; } .text-orange { color: #e3b341; } .text-purple { color: #bc8cff; }
+.interview-tip { background: #1a2a1a; border-left: 3px solid #3fb950; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 12px; }
+.interview-tip .label { font-size: 11px; color: #3fb950; font-weight: 600; margin-bottom: 4px; }
+.interview-tip p { font-size: 13px; color: #c9d1d9; line-height: 1.6; }
+.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-table th { background: #21262d; padding: 10px 12px; text-align: left; color: #e3b341; border: 1px solid #30363d; }
+.compare-table td { padding: 9px 12px; border: 1px solid #21262d; color: #c9d1d9; }
+.compare-table tr:hover td { background: #1a1f27; }
+.good { color: #3fb950; } .bad { color: #f85149; }
+
+/* ===== SENTINEL NODES ===== */
+.sentinel-area { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; margin: 10px 0; }
+.redis-node { background: #161b22; border: 2px solid #30363d; border-radius: 8px; padding: 10px 14px; text-align: center; min-width: 90px; transition: all .3s; cursor: pointer; }
+.redis-node.master { border-color: #f85149; }
+.redis-node.slave { border-color: #3fb950; }
+.redis-node.dead { border-color: #3a1a1a; opacity: 0.5; background: #0d1117; }
+.redis-node.promoted { border-color: #e3b341; animation: pulse 1s infinite alternate; }
+.redis-node.sentinel-node { border-color: #58a6ff; min-width: 70px; }
+.redis-node .node-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.redis-node .node-status { font-size: 11px; color: #8b949e; }
+.redis-node .node-data { font-size: 10px; font-family: monospace; background: #010409; border-radius: 4px; padding: 4px; margin-top: 4px; }
+@keyframes pulse { from { box-shadow: 0 0 0 0 rgba(227, 179, 65, 0.4); } to { box-shadow: 0 0 0 8px rgba(227, 179, 65, 0); } }
+
+.sentinel-group { background: #0d1a2a; border: 1px solid #21262d; border-radius: 8px; padding: 12px; }
+.sentinel-group h4 { font-size: 12px; color: #58a6ff; margin-bottom: 8px; }
+.redis-group { background: #1a0d0d; border: 1px solid #21262d; border-radius: 8px; padding: 12px; }
+.redis-group h4 { font-size: 12px; color: #f85149; margin-bottom: 8px; }
+
+/* ===== CLUSTER HASH SLOTS ===== */
+.slot-map { display: flex; gap: 4px; flex-wrap: wrap; margin: 10px 0; }
+.slot-seg { height: 24px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; cursor: pointer; transition: all .2s; flex: 1; min-width: 60px; }
+.slot-seg:hover { opacity: 0.8; transform: scaleY(1.1); }
+.slot-0 { background: #1f3a5f; color: #58a6ff; }
+.slot-1 { background: #1a3a2a; color: #3fb950; }
+.slot-2 { background: #2a1a4a; color: #bc8cff; }
+.slot-0b { background: #0a1a30; color: #3a6a9f; border: 1px dashed #58a6ff; }
+.slot-1b { background: #0a2a1a; color: #1a6a3a; border: 1px dashed #3fb950; }
+.slot-2b { background: #1a0a3a; color: #5a3a8f; border: 1px dashed #bc8cff; }
+.cluster-node { background: #161b22; border: 2px solid #30363d; border-radius: 8px; padding: 12px; transition: all .3s; }
+.cluster-node.master-node { border-color: #f85149; }
+.cluster-node.slave-node { border-color: #3fb950; }
+.cluster-node.fail-node { border-color: #3a1a1a; opacity: 0.5; }
+
+/* ===== CONSISTENT HASH ===== */
+.ring-container { position: relative; width: 260px; height: 260px; margin: 0 auto; }
+.ring-svg { position: absolute; top: 0; left: 0; }
+
+/* ===== DIST LOCK ===== */
+.lock-demo { background: #010409; border: 1px solid #21262d; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; }
+.lock-state { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.lock-client { background: #21262d; border-radius: 6px; padding: 8px 12px; min-width: 120px; text-align: center; transition: all .3s; }
+.lock-client.holding { background: #1a3a2a; border: 1px solid #3fb950; }
+.lock-client.waiting { background: #3a2a00; border: 1px solid #e3b341; }
+.lock-client.failed { background: #1a0a0a; border: 1px solid #f85149; }
+</style>
+</head>
+<body>
+<h1>🔴 Redis 集群 & 高可用 · 动态可视化</h1>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab(0)">① 哨兵(Sentinel)</div>
+  <div class="tab" onclick="showTab(1)">② Cluster 哈希槽</div>
+  <div class="tab" onclick="showTab(2)">③ 一致性哈希</div>
+  <div class="tab" onclick="showTab(3)">④ 分布式锁</div>
+  <div class="tab" onclick="showTab(4)">⑤ 高可用对比</div>
+</div>
+
+<!-- ===== SECTION 1: SENTINEL ===== -->
+<div class="section active" id="sec0">
+  <div class="card">
+    <h3>哨兵(Sentinel)模式 — 自动故障转移</h3>
+    <div class="sentinel-area">
+      <!-- Sentinel Cluster -->
+      <div class="sentinel-group">
+        <h4>🔍 Sentinel 集群（3个哨兵）</h4>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div class="redis-node sentinel-node" id="s0"><div class="node-title" style="color:#58a6ff;">Sentinel-1</div><div class="node-status" id="s0-status">监控中</div></div>
+          <div class="redis-node sentinel-node" id="s1"><div class="node-title" style="color:#58a6ff;">Sentinel-2</div><div class="node-status" id="s1-status">监控中</div></div>
+          <div class="redis-node sentinel-node" id="s2"><div class="node-title" style="color:#58a6ff;">Sentinel-3</div><div class="node-status" id="s2-status">监控中</div></div>
+        </div>
+        <div style="font-size:10px;color:#8b949e;margin-top:6px;text-align:center;">PING 每秒一次</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;justify-content:center;font-size:20px;color:#58a6ff;">⇄</div>
+
+      <!-- Redis Cluster -->
+      <div class="redis-group">
+        <h4>Redis 主从集群</h4>
+        <div class="redis-node master" id="master0">
+          <div class="node-title text-red">Master</div>
+          <div class="node-status" id="master-status">running</div>
+          <div class="node-data" id="master-data">keys: 100k<br>offset: 1024</div>
+        </div>
+        <div style="color:#8b949e;text-align:center;margin:4px 0;font-size:12px;">↓ 异步复制</div>
+        <div style="display:flex;gap:8px;">
+          <div class="redis-node slave" id="slave0">
+            <div class="node-title text-green">Slave-1</div>
+            <div class="node-status" id="slave0-status">synced</div>
+            <div class="node-data">offset: 1024</div>
+          </div>
+          <div class="redis-node slave" id="slave1">
+            <div class="node-title text-green">Slave-2</div>
+            <div class="node-status" id="slave1-status">synced</div>
+            <div class="node-data">offset: 1020</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex gap-8 flex-wrap mt-8">
+      <button class="btn btn-red" onclick="killMaster()">💥 Master 宕机</button>
+      <button class="btn btn-blue" onclick="runElection()">🗳 选举新 Master</button>
+      <button class="btn btn-green" onclick="oldMasterRecover()">↩ 旧Master恢复</button>
+      <button class="btn btn-gray" onclick="resetSentinel()">重置</button>
+    </div>
+    <div class="log-box mt-8" id="sentinelLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>哨兵选举流程 & 从库选主优先级</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">故障检测流程</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.9;">
+          <div>① Sentinel 每秒 PING 所有节点</div>
+          <div>② Master 无响应 → <span class="text-orange">主观下线 (SDOWN)</span></div>
+          <div>③ 通知其他 Sentinel 确认</div>
+          <div>④ <span class="text-red">超过半数</span> Sentinel 确认下线</div>
+          <div>⑤ → <span class="text-red">客观下线 (ODOWN)</span></div>
+          <div>⑥ 开始从 Slave 中选新 Master</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">新 Master 选举优先级</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.9;">
+          <div>1. <span class="text-green">replica-priority</span> 越低越优先（默认100）</div>
+          <div>2. <span class="text-green">复制偏移量</span>最大的优先（数据最新）</div>
+          <div>3. Run ID 字典序最小的优先</div>
+          <div style="margin-top:8px;color:#8b949e;font-size:12px;">✅ 选出来的新 Master 数据最全</div>
+          <div style="color:#8b949e;font-size:12px;">✅ 其他 Slave 改为复制新 Master</div>
+          <div style="color:#8b949e;font-size:12px;">✅ 通知客户端新 Master 地址</div>
+        </div>
+      </div>
+    </div>
+    <div class="interview-tip">
+      <div class="label">面试要点</div>
+      <p>哨兵 = 监控 + 自动故障转移 + 通知客户端。过半 Sentinel 认为 Master 挂 → 客观下线 → 按优先级选 Slave 升级 → 通知客户端新地址。部署奇数个哨兵（3或5）防止脑裂。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 2: CLUSTER HASH SLOTS ===== -->
+<div class="section" id="sec1">
+  <div class="card">
+    <h3>Redis Cluster — 16384 个哈希槽</h3>
+    <div class="text-sm text-muted mb-8">共 16384 个槽，分配给各主节点；CRC16(key) % 16384 决定 key 落哪个槽</div>
+
+    <div class="slot-map" id="slotMap">
+      <div class="slot-seg slot-0" onclick="showSlotInfo(0)">Node1<br>0-5460</div>
+      <div class="slot-seg slot-1" onclick="showSlotInfo(1)">Node2<br>5461-10922</div>
+      <div class="slot-seg slot-2" onclick="showSlotInfo(2)">Node3<br>10923-16383</div>
+    </div>
+
+    <div style="background:#010409;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;margin:8px 0;" id="slotInfo">
+      点击上方槽段查看详情，或使用下方按钮演示...
+    </div>
+
+    <div class="grid-3 mt-8">
+      <div class="cluster-node master-node" id="cn0">
+        <div style="font-size:12px;font-weight:600;color:#f85149;">Master-1 <span class="badge badge-red">主</span></div>
+        <div style="font-size:11px;color:#8b949e;margin:4px 0;">槽: 0 ~ 5460</div>
+        <div style="font-size:11px;color:#8b949e;">备: Slave-1</div>
+        <div class="node-data" style="font-size:10px;background:#0d1117;border-radius:4px;padding:4px;margin-top:4px;font-family:monospace;color:#3fb950;" id="cn0-state">running</div>
+      </div>
+      <div class="cluster-node master-node" id="cn1">
+        <div style="font-size:12px;font-weight:600;color:#f85149;">Master-2 <span class="badge badge-red">主</span></div>
+        <div style="font-size:11px;color:#8b949e;margin:4px 0;">槽: 5461 ~ 10922</div>
+        <div style="font-size:11px;color:#8b949e;">备: Slave-2</div>
+        <div class="node-data" style="font-size:10px;background:#0d1117;border-radius:4px;padding:4px;margin-top:4px;font-family:monospace;color:#3fb950;" id="cn1-state">running</div>
+      </div>
+      <div class="cluster-node master-node" id="cn2">
+        <div style="font-size:12px;font-weight:600;color:#f85149;">Master-3 <span class="badge badge-red">主</span></div>
+        <div style="font-size:11px;color:#8b949e;margin:4px 0;">槽: 10923 ~ 16383</div>
+        <div style="font-size:11px;color:#8b949e;">备: Slave-3</div>
+        <div class="node-data" style="font-size:10px;background:#0d1117;border-radius:4px;padding:4px;margin-top:4px;font-family:monospace;color:#3fb950;" id="cn2-state">running</div>
+      </div>
+      <div class="cluster-node slave-node" id="cs0">
+        <div style="font-size:12px;font-weight:600;color:#3fb950;">Slave-1 <span class="badge badge-green">从</span></div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px;">复制 Master-1</div>
+        <div class="node-data" style="font-size:10px;background:#0d1117;border-radius:4px;padding:4px;margin-top:4px;font-family:monospace;color:#3fb950;" id="cs0-state">synced</div>
+      </div>
+      <div class="cluster-node slave-node" id="cs1">
+        <div style="font-size:12px;font-weight:600;color:#3fb950;">Slave-2 <span class="badge badge-green">从</span></div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px;">复制 Master-2</div>
+        <div class="node-data" style="font-size:10px;background:#0d1117;border-radius:4px;padding:4px;margin-top:4px;font-family:monospace;color:#3fb950;" id="cs1-state">synced</div>
+      </div>
+      <div class="cluster-node slave-node" id="cs2">
+        <div style="font-size:12px;font-weight:600;color:#3fb950;">Slave-3 <span class="badge badge-green">从</span></div>
+        <div style="font-size:11px;color:#8b949e;margin-top:4px;">复制 Master-3</div>
+        <div class="node-data" style="font-size:10px;background:#0d1117;border-radius:4px;padding:4px;margin-top:4px;font-family:monospace;color:#3fb950;" id="cs2-state">synced</div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;">
+      <div style="font-size:13px;color:#e3b341;font-weight:600;margin-bottom:8px;">模拟 key 路由</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="keyInput" value="out_order_no_12345" style="background:#010409;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 10px;font-family:monospace;font-size:13px;width:200px;">
+        <button class="btn btn-blue" onclick="routeKey()">计算路由</button>
+        <button class="btn btn-red" onclick="killClusterMaster()">💥 Master-2 宕机</button>
+        <button class="btn btn-green" onclick="recoverCluster()">恢复</button>
+      </div>
+      <div style="font-size:12px;color:#8b949e;margin-top:6px;" id="routeResult"></div>
+    </div>
+    <div class="log-box mt-8" id="clusterLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>为什么是 16384 个槽？</h3>
+    <div class="grid-2">
+      <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+        <div>• 心跳包要携带槽信息</div>
+        <div>• 16384 槽 = <span class="text-green">2KB</span> 位图（2048字节）</div>
+        <div>• 65536 槽 = 8KB，心跳包太大占带宽</div>
+        <div>• 一般集群节点不超过 1000 个</div>
+        <div>• 16384 / 1000 = 每个节点约16槽，足够了</div>
+      </div>
+      <div style="background:#010409;border-radius:6px;padding:10px;font-size:12px;font-family:monospace;">
+        <div style="color:#e3b341;">// key 路由计算</div>
+        <div style="color:#3fb950;">slot = CRC16(key) % 16384</div>
+        <div style="color:#8b949e;margin-top:6px;">// hash tag: {xxx}</div>
+        <div style="color:#3fb950;">key = "order_{123}_status"</div>
+        <div style="color:#8b949e;">→ 只对 {123} 计算 CRC16</div>
+        <div style="color:#8b949e;">→ 强制同一 tag 到同一节点</div>
+        <div style="color:#8b949e;">→ 支持多 key 原子操作</div>
+      </div>
+    </div>
+    <div class="interview-tip">
+      <div class="label">面试要点</div>
+      <p>Cluster = 数据分片 + 去中心化 + 自动故障转移。每个 key 通过 CRC16 % 16384 路由到对应节点，每个节点负责部分槽。客户端连任意节点，路由错了会返回 MOVED 重定向。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 3: CONSISTENT HASH ===== -->
+<div class="section" id="sec2">
+  <div class="card">
+    <h3>一致性哈希 — 为什么用它？和取模哈希区别</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-red mb-8" style="font-size:13px;font-weight:600;">普通取模哈希的问题</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>节点数 = N，key % N 路由</div>
+          <div class="text-red">新增/删除节点 → N 变化</div>
+          <div class="text-red">→ 几乎所有 key 都要重新映射</div>
+          <div class="text-red">→ 缓存大量失效 → 缓存雪崩！</div>
+        </div>
+        <div class="text-green mt-8 mb-8" style="font-size:13px;font-weight:600;">一致性哈希的解决</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>哈希环（0 ~ 2³²）</div>
+          <div>节点映射到环上某个位置</div>
+          <div>key 顺时针找最近节点</div>
+          <div class="text-green">新增节点：只影响相邻节点的 key</div>
+          <div class="text-green">删除节点：只影响该节点的 key</div>
+          <div class="text-green">其他节点不受影响！</div>
+        </div>
+      </div>
+      <div>
+        <canvas id="hashRingCanvas" width="260" height="260" style="border-radius:50%;"></canvas>
+        <div style="text-align:center;font-size:11px;color:#8b949e;margin-top:4px;" id="ringCaption">3个节点的哈希环</div>
+      </div>
+    </div>
+
+    <div class="flex gap-8 flex-wrap mt-8">
+      <button class="btn btn-blue" onclick="addHashNode()">➕ 添加节点</button>
+      <button class="btn btn-red" onclick="removeHashNode()">➖ 删除节点</button>
+      <button class="btn btn-orange" onclick="addVirtualNodes()">⚙ 开启虚拟节点</button>
+      <button class="btn btn-gray" onclick="resetHashRing()">重置</button>
+    </div>
+    <div class="log-box mt-8" id="hashLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>虚拟节点 — 解决数据倾斜</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">问题：数据倾斜</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>节点少 → 分布可能不均匀</div>
+          <div>某节点可能承担 50%+ 的 key</div>
+          <div class="text-red">热点问题、负载不均</div>
+        </div>
+        <div class="text-green mt-8 mb-8" style="font-size:13px;font-weight:600;">解决：虚拟节点</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>每个真实节点映射 N 个虚拟节点</div>
+          <div>虚拟节点分布更均匀</div>
+          <div>key 路由到虚拟节点 → 映射真实节点</div>
+          <div class="text-green">一般 100~200 个虚拟节点/真实节点</div>
+        </div>
+      </div>
+      <div style="background:#010409;border-radius:8px;padding:14px;font-size:12px;font-family:monospace;">
+        <div style="color:#e3b341;">// 虚拟节点命名规则</div>
+        <div style="color:#3fb950;">Node1#VN0, Node1#VN1 ... Node1#VN99</div>
+        <div style="color:#3fb950;">Node2#VN0, Node2#VN1 ... Node2#VN99</div>
+        <div style="margin-top:8px;color:#e3b341;">// 路由</div>
+        <div style="color:#3fb950;">slot = CRC32("out_order_123")</div>
+        <div style="color:#8b949e;">→ 顺时针找最近虚拟节点</div>
+        <div style="color:#8b949e;">→ 虚拟节点对应 → 真实节点</div>
+        <div style="margin-top:8px;color:#e3b341;">// Redis Cluster 不用一致性哈希</div>
+        <div style="color:#8b949e;">// Cluster 用固定16384槽</div>
+        <div style="color:#8b949e;">// 一致性哈希用于自建代理层</div>
+        <div style="color:#8b949e;">// 如 Twemproxy / Codis</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 4: DIST LOCK ===== -->
+<div class="section" id="sec3">
+  <div class="card">
+    <h3>Redis 分布式锁 — SET NX EX + Redisson</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">基础实现</div>
+        <div style="background:#010409;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;line-height:1.8;">
+          <div style="color:#e3b341;"># 加锁（原子操作）</div>
+          <div style="color:#3fb950;">SET lock:pay_{orderId}</div>
+          <div style="color:#3fb950;">    {unique_uuid} NX EX 30</div>
+          <div style="margin-top:6px;color:#e3b341;"># 解锁（Lua脚本保证原子）</div>
+          <div style="color:#3fb950;">if GET(key) == my_uuid then</div>
+          <div style="color:#3fb950;">    DEL(key)</div>
+          <div style="color:#3fb950;">end</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">四大坑 & 解决方案</div>
+        <div style="font-size:12px;color:#c9d1d9;line-height:1.8;">
+          <div>❶ <span class="text-red">锁过期业务未完</span> → Redisson 看门狗续期</div>
+          <div>❷ <span class="text-red">不可重入</span> → Hash 结构记次数</div>
+          <div>❸ <span class="text-red">主从切换锁丢失</span> → RedLock(多节点)</div>
+          <div>❹ <span class="text-red">非原子加锁+过期</span> → SET NX EX 一条命令</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lock Demo -->
+    <div style="margin-top:12px;">
+      <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">并发抢锁模拟</div>
+      <div class="lock-state" id="lockState">
+        <div class="lock-client" id="lc0"><div style="font-weight:600;">Client-A</div><div style="font-size:11px;color:#8b949e;" id="lc0-status">空闲</div></div>
+        <div class="lock-client" id="lc1"><div style="font-weight:600;">Client-B</div><div style="font-size:11px;color:#8b949e;" id="lc1-status">空闲</div></div>
+        <div class="lock-client" id="lc2"><div style="font-weight:600;">Client-C</div><div style="font-size:11px;color:#8b949e;" id="lc2-status">空闲</div></div>
+        <div style="background:#21262d;border-radius:6px;padding:8px 12px;display:flex;flex-direction:column;align-items:center;">
+          <div style="font-size:11px;color:#8b949e;">Redis Lock</div>
+          <div style="font-size:18px;margin-top:2px;" id="lockIcon">🔓</div>
+          <div style="font-size:10px;color:#8b949e;" id="lockHolder">未持有</div>
+        </div>
+      </div>
+
+      <div class="flex gap-8 flex-wrap mt-8">
+        <button class="btn btn-blue" onclick="tryAcquireLock(0)">Client-A 抢锁</button>
+        <button class="btn btn-green" onclick="tryAcquireLock(1)">Client-B 抢锁</button>
+        <button class="btn btn-orange" onclick="tryAcquireLock(2)">Client-C 抢锁</button>
+        <button class="btn btn-red" onclick="releaseLock()">释放锁</button>
+        <button class="btn btn-purple" onclick="simWatchdog()">Redisson 看门狗续期</button>
+        <button class="btn btn-gray" onclick="resetLock()">重置</button>
+      </div>
+      <div class="log-box mt-8" id="lockLog"></div>
+    </div>
+
+    <div class="interview-tip">
+      <div class="label">Redisson 看门狗原理</div>
+      <p>加锁成功 → 后台启动 TimerTask，每隔 10s（锁30s的1/3）检查 → 还持有锁就续期到 30s → 业务执行多久就续多久。解锁时取消 TimerTask。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 5: COMPARE ===== -->
+<div class="section" id="sec4">
+  <div class="card">
+    <h3>三种高可用方案对比</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>维度</th><th>主从复制</th><th>哨兵模式</th><th>Cluster 集群</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>故障转移</td>
+          <td class="bad">手动切换</td>
+          <td class="good">自动故障转移</td>
+          <td class="good">自动故障转移</td>
+        </tr>
+        <tr>
+          <td>水平扩展</td>
+          <td class="bad">不支持</td>
+          <td class="bad">不支持（单主写）</td>
+          <td class="good">支持，数据分片</td>
+        </tr>
+        <tr>
+          <td>数据量</td>
+          <td>单机限制</td>
+          <td>单机限制</td>
+          <td class="good">理论无上限</td>
+        </tr>
+        <tr>
+          <td>写能力</td>
+          <td>单主</td>
+          <td>单主</td>
+          <td class="good">多主并行写</td>
+        </tr>
+        <tr>
+          <td>运维复杂度</td>
+          <td class="good">简单</td>
+          <td>中等</td>
+          <td class="bad">复杂</td>
+        </tr>
+        <tr>
+          <td>多 key 操作</td>
+          <td class="good">支持</td>
+          <td class="good">支持</td>
+          <td class="bad">需在同一槽（hash tag）</td>
+        </tr>
+        <tr>
+          <td>适用场景</td>
+          <td>读多写少，读扩展</td>
+          <td>高可用，中等数据量</td>
+          <td>海量数据，超高并发</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="interview-tip" style="margin-top:16px;">
+      <div class="label">选型建议</div>
+      <p>数据量小 → 哨兵；数据量大/写压力大 → Cluster。Cluster 注意 mget/pipeline 只能在同一个槽（用 hash tag {} 解决）。支付场景一般用哨兵，数据量不大，强一致优先，或者直接上 Cluster。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>大 Key / 热 Key 问题</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-red mb-8" style="font-size:13px;font-weight:600;">大 Key 危害 & 解决</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div class="bad">读写耗时长，阻塞主线程</div>
+          <div class="bad">集群节点内存倾斜</div>
+          <div class="bad">删除时阻塞（需用 UNLINK 异步删）</div>
+          <div style="margin-top:6px;color:#3fb950;">✓ 拆分大 Hash/List 为多个小的</div>
+          <div style="color:#3fb950;">✓ 大 value 存对象存储，Redis 存引用</div>
+          <div style="color:#3fb950;">✓ redis-cli --bigkeys 扫描</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">热 Key 危害 & 解决</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div class="bad">流量集中打到同一节点</div>
+          <div class="bad">节点 CPU/带宽打满</div>
+          <div style="margin-top:6px;color:#3fb950;">✓ 本地缓存 (Caffeine) 分担</div>
+          <div style="color:#3fb950;">✓ 热 key 复制：key_0~key_9 随机读</div>
+          <div style="color:#3fb950;">✓ Redis 4.0+ hotkeys 自动发现</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(i) {
+  document.querySelectorAll('.section').forEach((s,idx) => s.classList.toggle('active', idx===i));
+  document.querySelectorAll('.tab').forEach((t,idx) => t.classList.toggle('active', idx===i));
+}
+
+// ===== SENTINEL =====
+let masterAlive = true;
+let electionDone = false;
+
+function addSentinelLog(msg, type='') {
+  const log = document.getElementById('sentinelLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function killMaster() {
+  if (!masterAlive) { addSentinelLog('Master 已宕机', 'gray'); return; }
+  masterAlive = false; electionDone = false;
+  document.getElementById('master0').className = 'redis-node dead';
+  document.getElementById('master-status').textContent = '❌ DOWN';
+  addSentinelLog('Master 宕机！停止响应...', 'err');
+  setTimeout(() => {
+    addSentinelLog('Sentinel-1 发现 Master 无响应 → 主观下线(SDOWN)', 'warn');
+    document.getElementById('s0-status').textContent = '⚠ SDOWN';
+  }, 600);
+  setTimeout(() => {
+    addSentinelLog('Sentinel-2 确认 Master 无响应 → SDOWN', 'warn');
+    document.getElementById('s1-status').textContent = '⚠ SDOWN';
+  }, 1000);
+  setTimeout(() => {
+    addSentinelLog('Sentinel-3 确认 Master 无响应 → SDOWN', 'warn');
+    document.getElementById('s2-status').textContent = '⚠ SDOWN';
+  }, 1400);
+  setTimeout(() => {
+    addSentinelLog('3/3 Sentinel 确认 → 客观下线(ODOWN)！开始故障转移...', 'err');
+    addSentinelLog('▶ 点击「选举新 Master」继续', 'info');
+  }, 1800);
+}
+
+function runElection() {
+  if (masterAlive) { addSentinelLog('Master 当前正常，无需选举', 'gray'); return; }
+  if (electionDone) { addSentinelLog('选举已完成', 'gray'); return; }
+  electionDone = true;
+  addSentinelLog('开始从 Slave 中选举新 Master...', 'info');
+  setTimeout(() => {
+    addSentinelLog('比较优先级：Slave-1(priority=100, offset=1024) vs Slave-2(priority=100, offset=1020)', 'info');
+  }, 500);
+  setTimeout(() => {
+    addSentinelLog('Slave-1 复制偏移量更大(1024 > 1020)，选为新 Master！', 'info');
+    document.getElementById('slave0').className = 'redis-node promoted';
+    document.getElementById('slave0-status').textContent = '🟡 升级中...';
+    document.getElementById('s0-status').textContent = '✅ 监控中';
+    document.getElementById('s1-status').textContent = '✅ 监控中';
+    document.getElementById('s2-status').textContent = '✅ 监控中';
+  }, 1000);
+  setTimeout(() => {
+    document.getElementById('slave0').className = 'redis-node master';
+    document.getElementById('slave0-status').textContent = '✅ NEW MASTER';
+    addSentinelLog('✅ Slave-1 升级为新 Master，开始接受写请求', 'info');
+    addSentinelLog('Slave-2 改为复制新 Master(Slave-1)', 'info');
+    addSentinelLog('Sentinel 通知所有客户端新 Master 地址', 'info');
+  }, 1800);
+}
+
+function oldMasterRecover() {
+  if (masterAlive) { addSentinelLog('Master 已在运行', 'gray'); return; }
+  addSentinelLog('旧 Master 恢复上线...', 'info');
+  setTimeout(() => {
+    document.getElementById('master0').className = 'redis-node slave';
+    document.getElementById('master-status').textContent = 'slave (降级)';
+    masterAlive = true;
+    addSentinelLog('旧 Master 恢复后以 Slave 身份加入，不会抢回主节点', 'warn');
+    addSentinelLog('需手动 SLAVEOF 指向新 Master', 'gray');
+  }, 800);
+}
+
+function resetSentinel() {
+  masterAlive = true; electionDone = false;
+  document.getElementById('master0').className = 'redis-node master';
+  document.getElementById('master-status').textContent = 'running';
+  document.getElementById('slave0').className = 'redis-node slave';
+  document.getElementById('slave0-status').textContent = 'synced';
+  document.getElementById('s0-status').textContent = '监控中';
+  document.getElementById('s1-status').textContent = '监控中';
+  document.getElementById('s2-status').textContent = '监控中';
+  document.getElementById('sentinelLog').innerHTML = '';
+}
+
+// ===== CLUSTER =====
+function addClusterLog(msg, type='') {
+  const log = document.getElementById('clusterLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function showSlotInfo(node) {
+  const info = ['0 ~ 5460 (5461个槽) → Master-1 负责', '5461 ~ 10922 (5462个槽) → Master-2 负责', '10923 ~ 16383 (5461个槽) → Master-3 负责'];
+  document.getElementById('slotInfo').textContent = `槽范围: ${info[node]}`;
+}
+
+function crc16(str) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < str.length; i++) {
+    crc ^= str.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+    }
+  }
+  return crc & 0xFFFF;
+}
+
+function routeKey() {
+  const key = document.getElementById('keyInput').value;
+  const slot = crc16(key) % 16384;
+  let node, color;
+  if (slot <= 5460) { node = 'Master-1'; color = '#58a6ff'; }
+  else if (slot <= 10922) { node = 'Master-2'; color = '#3fb950'; }
+  else { node = 'Master-3'; color = '#bc8cff'; }
+  document.getElementById('routeResult').innerHTML =
+    `CRC16("${key}") % 16384 = <span style="color:#e3b341;font-weight:600;">${slot}</span> → 路由到 <span style="color:${color};font-weight:600;">${node}</span>`;
+  addClusterLog(`key="${key}" → slot=${slot} → ${node}`, 'info');
+}
+
+let master2Down = false;
+function killClusterMaster() {
+  if (master2Down) { addClusterLog('Master-2 已宕机', 'gray'); return; }
+  master2Down = true;
+  document.getElementById('cn1').className = 'cluster-node fail-node';
+  document.getElementById('cn1-state').textContent = 'FAIL';
+  document.getElementById('cn1-state').style.color = '#f85149';
+  addClusterLog('⚠ Master-2 宕机！槽 5461-10922 暂时不可用', 'err');
+  setTimeout(() => {
+    document.getElementById('cs1').className = 'cluster-node master-node';
+    document.getElementById('cs1-state').textContent = 'NEW MASTER';
+    document.getElementById('cs1-state').style.color = '#e3b341';
+    addClusterLog('✅ Slave-2 自动升级为 Master-2，接管槽 5461-10922', 'info');
+  }, 1200);
+}
+
+function recoverCluster() {
+  master2Down = false;
+  document.getElementById('cn1').className = 'cluster-node master-node';
+  document.getElementById('cn1-state').textContent = 'running';
+  document.getElementById('cn1-state').style.color = '#3fb950';
+  document.getElementById('cs1').className = 'cluster-node slave-node';
+  document.getElementById('cs1-state').textContent = 'synced';
+  document.getElementById('cs1-state').style.color = '#3fb950';
+  document.getElementById('clusterLog').innerHTML = '';
+}
+
+// ===== CONSISTENT HASH =====
+let hashNodes = [
+  { name: 'Node1', angle: 30, color: '#58a6ff' },
+  { name: 'Node2', angle: 150, color: '#3fb950' },
+  { name: 'Node3', angle: 270, color: '#bc8cff' },
+];
+let virtualMode = false;
+
+function addHashLog(msg, type='') {
+  const log = document.getElementById('hashLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function drawHashRing() {
+  const canvas = document.getElementById('hashRingCanvas');
+  const ctx = canvas.getContext('2d');
+  const cx = 130, cy = 130, r = 110, nr = 12;
+  ctx.clearRect(0, 0, 260, 260);
+
+  // Ring
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.strokeStyle = '#30363d'; ctx.lineWidth = 3; ctx.stroke();
+
+  if (virtualMode) {
+    hashNodes.forEach(node => {
+      for (let v = 0; v < 8; v++) {
+        const angle = ((node.angle + v * 45) % 360) * Math.PI / 180;
+        const x = cx + r * Math.cos(angle - Math.PI/2);
+        const y = cy + r * Math.sin(angle - Math.PI/2);
+        ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI*2);
+        ctx.fillStyle = node.color + '88'; ctx.fill();
+      }
+    });
+  }
+
+  hashNodes.forEach(node => {
+    const angle = node.angle * Math.PI / 180;
+    const x = cx + r * Math.cos(angle - Math.PI/2);
+    const y = cy + r * Math.sin(angle - Math.PI/2);
+    const lx = cx + (r+22) * Math.cos(angle - Math.PI/2);
+    const ly = cy + (r+22) * Math.sin(angle - Math.PI/2);
+
+    ctx.beginPath(); ctx.arc(x, y, nr, 0, Math.PI*2);
+    ctx.fillStyle = node.color; ctx.fill();
+    ctx.fillStyle = '#0d1117';
+    ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(node.name.replace('Node','N'), x, y);
+
+    ctx.fillStyle = node.color;
+    ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(node.name, lx, ly);
+  });
+
+  // center
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Hash Ring', cx, cy);
+  ctx.fillText('0 ~ 2³²', cx, cy+14);
+  document.getElementById('ringCaption').textContent = `${hashNodes.length}个节点${virtualMode ? '（虚拟节点模式）' : ''}`;
+}
+
+function addHashNode() {
+  const colors = ['#f85149','#e3b341','#58a6ff','#3fb950','#bc8cff'];
+  const n = hashNodes.length;
+  if (n >= 5) { addHashLog('最多5个节点', 'gray'); return; }
+  const newNode = { name: `Node${n+1}`, angle: Math.floor(Math.random()*360), color: colors[n] };
+  const prev = hashNodes.find(nd => Math.abs(nd.angle - newNode.angle) < 60);
+  hashNodes.push(newNode);
+  drawHashRing();
+  addHashLog(`新增 ${newNode.name} → 只影响相邻节点间的 key 重新路由，其他节点不受影响`, 'info');
+}
+
+function removeHashNode() {
+  if (hashNodes.length <= 2) { addHashLog('至少保留2个节点', 'gray'); return; }
+  const removed = hashNodes.pop();
+  drawHashRing();
+  addHashLog(`删除 ${removed.name} → 该节点的 key 转移到顺时针下一个节点，其他不受影响`, 'warn');
+}
+
+function addVirtualNodes() {
+  virtualMode = !virtualMode;
+  drawHashRing();
+  addHashLog(virtualMode ? '开启虚拟节点：每个真实节点映射8个虚拟节点，分布更均匀' : '关闭虚拟节点模式', 'info');
+}
+
+function resetHashRing() {
+  hashNodes = [
+    { name: 'Node1', angle: 30, color: '#58a6ff' },
+    { name: 'Node2', angle: 150, color: '#3fb950' },
+    { name: 'Node3', angle: 270, color: '#bc8cff' },
+  ];
+  virtualMode = false;
+  drawHashRing();
+  document.getElementById('hashLog').innerHTML = '';
+}
+
+// ===== DIST LOCK =====
+let lockHolder = null;
+
+function addLockLog(msg, type='') {
+  const log = document.getElementById('lockLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function tryAcquireLock(idx) {
+  const names = ['A','B','C'];
+  const name = 'Client-' + names[idx];
+  const el = document.getElementById('lc' + idx);
+  const status = document.getElementById('lc' + idx + '-status');
+
+  if (lockHolder === idx) { addLockLog(`${name} 已持有锁（可重入）`, 'info'); return; }
+  if (lockHolder !== null) {
+    el.className = 'lock-client waiting';
+    status.textContent = '⏳ 等待中...';
+    addLockLog(`${name} 尝试加锁 → SET NX 失败（锁被 Client-${names[lockHolder]} 持有），进入等待`, 'warn');
+    return;
+  }
+
+  lockHolder = idx;
+  el.className = 'lock-client holding';
+  status.textContent = '🔒 持有锁';
+  document.getElementById('lockIcon').textContent = '🔒';
+  document.getElementById('lockHolder').textContent = `by ${name}`;
+  addLockLog(`${name} SET lock:pay_order ${name}_uuid NX EX 30 → 加锁成功！`, 'info');
+}
+
+function releaseLock() {
+  if (lockHolder === null) { addLockLog('当前无锁持有者', 'gray'); return; }
+  const names = ['A','B','C'];
+  const name = 'Client-' + names[lockHolder];
+  const el = document.getElementById('lc' + lockHolder);
+  const status = document.getElementById('lc' + lockHolder + '-status');
+  el.className = 'lock-client';
+  status.textContent = '空闲';
+  document.getElementById('lockIcon').textContent = '🔓';
+  document.getElementById('lockHolder').textContent = '未持有';
+  addLockLog(`${name} 执行 Lua 脚本: GET→比较UUID→DEL → 解锁成功`, 'info');
+  lockHolder = null;
+
+  // Wake up waiting
+  ['lc0','lc1','lc2'].forEach((id,i) => {
+    const st = document.getElementById(`lc${i}-status`);
+    if (st.textContent === '⏳ 等待中...') {
+      document.getElementById(id).className = 'lock-client';
+      st.textContent = '空闲（可重试）';
+    }
+  });
+}
+
+let watchdogTimer = null;
+function simWatchdog() {
+  if (lockHolder === null) { addLockLog('先获取锁再演示看门狗', 'gray'); return; }
+  const names = ['A','B','C'];
+  addLockLog(`[Redisson WatchDog] 检测到 Client-${names[lockHolder]} 持有锁，距过期还有 20s`, 'info');
+  setTimeout(() => addLockLog('[Redisson WatchDog] 10s 到，执行 PEXPIRE lock:pay_order 30000 续期...', 'warn'), 500);
+  setTimeout(() => addLockLog('[Redisson WatchDog] 续期成功！重置为 30s', 'info'), 1000);
+  setTimeout(() => addLockLog('[Redisson WatchDog] 业务代码执行中，继续守护...', 'gray'), 1500);
+}
+
+function resetLock() {
+  lockHolder = null;
+  ['lc0','lc1','lc2'].forEach(id => {
+    document.getElementById(id).className = 'lock-client';
+  });
+  document.getElementById('lc0-status').textContent = '空闲';
+  document.getElementById('lc1-status').textContent = '空闲';
+  document.getElementById('lc2-status').textContent = '空闲';
+  document.getElementById('lockIcon').textContent = '🔓';
+  document.getElementById('lockHolder').textContent = '未持有';
+  document.getElementById('lockLog').innerHTML = '';
+}
+
+// Init
+drawHashRing();
+</script>
+</body>
+</html>

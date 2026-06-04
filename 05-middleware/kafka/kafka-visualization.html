@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kafka 核心原理 - 动态可视化</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+h1 { text-align: center; padding: 24px; font-size: 22px; color: #58a6ff; border-bottom: 1px solid #21262d; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #21262d; flex-wrap: wrap; }
+.tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; background: #21262d; color: #8b949e; transition: all .2s; font-size: 13px; }
+.tab.active { background: #1f6feb; color: #fff; }
+.tab:hover:not(.active) { background: #30363d; color: #e6edf3; }
+
+.section { display: none; padding: 20px; }
+.section.active { display: block; }
+
+/* Cards */
+.card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.card h3 { color: #58a6ff; margin-bottom: 12px; font-size: 15px; }
+
+/* Buttons */
+.btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 4px; transition: all .2s; }
+.btn-blue { background: #1f6feb; color: #fff; }
+.btn-blue:hover { background: #388bfd; }
+.btn-green { background: #238636; color: #fff; }
+.btn-green:hover { background: #2ea043; }
+.btn-orange { background: #9e6a03; color: #fff; }
+.btn-orange:hover { background: #bb8009; }
+.btn-red { background: #b91c1c; color: #fff; }
+.btn-red:hover { background: #dc2626; }
+.btn-gray { background: #30363d; color: #e6edf3; }
+.btn-gray:hover { background: #3d444d; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-blue { background: #1f3a5f; color: #58a6ff; }
+.badge-green { background: #1a3a2a; color: #3fb950; }
+.badge-orange { background: #3a2a00; color: #e3b341; }
+.badge-red { background: #3a1a1a; color: #f85149; }
+.badge-purple { background: #2a1a4a; color: #bc8cff; }
+
+.log-box { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; min-height: 80px; max-height: 200px; overflow-y: auto; color: #3fb950; }
+.log-line { margin: 2px 0; }
+.log-line.warn { color: #e3b341; }
+.log-line.err { color: #f85149; }
+.log-line.info { color: #58a6ff; }
+.log-line.gray { color: #8b949e; }
+
+/* ===== SECTION 1: Kafka Architecture ===== */
+.arch-container { position: relative; }
+.arch-row { display: flex; align-items: stretch; gap: 12px; margin-bottom: 12px; }
+.arch-box { border-radius: 8px; padding: 10px 14px; text-align: center; min-width: 100px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .2s; user-select: none; }
+.arch-box:hover { transform: translateY(-2px); }
+.arch-producer { background: #1a3a5a; border: 2px solid #58a6ff; color: #58a6ff; }
+.arch-consumer { background: #1a3a2a; border: 2px solid #3fb950; color: #3fb950; }
+.arch-broker { background: #2a1a4a; border: 2px solid #bc8cff; color: #bc8cff; min-width: 140px; }
+.arch-zk { background: #3a2a00; border: 2px solid #e3b341; color: #e3b341; }
+.arch-topic { background: #1a2a3a; border: 1px solid #388bfd; color: #58a6ff; font-size: 12px; padding: 6px 10px; border-radius: 6px; }
+.arch-partition { background: #0d1117; border: 1px solid #30363d; color: #8b949e; font-size: 11px; padding: 4px 8px; border-radius: 4px; display: inline-block; margin: 2px; }
+.arch-partition.leader { border-color: #bc8cff; color: #bc8cff; }
+.arch-partition.follower { border-color: #8b949e; color: #8b949e; }
+
+.detail-panel { background: #0d1117; border: 1px solid #388bfd; border-radius: 8px; padding: 14px; margin-top: 12px; display: none; }
+.detail-panel.show { display: block; }
+.detail-panel ul { padding-left: 18px; }
+.detail-panel li { margin: 6px 0; color: #c9d1d9; line-height: 1.6; }
+.detail-panel li strong { color: #e3b341; }
+
+/* Message flow animation */
+.flow-area { position: relative; height: 80px; background: #010409; border-radius: 8px; overflow: hidden; margin: 10px 0; }
+.msg-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #58a6ff; top: 35px; left: 0; transition: left 1.2s ease; }
+.flow-label { position: absolute; font-size: 11px; color: #8b949e; }
+
+/* ===== SECTION 2: High Throughput ===== */
+.perf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.perf-item { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px; }
+.perf-item h4 { font-size: 13px; color: #e3b341; margin-bottom: 8px; }
+.perf-item p { font-size: 12px; color: #8b949e; line-height: 1.6; }
+
+.disk-compare { display: flex; gap: 12px; margin: 10px 0; }
+.disk-bar-group { flex: 1; }
+.disk-bar-group label { font-size: 11px; color: #8b949e; display: block; margin-bottom: 4px; }
+.disk-bar { height: 20px; border-radius: 4px; width: 0; transition: width 1s ease; display: flex; align-items: center; padding-left: 8px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.disk-bar.seq { background: #238636; color: #fff; }
+.disk-bar.rand { background: #b91c1c; color: #fff; }
+.disk-bar.mem { background: #1f6feb; color: #fff; }
+
+/* Zero copy */
+.copy-compare { display: flex; gap: 20px; margin: 10px 0; flex-wrap: wrap; }
+.copy-path { flex: 1; min-width: 200px; }
+.copy-path h5 { font-size: 12px; color: #8b949e; margin-bottom: 8px; text-align: center; }
+.copy-step { background: #21262d; border-radius: 4px; padding: 5px 10px; text-align: center; font-size: 11px; margin: 3px 0; }
+.copy-step.highlight { background: #1f3a5f; color: #58a6ff; }
+.copy-step.removed { background: #1a0a0a; color: #3a1a1a; text-decoration: line-through; }
+.copy-arrow { text-align: center; color: #8b949e; font-size: 14px; margin: 0; }
+
+/* ===== SECTION 3: ISR / HW / LEO ===== */
+.sync-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.node-card { background: #161b22; border: 2px solid #21262d; border-radius: 8px; padding: 12px; text-align: center; transition: all .3s; }
+.node-card.leader { border-color: #bc8cff; }
+.node-card.follower { border-color: #3fb950; }
+.node-card.follower.out-isr { border-color: #f85149; }
+.node-label { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.offset-bar { background: #010409; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 12px; }
+.offset-row { display: flex; justify-content: space-between; margin: 2px 0; }
+.offset-key { color: #8b949e; }
+.offset-val { color: #e3b341; font-weight: 600; }
+.hw-marker { background: #1f3a5f; color: #58a6ff; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-top: 6px; }
+
+.isr-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.isr-dot { width: 10px; height: 10px; border-radius: 50%; }
+.isr-dot.in { background: #3fb950; }
+.isr-dot.out { background: #f85149; }
+
+/* ===== SECTION 4: Rebalance ===== */
+.rebalance-stage { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.rb-node { background: #21262d; border-radius: 8px; padding: 10px; text-align: center; min-width: 80px; transition: all .3s; }
+.rb-node.active { background: #1a3a2a; border: 2px solid #3fb950; }
+.rb-node.dead { background: #1a0a0a; border: 2px solid #f85149; opacity: 0.6; }
+.rb-node.joining { background: #1f3a5f; border: 2px solid #58a6ff; }
+.rb-node.stopped { background: #3a2a00; border: 2px solid #e3b341; }
+.rb-partition { font-size: 10px; color: #8b949e; margin-top: 4px; }
+.rb-partition span { background: #30363d; padding: 1px 4px; border-radius: 3px; margin: 1px; display: inline-block; }
+.rb-partition span.mine { background: #1f3a5f; color: #58a6ff; }
+
+/* ===== SECTION 5: Backlog ===== */
+.backlog-chart { position: relative; height: 120px; background: #010409; border-radius: 8px; padding: 10px; margin: 10px 0; overflow: hidden; }
+.backlog-bar { position: absolute; bottom: 10px; width: 30px; background: #1f6feb; border-radius: 3px 3px 0 0; transition: height 0.5s ease, background 0.5s ease; }
+.backlog-chart .axis-label { position: absolute; font-size: 10px; color: #8b949e; }
+.backlog-tip { font-size: 12px; color: #8b949e; margin-top: 6px; line-height: 1.6; }
+
+/* ===== SECTION 6: KRaft ===== */
+.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-table th { background: #21262d; padding: 10px 12px; text-align: left; color: #e3b341; border: 1px solid #30363d; }
+.compare-table td { padding: 9px 12px; border: 1px solid #21262d; color: #c9d1d9; }
+.compare-table tr:hover td { background: #161b22; }
+.compare-table .good { color: #3fb950; }
+.compare-table .bad { color: #f85149; }
+
+/* Utils */
+.flex { display: flex; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.flex-wrap { flex-wrap: wrap; }
+.mt-8 { margin-top: 8px; }
+.mb-8 { margin-bottom: 8px; }
+.text-sm { font-size: 12px; }
+.text-muted { color: #8b949e; }
+.text-green { color: #3fb950; }
+.text-blue { color: #58a6ff; }
+.text-orange { color: #e3b341; }
+.text-red { color: #f85149; }
+.text-purple { color: #bc8cff; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.interview-tip { background: #1a2a1a; border-left: 3px solid #3fb950; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 12px; }
+.interview-tip .label { font-size: 11px; color: #3fb950; font-weight: 600; margin-bottom: 4px; }
+.interview-tip p { font-size: 13px; color: #c9d1d9; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>⚡ Kafka 核心原理 · 动态可视化</h1>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab(0)">① 架构总览</div>
+  <div class="tab" onclick="showTab(1)">② 高吞吐量原因</div>
+  <div class="tab" onclick="showTab(2)">③ ISR / HW / LEO</div>
+  <div class="tab" onclick="showTab(3)">④ Rebalance</div>
+  <div class="tab" onclick="showTab(4)">⑤ 消息积压</div>
+  <div class="tab" onclick="showTab(5)">⑥ KRaft vs ZK</div>
+</div>
+
+<!-- ===== SECTION 1: Architecture ===== -->
+<div class="section active" id="sec0">
+  <div class="card">
+    <h3>Kafka 集群架构 — 点击组件查看详情</h3>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+      <!-- Producer -->
+      <div style="text-align:center;">
+        <div class="arch-box arch-producer" onclick="showDetail('producer')">Producer<br><span style="font-size:11px;font-weight:400;">支付服务</span></div>
+        <div class="arch-box arch-producer" onclick="showDetail('producer')" style="margin-top:8px;">Producer<br><span style="font-size:11px;font-weight:400;">订单服务</span></div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;justify-content:center;font-size:20px;color:#58a6ff;">→</div>
+
+      <!-- Broker Cluster -->
+      <div>
+        <div style="text-align:center;font-size:11px;color:#8b949e;margin-bottom:6px;">Kafka Cluster</div>
+        <div style="display:flex;gap:8px;">
+          <div style="cursor:pointer;" onclick="showDetail('broker')">
+            <div class="arch-box arch-broker">Broker 1<br><span style="font-size:10px;font-weight:400;">Controller</span></div>
+            <div style="margin-top:4px;">
+              <div class="arch-partition leader">P0 Leader</div>
+              <div class="arch-partition follower">P1 Follower</div>
+              <div class="arch-partition follower">P2 Follower</div>
+            </div>
+          </div>
+          <div style="cursor:pointer;" onclick="showDetail('broker')">
+            <div class="arch-box arch-broker">Broker 2</div>
+            <div style="margin-top:4px;">
+              <div class="arch-partition follower">P0 Follower</div>
+              <div class="arch-partition leader">P1 Leader</div>
+              <div class="arch-partition follower">P2 Follower</div>
+            </div>
+          </div>
+          <div style="cursor:pointer;" onclick="showDetail('broker')">
+            <div class="arch-box arch-broker">Broker 3</div>
+            <div style="margin-top:4px;">
+              <div class="arch-partition follower">P0 Follower</div>
+              <div class="arch-partition follower">P1 Follower</div>
+              <div class="arch-partition leader">P2 Leader</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:8px;text-align:center;font-size:11px;color:#8b949e;">Topic: payment_success (3分区 3副本)</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;justify-content:center;font-size:20px;color:#3fb950;">→</div>
+
+      <!-- Consumer Group -->
+      <div>
+        <div style="text-align:center;font-size:11px;color:#8b949e;margin-bottom:6px;">Consumer Group: reconcile-svc</div>
+        <div class="arch-box arch-consumer" onclick="showDetail('consumer')" style="margin-bottom:4px;">Consumer 1<br><span style="font-size:11px;font-weight:400;">← P0</span></div>
+        <div class="arch-box arch-consumer" onclick="showDetail('consumer')" style="margin-bottom:4px;">Consumer 2<br><span style="font-size:11px;font-weight:400;">← P1</span></div>
+        <div class="arch-box arch-consumer" onclick="showDetail('consumer')">Consumer 3<br><span style="font-size:11px;font-weight:400;">← P2</span></div>
+      </div>
+
+      <!-- ZK -->
+      <div style="display:flex;flex-direction:column;justify-content:center;gap:8px;">
+        <div class="arch-box arch-zk" onclick="showDetail('zk')" style="font-size:12px;">ZooKeeper<br>/ KRaft<br><span style="font-size:10px;font-weight:400;">元数据管理</span></div>
+      </div>
+    </div>
+
+    <!-- Detail Panel -->
+    <div class="detail-panel" id="detail-producer">
+      <strong style="color:#58a6ff;">Producer 生产者</strong>
+      <ul style="margin-top:8px;">
+        <li>通过 <strong>message key</strong> 路由到指定分区 — key 相同的消息进同一分区（保证有序）</li>
+        <li>支付场景：key = out_order_no，保证同一订单消息有序</li>
+        <li><strong>acks=all</strong>：等所有 ISR 副本写入才返回成功（最高可靠性）</li>
+        <li><strong>enable.idempotence=true</strong>：幂等生产者，防止重试重复写入</li>
+        <li>批量发送：accumulate → batch → compress → send，减少网络 IO</li>
+      </ul>
+    </div>
+    <div class="detail-panel" id="detail-broker">
+      <strong style="color:#bc8cff;">Broker 节点</strong>
+      <ul style="margin-top:8px;">
+        <li>每个 Broker 存储部分分区数据，分区分散在不同 Broker 实现负载均衡</li>
+        <li>每个分区有一个 <strong>Leader</strong>（负责读写）和多个 <strong>Follower</strong>（只负责同步）</li>
+        <li>Controller 节点：管理整个集群的元数据，负责 Leader 选举</li>
+        <li>消息存储格式：segment 文件（.log 消息体 + .index 偏移索引 + .timeindex 时间索引）</li>
+        <li>默认保留 7 天，到期无论是否消费都删除</li>
+      </ul>
+    </div>
+    <div class="detail-panel" id="detail-consumer">
+      <strong style="color:#3fb950;">Consumer Group 消费者组</strong>
+      <ul style="margin-top:8px;">
+        <li>同一个 Group 中，每个分区只能被<strong>一个</strong>消费者消费</li>
+        <li>消费者数 ≤ 分区数（多出来的消费者空转，浪费）</li>
+        <li>offset 存储在 <strong>__consumer_offsets</strong> 内部 Topic</li>
+        <li><strong>手动提交 offset</strong>：业务处理完再提交，防止丢消息</li>
+        <li>死信队列：失败重试 N 次后进 DLQ，人工处理</li>
+      </ul>
+    </div>
+    <div class="detail-panel" id="detail-zk">
+      <strong style="color:#e3b341;">ZooKeeper / KRaft</strong>
+      <ul style="margin-top:8px;">
+        <li>存储集群元数据：Broker 列表、Topic 配置、分区分配、消费者组 offset</li>
+        <li>负责 Controller 选举：第一个在 ZK 上写 /controller 节点的 Broker 成为 Controller</li>
+        <li>Kafka 2.8+ 支持 KRaft 模式，不再依赖 ZK，自己用 Raft 管理元数据</li>
+        <li>KRaft 支持 <strong>几十万</strong>分区（ZK 模式最多几万）</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Message Flow Demo -->
+  <div class="card">
+    <h3>消息发送全流程 — 动画演示</h3>
+    <div class="flow-area" id="flowArea">
+      <div style="position:absolute;top:10px;left:5%;font-size:11px;color:#58a6ff;">Producer</div>
+      <div style="position:absolute;top:10px;left:38%;font-size:11px;color:#bc8cff;">Broker Leader</div>
+      <div style="position:absolute;top:10px;left:60%;font-size:11px;color:#8b949e;">Follower x2</div>
+      <div style="position:absolute;top:10px;right:5%;font-size:11px;color:#3fb950;">Consumer</div>
+
+      <div id="msgDot1" class="msg-dot" style="background:#58a6ff;"></div>
+      <div id="msgDot2" class="msg-dot" style="background:#bc8cff;display:none;"></div>
+      <div id="msgDot3" class="msg-dot" style="background:#3fb950;display:none;"></div>
+
+      <!-- stage labels -->
+      <div style="position:absolute;bottom:4px;left:18%;font-size:10px;color:#8b949e;" id="step-label"></div>
+    </div>
+    <div id="flow-desc" style="font-size:12px;color:#8b949e;min-height:28px;margin-top:4px;"></div>
+    <button class="btn btn-blue mt-8" onclick="runFlow()">▶ 播放发送流程</button>
+    <div class="interview-tip" style="margin-top:10px;">
+      <div class="label">面试口诀</div>
+      <p>Producer → 按 key 哈希选 Partition → 发给 Leader → Leader 写本地 → Follower 拉取同步 → 等 ISR 全部 ACK → 返回成功 → 消费者按 offset 拉取</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 2: High Throughput ===== -->
+<div class="section" id="sec1">
+  <div class="card">
+    <h3>为什么 Kafka 吞吐量极高？</h3>
+    <div class="perf-grid">
+      <div class="perf-item" onclick="togglePerf(this)" style="cursor:pointer;">
+        <h4>① 顺序写磁盘</h4>
+        <p>消息追加到 Partition 文件末尾，顺序写速度与内存相当，比随机写快 100x+</p>
+        <div id="perf-disk-demo" style="display:none;margin-top:10px;">
+          <div class="disk-compare">
+            <div class="disk-bar-group">
+              <label>顺序写 (600MB/s)</label>
+              <div class="disk-bar seq" id="seq-bar" style="width:0">600MB/s</div>
+            </div>
+            <div class="disk-bar-group">
+              <label>随机写 (100KB/s)</label>
+              <div class="disk-bar rand" id="rand-bar" style="width:0">~0.1%</div>
+            </div>
+          </div>
+          <p style="font-size:11px;color:#8b949e;margin-top:4px;">HDD 顺序写 vs 随机写 — 相差 6000 倍</p>
+        </div>
+      </div>
+      <div class="perf-item" onclick="showZeroCopy()" style="cursor:pointer;">
+        <h4>② 零拷贝 (sendfile/mmap)</h4>
+        <p>数据不经用户态，直接内核 → 网卡，减少 2 次 CPU 拷贝和 2 次系统调用</p>
+        <div id="perf-copy-demo" style="display:none;margin-top:10px;">
+          <div class="copy-compare">
+            <div class="copy-path">
+              <h5 style="color:#f85149;">传统方式 (4次拷贝)</h5>
+              <div class="copy-step">磁盘 → 内核缓冲区</div>
+              <div class="copy-arrow">↓</div>
+              <div class="copy-step highlight">内核 → 用户态 (CPU)</div>
+              <div class="copy-arrow">↓</div>
+              <div class="copy-step highlight">用户态 → socket 缓冲区 (CPU)</div>
+              <div class="copy-arrow">↓</div>
+              <div class="copy-step">socket → 网卡</div>
+            </div>
+            <div class="copy-path">
+              <h5 style="color:#3fb950;">sendfile 零拷贝 (2次)</h5>
+              <div class="copy-step">磁盘 → 内核缓冲区</div>
+              <div class="copy-arrow">↓</div>
+              <div class="copy-step removed">内核 → 用户态 ❌</div>
+              <div class="copy-arrow">↓</div>
+              <div class="copy-step removed">用户态 → socket ❌</div>
+              <div class="copy-arrow">↓</div>
+              <div class="copy-step" style="background:#1a3a2a;color:#3fb950;">内核 → 网卡 (DMA)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="perf-item">
+        <h4>③ 批量处理</h4>
+        <p>Producer 攒一批再发（batch.size），Consumer 一次拉一批（max.poll.records），大幅减少网络 IO 次数</p>
+        <div style="margin-top:8px;font-size:12px;color:#8b949e;">
+          <div>一条条发：10万条 = 10万次网络请求</div>
+          <div style="color:#3fb950;">批量发：10万条 / 500 = 200次请求</div>
+        </div>
+      </div>
+      <div class="perf-item">
+        <h4>④ PageCache 页缓存</h4>
+        <p>写消息先写到 OS 页缓存，后台异步刷盘；读消息也先读 PageCache，大概率命中，不用实际 IO</p>
+        <div style="margin-top:8px;background:#010409;border-radius:6px;padding:8px;font-size:12px;font-family:monospace;">
+          <div style="color:#3fb950;">Write: 内存速度写 PageCache → 返回</div>
+          <div style="color:#8b949e;">Flush: OS 后台异步将脏页刷盘</div>
+          <div style="color:#3fb950;">Read: 先查 PageCache → miss才读盘</div>
+        </div>
+      </div>
+    </div>
+    <div class="interview-tip">
+      <div class="label">面试总结</div>
+      <p>Kafka 快的四个核心：<strong style="color:#e3b341;">顺序写磁盘</strong> + <strong style="color:#e3b341;">零拷贝</strong> + <strong style="color:#e3b341;">批量处理</strong> + <strong style="color:#e3b341;">页缓存</strong>。单机轻松扛 10w+ QPS。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>性能指标对比（点击各项演示）</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <button class="btn btn-blue" onclick="showDiskPerf()">顺序写 vs 随机写</button>
+      <button class="btn btn-green" onclick="showZeroCopy()">零拷贝对比</button>
+    </div>
+    <div id="active-demo"></div>
+  </div>
+</div>
+
+<!-- ===== SECTION 3: ISR / HW / LEO ===== -->
+<div class="section" id="sec2">
+  <div class="card">
+    <h3>ISR / HW / LEO — 副本同步机制</h3>
+    <div class="grid-2" style="margin-bottom:12px;">
+      <div>
+        <div class="text-orange" style="font-size:13px;font-weight:600;margin-bottom:8px;">核心概念</div>
+        <div style="background:#010409;border-radius:6px;padding:10px;font-size:12px;line-height:1.8;">
+          <div><span style="color:#bc8cff;font-weight:600;">LEO</span> (Log End Offset)：各副本已写入的最新 offset</div>
+          <div><span style="color:#58a6ff;font-weight:600;">HW</span> (High Watermark)：所有 ISR 都同步了的最大 offset</div>
+          <div><span style="color:#3fb950;font-weight:600;">ISR</span>：与 Leader 同步差距在阈值内的副本集合</div>
+          <div style="color:#8b949e;margin-top:4px;">Consumer 只能消费 HW 以内的消息</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange" style="font-size:13px;font-weight:600;margin-bottom:8px;">ISR 踢出条件</div>
+        <div style="background:#010409;border-radius:6px;padding:10px;font-size:12px;line-height:1.8;">
+          <div>超过 <span style="color:#f85149;">replica.lag.time.max.ms</span>（默认10秒）</div>
+          <div>还没拉取到 Leader 的最新消息</div>
+          <div style="color:#8b949e;margin-top:4px;">↓ 踢出 ISR → 放入 OSR</div>
+          <div style="color:#8b949e;">恢复追上后 → 重新加入 ISR</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sync Demo -->
+    <div class="sync-grid" id="syncGrid">
+      <div class="node-card leader">
+        <div class="node-label"><span class="badge badge-purple">Leader</span> Broker 1</div>
+        <div class="offset-bar">
+          <div class="offset-row"><span class="offset-key">LEO</span><span class="offset-val" id="leo0">100</span></div>
+          <div class="offset-row"><span class="offset-key">HW</span><span class="offset-val" id="hw0">98</span></div>
+        </div>
+        <div class="hw-marker">HW = min(all ISR LEO)</div>
+      </div>
+      <div class="node-card follower">
+        <div class="node-label"><span class="badge badge-green">ISR ✓</span> Broker 2</div>
+        <div class="offset-bar">
+          <div class="offset-row"><span class="offset-key">LEO</span><span class="offset-val" id="leo1">98</span></div>
+          <div class="offset-row"><span class="offset-key">HW</span><span class="offset-val" id="hw1">98</span></div>
+        </div>
+        <div class="hw-marker" style="background:#1a3a2a;color:#3fb950;">正常同步中</div>
+      </div>
+      <div class="node-card follower" id="follower2">
+        <div class="node-label"><span class="badge badge-green" id="isr2badge">ISR ✓</span> Broker 3</div>
+        <div class="offset-bar">
+          <div class="offset-row"><span class="offset-key">LEO</span><span class="offset-val" id="leo2">92</span></div>
+          <div class="offset-row"><span class="offset-key">HW</span><span class="offset-val" id="hw2">98</span></div>
+        </div>
+        <div class="hw-marker" id="f2status" style="background:#1a3a2a;color:#3fb950;">同步稍微滞后</div>
+      </div>
+    </div>
+
+    <div class="flex gap-8 mt-8" style="flex-wrap:wrap;">
+      <button class="btn btn-blue" onclick="simulateWrite()">▶ 写入新消息</button>
+      <button class="btn btn-orange" onclick="simulateLag()">模拟 Broker3 延迟</button>
+      <button class="btn btn-green" onclick="simulateRecover()">Broker3 恢复</button>
+      <button class="btn btn-red" onclick="simulateLeaderFail()">Leader 宕机 → 选新主</button>
+      <button class="btn btn-gray" onclick="resetSync()">重置</button>
+    </div>
+    <div class="log-box mt-8" id="syncLog"></div>
+
+    <div class="interview-tip">
+      <div class="label">面试要点</div>
+      <p>生产者 acks=all → 等 ISR 全部写入 HW 才算提交 → 消费者只看 HW。Follower 落后超时 → 踢出 ISR → 不参与 HW 计算 → Leader 挂了从 ISR 选新主（新主数据最新）</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 4: Rebalance ===== -->
+<div class="section" id="sec3">
+  <div class="card">
+    <h3>Consumer Group Rebalance — 动态演示</h3>
+    <div class="mb-8 text-sm text-muted">Topic: payment_success，4个分区 (P0~P3)，消费者组: pay-group</div>
+
+    <div class="rebalance-stage" id="rbStage">
+      <div class="rb-node active" id="rb0">
+        <div>Consumer-1</div>
+        <div class="rb-partition"><span class="mine">P0</span> <span class="mine">P1</span></div>
+      </div>
+      <div class="rb-node active" id="rb1">
+        <div>Consumer-2</div>
+        <div class="rb-partition"><span class="mine">P2</span> <span class="mine">P3</span></div>
+      </div>
+      <div class="rb-node" id="rb2" style="display:none;">
+        <div>Consumer-3</div>
+        <div class="rb-partition" id="rb2parts"></div>
+      </div>
+    </div>
+
+    <div style="font-size:12px;color:#8b949e;margin:8px 0;" id="rbStatus">当前状态：正常消费，2个消费者各消费2个分区</div>
+
+    <div class="flex gap-8 mt-8" style="flex-wrap:wrap;">
+      <button class="btn btn-blue" onclick="rbAddConsumer()">➕ 加入新消费者</button>
+      <button class="btn btn-red" onclick="rbKillConsumer()">💀 Consumer-1 宕机</button>
+      <button class="btn btn-orange" onclick="rbAddPartition()">➕ Topic 增加分区</button>
+      <button class="btn btn-gray" onclick="rbReset()">重置</button>
+    </div>
+    <div class="log-box mt-8" id="rbLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>Rebalance 过程 & 影响</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange" style="font-size:13px;font-weight:600;margin-bottom:8px;">触发时机</div>
+        <ul style="padding-left:18px;font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <li>消费者实例 <strong>加入/离开</strong> 消费者组</li>
+          <li>消费者<strong>心跳超时</strong>（session.timeout.ms 默认45s）</li>
+          <li>消费处理时间超过 <strong>max.poll.interval.ms</strong></li>
+          <li>Topic <strong>分区数变更</strong></li>
+        </ul>
+      </div>
+      <div>
+        <div class="text-orange" style="font-size:13px;font-weight:600;margin-bottom:8px;">影响 & 优化</div>
+        <ul style="padding-left:18px;font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <li>Rebalance 期间 <strong style="color:#f85149;">全组停止消费（STW）</strong></li>
+          <li>分区重分配可能导致<strong>重复消费</strong></li>
+          <li>优化：调大 session 超时时间</li>
+          <li>优化：消费逻辑不要太慢，异步处理</li>
+          <li>优化：批量优雅上下线，不要频繁重启</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 5: Backlog ===== -->
+<div class="section" id="sec4">
+  <div class="card">
+    <h3>消息积压 — 排查处理流程</h3>
+    <div style="margin-bottom:10px;">
+      <div style="font-size:13px;color:#8b949e;margin-bottom:8px;">积压量实时变化（模拟）</div>
+      <div class="backlog-chart" id="backlogChart">
+        <div style="position:absolute;left:8px;top:4px;font-size:10px;color:#8b949e;">消息数（万）</div>
+      </div>
+      <div style="font-size:12px;color:#8b949e;margin-top:4px;" id="backlogInfo">当前积压：0</div>
+    </div>
+
+    <div class="flex gap-8 flex-wrap">
+      <button class="btn btn-red" onclick="simulateBacklog()">🔴 模拟积压</button>
+      <button class="btn btn-blue" onclick="scaleConsumer()">➕ 扩容消费者</button>
+      <button class="btn btn-green" onclick="fixConsumer()">🔧 修复消费逻辑</button>
+      <button class="btn btn-gray" onclick="resetBacklog()">重置</button>
+    </div>
+    <div class="log-box mt-8" id="backlogLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>处理步骤 & 面试答法</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">第一步：定位原因</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>🔍 是生产者流量突增？（大促）</div>
+          <div>🔍 消费者挂了/卡住？</div>
+          <div>🔍 消费逻辑有慢 SQL / 慢调用？</div>
+          <div>🔍 消费者数 &lt; 分区数？</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">第二步：紧急处理</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>⚡ 紧急扩容消费者实例</div>
+          <div>⚡ 增加分区数（要 Rebalance）</div>
+          <div>⚡ 消费逻辑走异步/批量优化</div>
+          <div>⚡ 临时 Topic 转存，慢慢补消费</div>
+        </div>
+      </div>
+    </div>
+    <div class="interview-tip">
+      <div class="label">支付场景</div>
+      <p>大促时支付量突增，消费者消费慢积压几十万条 → 临时加消费者实例 → 很快消费完 → 后续优化消费逻辑改为批量处理 → 彻底解决。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 6: KRaft vs ZK ===== -->
+<div class="section" id="sec5">
+  <div class="card">
+    <h3>KRaft 模式 vs ZooKeeper 模式</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>维度</th><th>ZooKeeper 模式</th><th>KRaft 模式 (2.8+)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>依赖</td>
+          <td class="bad">依赖 ZK，需单独部署运维</td>
+          <td class="good">无外部依赖，Kafka 自己管理元数据</td>
+        </tr>
+        <tr>
+          <td>最大分区数</td>
+          <td class="bad">几万分区（ZK 存储瓶颈）</td>
+          <td class="good">几十万分区</td>
+        </tr>
+        <tr>
+          <td>运维复杂度</td>
+          <td class="bad">要维护 ZK + Kafka 两套</td>
+          <td class="good">只维护 Kafka</td>
+        </tr>
+        <tr>
+          <td>可用性</td>
+          <td class="bad">ZK 挂了元数据不可用</td>
+          <td class="good">自己 Raft 选主，可用性更高</td>
+        </tr>
+        <tr>
+          <td>启动速度</td>
+          <td class="bad">ZK 同步元数据慢</td>
+          <td class="good">启动更快</td>
+        </tr>
+        <tr>
+          <td>选举机制</td>
+          <td>ZK 临时节点竞争</td>
+          <td class="good">Raft 协议选 Active Controller</td>
+        </tr>
+        <tr>
+          <td>生产建议</td>
+          <td>老版本，存量系统</td>
+          <td class="good">新项目推荐 KRaft（3.3+正式可用）</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="interview-tip" style="margin-top:16px;">
+      <div class="label">架构演进</div>
+      <p>Kafka 新版本用 KRaft 替代 ZK：不用外部依赖，支持更多分区，运维更简单。Controller 用 Raft 协议选主，元数据存在 Kafka 自己的 log 里，不用 ZK 了。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>三大 MQ 对比</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>维度</th><th>Kafka</th><th>Pulsar</th><th>RabbitMQ</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>吞吐量</td>
+          <td class="good">极高 ~100w/s</td>
+          <td class="good">极高，存算分离</td>
+          <td>中等 ~几万/s</td>
+        </tr>
+        <tr>
+          <td>延迟消息</td>
+          <td class="bad">不支持（需自实现）</td>
+          <td class="good">原生支持</td>
+          <td class="good">插件支持</td>
+        </tr>
+        <tr>
+          <td>多租户</td>
+          <td class="bad">不支持</td>
+          <td class="good">原生支持</td>
+          <td>有限支持</td>
+        </tr>
+        <tr>
+          <td>死信队列</td>
+          <td class="bad">需手动实现</td>
+          <td class="good">内置</td>
+          <td class="good">内置</td>
+        </tr>
+        <tr>
+          <td>适用场景</td>
+          <td>日志、大数据流、高吞吐</td>
+          <td class="good">支付业务、多租户 SaaS</td>
+          <td>复杂路由、低延迟业务消息</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ===== Tab Control =====
+function showTab(i) {
+  document.querySelectorAll('.section').forEach((s,idx) => s.classList.toggle('active', idx===i));
+  document.querySelectorAll('.tab').forEach((t,idx) => t.classList.toggle('active', idx===i));
+}
+
+// ===== Section 1: Detail Panels =====
+function showDetail(name) {
+  document.querySelectorAll('.detail-panel').forEach(p => p.classList.remove('show'));
+  const panel = document.getElementById('detail-' + name);
+  if (panel) panel.classList.add('show');
+}
+
+// ===== Message Flow =====
+let flowRunning = false;
+async function runFlow() {
+  if (flowRunning) return;
+  flowRunning = true;
+  const d1 = document.getElementById('msgDot1');
+  const d2 = document.getElementById('msgDot2');
+  const d3 = document.getElementById('msgDot3');
+  const desc = document.getElementById('flow-desc');
+
+  const steps = [
+    { dot: d1, pos: '8%', label: '① Producer 按 key 哈希选 Partition P0' },
+    { dot: d1, pos: '35%', label: '② 发送到 Broker1 Leader (P0)' },
+    { dot: d2, pos: '62%', label: '③ Follower 异步拉取同步' },
+    { dot: d2, pos: '62%', label: '④ ISR 全部 ACK → HW 推进' },
+    { dot: d3, pos: '88%', label: '⑤ Consumer 拉取 offset≤HW 的消息' },
+    { dot: d3, pos: '88%', label: '⑥ 处理完成 → 手动提交 offset' },
+  ];
+
+  d1.style.left = '8%'; d1.style.display = 'block';
+  d2.style.left = '38%'; d2.style.display = 'none';
+  d3.style.left = '88%'; d3.style.display = 'none';
+
+  for (const s of steps) {
+    s.dot.style.display = 'block';
+    s.dot.style.left = s.pos;
+    desc.textContent = s.label;
+    await sleep(1000);
+  }
+  flowRunning = false;
+}
+
+// ===== Section 2: Perf Demo =====
+function togglePerf(el) {
+  const demo = el.querySelector('[id$="-demo"]');
+  if (demo) { demo.style.display = demo.style.display === 'none' ? 'block' : 'none'; }
+}
+
+function showDiskPerf() {
+  const html = `
+    <div class="disk-compare">
+      <div class="disk-bar-group">
+        <label>顺序写磁盘 (600 MB/s)</label>
+        <div class="disk-bar seq" id="seq-bar2">600 MB/s</div>
+      </div>
+      <div class="disk-bar-group">
+        <label>随机写磁盘 (约 0.1 MB/s)</label>
+        <div class="disk-bar rand" id="rand-bar2">0.1 MB/s</div>
+      </div>
+      <div class="disk-bar-group">
+        <label>内存读写 (~10 GB/s)</label>
+        <div class="disk-bar mem" id="mem-bar2">10 GB/s</div>
+      </div>
+    </div>
+    <p style="font-size:11px;color:#8b949e;margin-top:6px;">顺序写 ≈ 内存速度的 1/16，比随机写快 6000 倍</p>`;
+  document.getElementById('active-demo').innerHTML = html;
+  setTimeout(() => {
+    document.getElementById('seq-bar2').style.width = '60%';
+    document.getElementById('rand-bar2').style.width = '1%';
+    document.getElementById('mem-bar2').style.width = '100%';
+  }, 100);
+}
+
+function showZeroCopy() {
+  document.getElementById('active-demo').innerHTML = `
+    <div class="copy-compare">
+      <div class="copy-path">
+        <h5 style="color:#f85149;">传统方式 (4次拷贝, 4次系统调用)</h5>
+        <div class="copy-step">① 磁盘 → PageCache (DMA)</div>
+        <div class="copy-arrow">↓</div>
+        <div class="copy-step highlight">② PageCache → 用户缓冲区 (CPU)</div>
+        <div class="copy-arrow">↓</div>
+        <div class="copy-step highlight">③ 用户缓冲区 → socket缓冲区 (CPU)</div>
+        <div class="copy-arrow">↓</div>
+        <div class="copy-step">④ socket缓冲区 → 网卡 (DMA)</div>
+      </div>
+      <div class="copy-path">
+        <h5 style="color:#3fb950;">sendfile 零拷贝 (2次拷贝, 1次系统调用)</h5>
+        <div class="copy-step">① 磁盘 → PageCache (DMA)</div>
+        <div class="copy-arrow">↓</div>
+        <div class="copy-step removed">内核 → 用户态 ❌ 省掉</div>
+        <div class="copy-arrow">↓</div>
+        <div class="copy-step removed">用户态 → socket ❌ 省掉</div>
+        <div class="copy-arrow">↓</div>
+        <div class="copy-step" style="background:#1a3a2a;color:#3fb950;">② PageCache → 网卡 (DMA, 通过fd引用)</div>
+      </div>
+    </div>`;
+}
+
+// ===== Section 3: ISR / HW / LEO =====
+let syncState = { leo: [100, 98, 92], hw: 98, lagTimer: null, inISR: [true, true, true], leaderIdx: 0 };
+
+function addSyncLog(msg, type='') {
+  const log = document.getElementById('syncLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div');
+  line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function updateSyncUI() {
+  const s = syncState;
+  for (let i = 0; i < 3; i++) {
+    const key = i === s.leaderIdx ? 'L' : i;
+    if (i === 0) { document.getElementById('leo0').textContent = s.leo[0]; document.getElementById('hw0').textContent = s.hw; }
+    if (i === 1) { document.getElementById('leo1').textContent = s.leo[1]; document.getElementById('hw1').textContent = s.hw; }
+    if (i === 2) { document.getElementById('leo2').textContent = s.leo[2]; document.getElementById('hw2').textContent = s.hw; }
+  }
+  // Update ISR badge for Broker3
+  const badge2 = document.getElementById('isr2badge');
+  const f2 = document.getElementById('follower2');
+  const f2status = document.getElementById('f2status');
+  if (s.inISR[2]) {
+    badge2.textContent = 'ISR ✓'; badge2.className = 'badge badge-green';
+    f2.className = 'node-card follower';
+    f2status.textContent = '正常同步中'; f2status.style.background='#1a3a2a'; f2status.style.color='#3fb950';
+  } else {
+    badge2.textContent = 'OSR ✗'; badge2.className = 'badge badge-red';
+    f2.className = 'node-card follower out-isr';
+    f2status.textContent = '⚠ 踢出ISR'; f2status.style.background='#2a0a0a'; f2status.style.color='#f85149';
+  }
+}
+
+function computeHW() {
+  const isrLEOs = syncState.leo.filter((_, i) => syncState.inISR[i]);
+  return Math.min(...isrLEOs);
+}
+
+function simulateWrite() {
+  syncState.leo[0] += 3;
+  addSyncLog(`Producer → Leader 写入3条消息，Leader LEO: ${syncState.leo[0]}`, 'info');
+  setTimeout(() => {
+    syncState.leo[1] = syncState.leo[0];
+    addSyncLog(`Broker2(Follower) 同步完成，LEO: ${syncState.leo[1]}`, 'info');
+    if (syncState.inISR[2]) {
+      syncState.leo[2] = syncState.leo[0];
+      addSyncLog(`Broker3(Follower) 同步完成，LEO: ${syncState.leo[2]}`, 'info');
+    }
+    syncState.hw = computeHW();
+    addSyncLog(`HW 更新为 ${syncState.hw}，Consumer 可消费到此 offset`, 'gray');
+    updateSyncUI();
+  }, 800);
+}
+
+function simulateLag() {
+  syncState.inISR[2] = false;
+  addSyncLog('Broker3 超过10s未同步 → 被踢出 ISR!', 'err');
+  addSyncLog('ISR: [Broker1(Leader), Broker2]', 'warn');
+  addSyncLog(`HW = min(ISR LEO) = min(${syncState.leo[0]}, ${syncState.leo[1]}) = ${Math.min(syncState.leo[0], syncState.leo[1])}`, 'info');
+  syncState.hw = computeHW();
+  updateSyncUI();
+}
+
+function simulateRecover() {
+  if (syncState.inISR[2]) { addSyncLog('Broker3 当前已在 ISR 中', 'gray'); return; }
+  syncState.leo[2] = syncState.leo[0];
+  syncState.inISR[2] = true;
+  addSyncLog('Broker3 追上同步进度，重新加入 ISR ✓', 'info');
+  syncState.hw = computeHW();
+  updateSyncUI();
+}
+
+function simulateLeaderFail() {
+  addSyncLog('⚠ Leader(Broker1) 宕机！', 'err');
+  addSyncLog('Controller 检测到 Leader 下线，开始从 ISR 选新 Leader...', 'warn');
+  setTimeout(() => {
+    addSyncLog('选举结果：Broker2(ISR中，LEO最大) 成为新 Leader', 'info');
+    addSyncLog('新 Leader LEO: ' + syncState.leo[1] + '，继续服务', 'info');
+    addSyncLog('Broker1 如果恢复会以 Follower 身份重新加入', 'gray');
+  }, 1000);
+}
+
+function resetSync() {
+  syncState = { leo: [100, 98, 92], hw: 98, lagTimer: null, inISR: [true, true, true], leaderIdx: 0 };
+  document.getElementById('syncLog').innerHTML = '';
+  updateSyncUI();
+}
+
+// ===== Section 4: Rebalance =====
+let rbState = { consumers: 2, partitions: 4, alive: [true, true, false], rebalancing: false };
+
+function addRbLog(msg, type='') {
+  const log = document.getElementById('rbLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function setRbStatus(msg) { document.getElementById('rbStatus').textContent = msg; }
+
+function doRebalance(reason) {
+  if (rbState.rebalancing) return;
+  rbState.rebalancing = true;
+
+  // Stop all
+  ['rb0','rb1','rb2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.style.display !== 'none') {
+      el.className = 'rb-node stopped';
+    }
+  });
+
+  addRbLog('🔄 触发 Rebalance: ' + reason, 'warn');
+  addRbLog('⛔ 所有消费者暂停消费 (STW)...', 'err');
+  setRbStatus('⛔ Rebalance 进行中，消费暂停...');
+
+  setTimeout(() => {
+    // Redistribute
+    const aliveConsumers = [];
+    if (document.getElementById('rb0')?.style.display !== 'none' && !document.getElementById('rb0')?.classList.contains('dead')) aliveConsumers.push('rb0');
+    if (document.getElementById('rb1')?.style.display !== 'none' && !document.getElementById('rb1')?.classList.contains('dead')) aliveConsumers.push('rb1');
+    if (document.getElementById('rb2')?.style.display !== 'none' && !document.getElementById('rb2')?.classList.contains('dead')) aliveConsumers.push('rb2');
+
+    const allPartitions = Array.from({length: rbState.partitions}, (_, i) => `P${i}`);
+    const perConsumer = Math.floor(allPartitions.length / aliveConsumers.length);
+
+    aliveConsumers.forEach((id, i) => {
+      const el = document.getElementById(id);
+      el.className = 'rb-node active';
+      const assigned = allPartitions.slice(i * perConsumer, (i+1) * perConsumer);
+      const parts = el.querySelector('.rb-partition');
+      if (parts) parts.innerHTML = assigned.map(p => `<span class="mine">${p}</span>`).join(' ');
+    });
+
+    addRbLog(`✅ Rebalance 完成，分区重新分配: ${aliveConsumers.length} 消费者各消费 ${perConsumer} 个分区`, 'info');
+    setRbStatus(`正常消费，${aliveConsumers.length}个消费者，每人${perConsumer}个分区`);
+    rbState.rebalancing = false;
+  }, 1500);
+}
+
+function rbAddConsumer() {
+  const rb2 = document.getElementById('rb2');
+  if (rb2.style.display !== 'none') { addRbLog('Consumer-3 已存在', 'gray'); return; }
+  rb2.style.display = '';
+  rb2.className = 'rb-node joining';
+  addRbLog('Consumer-3 申请加入消费者组...', 'info');
+  setTimeout(() => doRebalance('新消费者加入'), 500);
+}
+
+function rbKillConsumer() {
+  const rb0 = document.getElementById('rb0');
+  if (rb0.classList.contains('dead')) { addRbLog('Consumer-1 已宕机', 'gray'); return; }
+  rb0.className = 'rb-node dead';
+  addRbLog('Consumer-1 宕机！心跳超时...', 'err');
+  setTimeout(() => doRebalance('消费者宕机'), 600);
+}
+
+function rbAddPartition() {
+  rbState.partitions += 2;
+  addRbLog(`Topic 新增2个分区，现在共 ${rbState.partitions} 个分区`, 'info');
+  doRebalance('分区数变更');
+}
+
+function rbReset() {
+  rbState = { consumers: 2, partitions: 4, alive: [true, true, false], rebalancing: false };
+  document.getElementById('rb0').className = 'rb-node active'; document.getElementById('rb0').style.display = '';
+  document.getElementById('rb0').querySelector('.rb-partition').innerHTML = '<span class="mine">P0</span> <span class="mine">P1</span>';
+  document.getElementById('rb1').className = 'rb-node active'; document.getElementById('rb1').style.display = '';
+  document.getElementById('rb1').querySelector('.rb-partition').innerHTML = '<span class="mine">P2</span> <span class="mine">P3</span>';
+  document.getElementById('rb2').style.display = 'none';
+  document.getElementById('rbLog').innerHTML = '';
+  setRbStatus('当前状态：正常消费，2个消费者各消费2个分区');
+}
+
+// ===== Section 5: Backlog =====
+let backlogData = new Array(20).fill(0);
+let backlogInterval = null;
+let backlogFixed = false;
+
+function renderBacklog() {
+  const chart = document.getElementById('backlogChart');
+  const existing = chart.querySelectorAll('.backlog-bar');
+  existing.forEach(e => e.remove());
+
+  const maxVal = Math.max(...backlogData, 1);
+  backlogData.forEach((v, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'backlog-bar';
+    bar.style.left = (10 + i * 14) + 'px';
+    bar.style.height = Math.max(2, (v / 100) * 95) + 'px';
+    bar.style.background = v > 50 ? '#b91c1c' : v > 20 ? '#9e6a03' : '#238636';
+    chart.appendChild(bar);
+  });
+  document.getElementById('backlogInfo').textContent = `当前积压：${backlogData[backlogData.length-1]}万条`;
+}
+
+function simulateBacklog() {
+  if (backlogInterval) return;
+  addBacklogLog('🔴 生产流量突增！消费速度跟不上...', 'err');
+  backlogFixed = false;
+  let count = 0;
+  backlogInterval = setInterval(() => {
+    count++;
+    const last = backlogData[backlogData.length-1];
+    const increase = backlogFixed ? -Math.floor(Math.random()*8+5) : Math.floor(Math.random()*8+3);
+    const next = Math.max(0, last + increase);
+    backlogData.shift(); backlogData.push(Math.min(next, 99));
+    renderBacklog();
+    if (next >= 80 && !backlogFixed) addBacklogLog(`⚠ 积压告警：${next}万条！`, 'err');
+    if (next <= 0) { clearInterval(backlogInterval); backlogInterval = null; addBacklogLog('✅ 积压清零，恢复正常', 'info'); }
+  }, 300);
+}
+
+function addBacklogLog(msg, type='') {
+  const log = document.getElementById('backlogLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function scaleConsumer() {
+  backlogFixed = true;
+  addBacklogLog('⚡ 紧急扩容：消费者实例从 4 → 8，触发 Rebalance...', 'warn');
+  setTimeout(() => addBacklogLog('✅ Rebalance 完成，消费速度 2x，积压开始下降', 'info'), 800);
+}
+
+function fixConsumer() {
+  backlogFixed = true;
+  addBacklogLog('🔧 修复消费逻辑：改为批量处理，批次从1条 → 100条', 'warn');
+  setTimeout(() => addBacklogLog('✅ 消费吞吐量提升，积压加速消费中...', 'info'), 800);
+}
+
+function resetBacklog() {
+  if (backlogInterval) { clearInterval(backlogInterval); backlogInterval = null; }
+  backlogData = new Array(20).fill(0);
+  document.getElementById('backlogLog').innerHTML = '';
+  renderBacklog();
+}
+
+// ===== Utils =====
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Init
+renderBacklog();
+updateSyncUI();
+</script>
+</body>
+</html>

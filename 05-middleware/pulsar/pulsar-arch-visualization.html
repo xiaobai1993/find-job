@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulsar 核心原理 - 动态可视化</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+h1 { text-align: center; padding: 24px; font-size: 22px; color: #bc8cff; border-bottom: 1px solid #21262d; }
+.tabs { display: flex; gap: 4px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #21262d; flex-wrap: wrap; }
+.tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; background: #21262d; color: #8b949e; transition: all .2s; font-size: 13px; }
+.tab.active { background: #6e40c9; color: #fff; }
+.tab:hover:not(.active) { background: #30363d; color: #e6edf3; }
+.section { display: none; padding: 20px; }
+.section.active { display: block; }
+.card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.card h3 { color: #bc8cff; margin-bottom: 12px; font-size: 15px; }
+.btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 4px; transition: all .2s; }
+.btn-purple { background: #6e40c9; color: #fff; } .btn-purple:hover { background: #8957e5; }
+.btn-blue { background: #1f6feb; color: #fff; } .btn-blue:hover { background: #388bfd; }
+.btn-green { background: #238636; color: #fff; } .btn-green:hover { background: #2ea043; }
+.btn-orange { background: #9e6a03; color: #fff; } .btn-orange:hover { background: #bb8009; }
+.btn-red { background: #b91c1c; color: #fff; } .btn-red:hover { background: #dc2626; }
+.btn-gray { background: #30363d; color: #e6edf3; } .btn-gray:hover { background: #3d444d; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-purple { background: #2a1a4a; color: #bc8cff; }
+.badge-blue { background: #1f3a5f; color: #58a6ff; }
+.badge-green { background: #1a3a2a; color: #3fb950; }
+.badge-orange { background: #3a2a00; color: #e3b341; }
+.badge-red { background: #3a1a1a; color: #f85149; }
+.log-box { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; min-height: 80px; max-height: 220px; overflow-y: auto; }
+.log-line { margin: 2px 0; color: #3fb950; }
+.log-line.warn { color: #e3b341; }
+.log-line.err { color: #f85149; }
+.log-line.info { color: #58a6ff; }
+.log-line.gray { color: #8b949e; }
+.log-line.purple { color: #bc8cff; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.flex { display: flex; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
+.flex-wrap { flex-wrap: wrap; } .mt-8 { margin-top: 8px; } .mb-8 { margin-bottom: 8px; }
+.text-sm { font-size: 12px; } .text-muted { color: #8b949e; }
+.text-purple { color: #bc8cff; } .text-green { color: #3fb950; }
+.text-blue { color: #58a6ff; } .text-orange { color: #e3b341; } .text-red { color: #f85149; }
+.interview-tip { background: #1a1a2a; border-left: 3px solid #bc8cff; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 12px; }
+.interview-tip .label { font-size: 11px; color: #bc8cff; font-weight: 600; margin-bottom: 4px; }
+.interview-tip p { font-size: 13px; color: #c9d1d9; line-height: 1.6; }
+.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-table th { background: #21262d; padding: 10px 12px; text-align: left; color: #e3b341; border: 1px solid #30363d; }
+.compare-table td { padding: 9px 12px; border: 1px solid #21262d; color: #c9d1d9; }
+.compare-table tr:hover td { background: #1a1f27; }
+.good { color: #3fb950; } .bad { color: #f85149; }
+
+/* ===== ARCH ===== */
+.layer-box { border-radius: 8px; padding: 10px 14px; text-align: center; font-weight: 600; cursor: pointer; transition: all .2s; }
+.layer-box:hover { transform: translateY(-2px); }
+.layer-client { background: #1f3a5f; border: 2px solid #58a6ff; color: #58a6ff; }
+.layer-broker { background: #2a1a4a; border: 2px solid #bc8cff; color: #bc8cff; }
+.layer-bk { background: #1a2a1a; border: 2px solid #3fb950; color: #3fb950; }
+.layer-zk { background: #3a2a00; border: 2px solid #e3b341; color: #e3b341; }
+
+.ledger-block { display: inline-block; width: 40px; height: 30px; border-radius: 4px; background: #1a3a2a; border: 1px solid #3fb950; color: #3fb950; font-size: 10px; text-align: center; line-height: 30px; margin: 2px; font-weight: 600; transition: all .3s; }
+.ledger-block.active { background: #3fb950; color: #0d1117; }
+.ledger-block.writing { background: #e3b341; color: #0d1117; border-color: #e3b341; }
+
+/* ===== SUBSCRIPTION MODES ===== */
+.sub-demo { background: #010409; border: 1px solid #21262d; border-radius: 8px; padding: 12px; }
+.msg-pill { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin: 2px; }
+.msg-pill.pending { background: #21262d; color: #8b949e; }
+.msg-pill.delivered { background: #1a3a2a; color: #3fb950; }
+.msg-pill.acked { background: #0a1a0a; color: #1a6a3a; border: 1px solid #1a4a2a; }
+.consumer-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; min-height: 36px; }
+.consumer-box { background: #21262d; border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600; min-width: 90px; text-align: center; }
+.consumer-box.active { background: #1f3a5f; color: #58a6ff; }
+.consumer-box.key-active { background: #2a1a4a; color: #bc8cff; }
+
+/* ===== DELAY MSG ===== */
+.timeline-track { position: relative; height: 50px; background: #010409; border-radius: 8px; margin: 10px 0; overflow: hidden; }
+.timeline-dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; top: 19px; transition: left 1.5s ease; }
+.timeline-marker { position: absolute; top: 0; width: 1px; background: #30363d; height: 100%; }
+.timeline-label { position: absolute; font-size: 10px; color: #8b949e; top: 34px; transform: translateX(-50%); }
+
+/* ===== DLQ ===== */
+.dlq-msg { background: #21262d; border-radius: 6px; padding: 6px 10px; font-size: 12px; margin: 4px 0; display: flex; justify-content: space-between; align-items: center; transition: all .3s; }
+.dlq-msg.retrying { background: #3a2a00; border-left: 3px solid #e3b341; }
+.dlq-msg.dead { background: #1a0a0a; border-left: 3px solid #f85149; }
+.dlq-msg.success { background: #0a1a0a; border-left: 3px solid #3fb950; }
+</style>
+</head>
+<body>
+<h1>💜 Pulsar 核心原理 · 动态可视化</h1>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab(0)">① 存算分离架构</div>
+  <div class="tab" onclick="showTab(1)">② 消息发送流程</div>
+  <div class="tab" onclick="showTab(2)">③ 四种订阅模式</div>
+  <div class="tab" onclick="showTab(3)">④ 延迟消息</div>
+  <div class="tab" onclick="showTab(4)">⑤ 死信队列</div>
+  <div class="tab" onclick="showTab(5)">⑥ Pulsar vs Kafka</div>
+</div>
+
+<!-- ===== SECTION 1: ARCH ===== -->
+<div class="section active" id="sec0">
+  <div class="card">
+    <h3>Pulsar 存算分离三层架构 — 点击各层查看详情</h3>
+
+    <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+      <!-- Layer Stack -->
+      <div style="display:flex;flex-direction:column;gap:10px;flex:1;min-width:200px;">
+        <!-- Client -->
+        <div>
+          <div class="text-muted text-sm mb-8">① 客户端层</div>
+          <div style="display:flex;gap:8px;">
+            <div class="layer-box layer-client" onclick="showArchDetail('producer')" style="flex:1;">Producer<br><span style="font-size:11px;font-weight:400;">支付服务</span></div>
+            <div class="layer-box layer-client" onclick="showArchDetail('consumer')" style="flex:1;">Consumer<br><span style="font-size:11px;font-weight:400;">对账服务</span></div>
+          </div>
+        </div>
+
+        <div style="text-align:center;color:#8b949e;">↕ TCP 长连接</div>
+
+        <!-- Broker -->
+        <div>
+          <div class="text-muted text-sm mb-8">② 计算层（无状态）</div>
+          <div style="display:flex;gap:8px;">
+            <div class="layer-box layer-broker" onclick="showArchDetail('broker')" style="flex:1;">Broker-1<br><span style="font-size:11px;font-weight:400;">无状态</span></div>
+            <div class="layer-box layer-broker" onclick="showArchDetail('broker')" style="flex:1;">Broker-2<br><span style="font-size:11px;font-weight:400;">无状态</span></div>
+            <div class="layer-box layer-broker" onclick="showArchDetail('broker')" style="flex:1;">Broker-3<br><span style="font-size:11px;font-weight:400;">无状态</span></div>
+          </div>
+          <div style="margin-top:6px;text-align:center;font-size:11px;color:#8b949e;">Broker 挂了不丢数据，新 Broker 接管 Topic 立即可服务</div>
+        </div>
+
+        <div style="text-align:center;color:#8b949e;">↕ BookKeeper 协议</div>
+
+        <!-- BookKeeper -->
+        <div>
+          <div class="text-muted text-sm mb-8">③ 存储层（有状态）</div>
+          <div style="display:flex;gap:8px;">
+            <div class="layer-box layer-bk" onclick="showArchDetail('bookie')" style="flex:1;">Bookie-1</div>
+            <div class="layer-box layer-bk" onclick="showArchDetail('bookie')" style="flex:1;">Bookie-2</div>
+            <div class="layer-box layer-bk" onclick="showArchDetail('bookie')" style="flex:1;">Bookie-3</div>
+            <div class="layer-box layer-bk" onclick="showArchDetail('bookie')" style="flex:1;">Bookie-4</div>
+          </div>
+          <div style="margin-top:8px;">
+            <div style="font-size:11px;color:#8b949e;margin-bottom:4px;">Ledger 分片存储（Ensemble=4, WriteQuorum=3, AckQuorum=2）</div>
+            <div>
+              <span class="ledger-block active">L1</span>
+              <span class="ledger-block active">L2</span>
+              <span class="ledger-block active">L3</span>
+              <span class="ledger-block writing" id="ledger-current">L4▶</span>
+              <span class="ledger-block">L5</span>
+              <span class="ledger-block">...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ZK -->
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <div class="layer-box layer-zk" onclick="showArchDetail('zk')" style="flex:1;font-size:12px;">ZooKeeper / BookKeeper Metadata<br><span style="font-size:10px;font-weight:400;">Topic路由 / Ledger元数据 / 选主</span></div>
+        </div>
+      </div>
+
+      <!-- Detail Panel -->
+      <div id="arch-detail" style="flex:1;min-width:220px;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px;font-size:13px;color:#c9d1d9;line-height:1.8;min-height:200px;">
+        <span style="color:#8b949e;">点击左侧各层查看详细说明...</span>
+      </div>
+    </div>
+
+    <div class="interview-tip">
+      <div class="label">存算分离的核心价值</div>
+      <p>Broker 无状态 → 挂了立即被其他 Broker 接管，扩 Broker 不迁数据；Bookie 独立扩容存储；对比 Kafka 存算耦合，扩容要迁移分区数据，耗时耗力。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Pulsar 多租户体系</h3>
+    <div style="background:#010409;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;line-height:1.8;">
+      <div style="color:#bc8cff;">persistent://tenant/namespace/topic</div>
+      <div style="margin-top:8px;">
+        <div style="color:#e3b341;">├── Tenant: meituan-pay （租户，如公司/业务线）</div>
+        <div style="color:#58a6ff;">│   ├── Namespace: payment （命名空间，隔离资源/权限）</div>
+        <div style="color:#3fb950;">│   │   ├── Topic: payment_success_v2</div>
+        <div style="color:#3fb950;">│   │   └── Topic: refund_callback</div>
+        <div style="color:#58a6ff;">│   └── Namespace: reconcile</div>
+        <div style="color:#3fb950;">│       └── Topic: daily_reconcile_task</div>
+        <div style="color:#e3b341;">└── Tenant: meituan-order</div>
+        <div style="color:#58a6ff;">    └── Namespace: order-svc</div>
+        <div style="color:#3fb950;">        └── Topic: order_created</div>
+      </div>
+      <div style="margin-top:8px;color:#8b949e;">// 不同租户/命名空间资源隔离，互不影响，Kafka做不到</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 2: SEND FLOW ===== -->
+<div class="section" id="sec1">
+  <div class="card">
+    <h3>消息发送 & 消费全流程 — 动画演示</h3>
+
+    <div style="display:flex;gap:10px;margin:10px 0;align-items:center;flex-wrap:wrap;" id="flowNodes">
+      <div style="text-align:center;">
+        <div style="background:#1f3a5f;border:2px solid #58a6ff;border-radius:8px;padding:8px 12px;color:#58a6ff;font-weight:600;">Producer<br><span style="font-size:10px;font-weight:400;">支付服务</span></div>
+      </div>
+      <div style="color:#8b949e;font-size:18px;" id="arrow1">→</div>
+      <div style="text-align:center;">
+        <div id="broker-flow" style="background:#2a1a4a;border:2px solid #bc8cff;border-radius:8px;padding:8px 12px;color:#bc8cff;font-weight:600;transition:all .3s;">Broker<br><span style="font-size:10px;font-weight:400;">无状态</span></div>
+      </div>
+      <div style="color:#8b949e;font-size:18px;" id="arrow2">→</div>
+      <div style="text-align:center;">
+        <div id="bk-flow" style="background:#1a2a1a;border:2px solid #3fb950;border-radius:8px;padding:8px 12px;color:#3fb950;font-weight:600;transition:all .3s;">BookKeeper<br><span style="font-size:10px;font-weight:400;">3副本持久化</span></div>
+      </div>
+      <div style="color:#8b949e;font-size:18px;" id="arrow3">→</div>
+      <div style="text-align:center;">
+        <div id="consumer-flow" style="background:#1f3a5f;border:2px solid #58a6ff;border-radius:8px;padding:8px 12px;color:#58a6ff;font-weight:600;transition:all .3s;">Consumer<br><span style="font-size:10px;font-weight:400;">对账服务</span></div>
+      </div>
+    </div>
+
+    <div style="background:#010409;border-radius:6px;padding:10px;font-size:12px;min-height:36px;color:#bc8cff;" id="flowDesc">点击播放按钮开始演示...</div>
+
+    <button class="btn btn-purple mt-8" onclick="playFlow()">▶ 播放发送流程</button>
+    <button class="btn btn-green mt-8" onclick="playConsume()">▶ 播放消费流程</button>
+    <button class="btn btn-gray mt-8" onclick="resetFlow()">重置</button>
+
+    <div class="log-box mt-8" id="flowLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>消息确认机制 — 对比 Kafka</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">Pulsar 消息级别 ack</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>① 消费者处理消息</div>
+          <div>② 处理成功 → <span class="text-green">acknowledge(msgId)</span></div>
+          <div>③ 失败 → 不 ack → 自动重投</div>
+          <div>④ 超过重试次数 → 进死信队列</div>
+          <div style="margin-top:6px;color:#3fb950;">✓ 单条消息单独确认</div>
+          <div style="color:#3fb950;">✓ 失败只重发失败的，不影响其他</div>
+          <div style="color:#3fb950;">✓ 也支持累积确认（似 Kafka）</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">Kafka offset 批量提交</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>① 消费一批消息</div>
+          <div>② 全部处理完 → <span class="text-blue">commitOffset(N)</span></div>
+          <div>③ N 之前全算已消费</div>
+          <div>④ 一条失败 → 这批都得重试</div>
+          <div style="margin-top:6px;color:#e3b341;">⚠ 不能跳过某条单独重试</div>
+          <div style="color:#e3b341;">⚠ 一条慢拖慢整批提交</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 3: SUBSCRIPTION MODES ===== -->
+<div class="section" id="sec2">
+  <div class="card">
+    <h3>四种订阅模式 — 点击模式查看动态演示</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <button class="btn btn-purple" onclick="showSubMode('exclusive')">① Exclusive 独占</button>
+      <button class="btn btn-blue" onclick="showSubMode('shared')">② Shared 共享</button>
+      <button class="btn btn-orange" onclick="showSubMode('failover')">③ Failover 灾备</button>
+      <button class="btn btn-green" onclick="showSubMode('key_shared')">④ Key_Shared ⭐</button>
+    </div>
+
+    <div id="subModeDemo">
+      <!-- Demo will be rendered here -->
+      <div style="color:#8b949e;font-size:13px;">点击上方按钮查看各订阅模式演示...</div>
+    </div>
+
+    <div class="interview-tip mt-8">
+      <div class="label">支付场景最常用</div>
+      <p><strong style="color:#bc8cff;">Key_Shared</strong>：同一个 out_order_no 的消息始终路由到同一个消费者（保证顺序），不同订单并发消费（高吞吐）。Kafka 要做到这个需要大量分区+复杂分配，Pulsar 内置支持。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>订阅模式对比表</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>模式</th><th>消费者数</th><th>消息分发</th><th>顺序保证</th><th>支付场景</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge badge-purple">Exclusive</span></td>
+          <td>1个（其他等待）</td>
+          <td>全部给唯一消费者</td>
+          <td class="good">全局有序</td>
+          <td>支付状态变更顺序处理</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-blue">Shared</span></td>
+          <td>多个并发</td>
+          <td>Round-Robin 轮询</td>
+          <td class="bad">无序</td>
+          <td>通知发送、账单生成（不要求顺序）</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-orange">Failover</span></td>
+          <td>主备各1个</td>
+          <td>主消费者处理，主挂备顶</td>
+          <td class="good">分区有序</td>
+          <td>核心回调高可用</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-green">Key_Shared ⭐</span></td>
+          <td>多个并发</td>
+          <td>同key → 同消费者</td>
+          <td class="good">同Key有序</td>
+          <td>支付回调（同订单顺序+高并发）</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ===== SECTION 4: DELAY MSG ===== -->
+<div class="section" id="sec3">
+  <div class="card">
+    <h3>延迟消息 — 支付超时关闭场景</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">原理</div>
+        <div style="background:#010409;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;line-height:1.8;">
+          <div style="color:#e3b341;">// 发送延迟消息</div>
+          <div style="color:#3fb950;">producer.newMessage()</div>
+          <div style="color:#3fb950;">  .deliverAfter(30, TimeUnit.MINUTES)</div>
+          <div style="color:#3fb950;">  .value(payOrderId)</div>
+          <div style="color:#3fb950;">  .send();</div>
+          <div style="margin-top:6px;color:#e3b341;">// 或者指定投递时间</div>
+          <div style="color:#3fb950;">.deliverAt(timestamp)</div>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:#c9d1d9;line-height:1.8;">
+          <div>Broker 内部维护 <span class="text-purple">时间轮（TimingWheel）</span></div>
+          <div>消息先写到延迟 Topic，到期后才投递到业务 Topic</div>
+          <div class="text-green">精度：秒级（比 Redis ZSet 更可靠）</div>
+          <div class="text-green">消息持久化，重启不丢</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">支付超时关单流程</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>① 创建支付单</div>
+          <div>② 发 30分钟 延迟消息</div>
+          <div>③ 用户支付成功 → ack 延迟消息</div>
+          <div>④ 30分钟后 → 消费者收到消息</div>
+          <div>⑤ 检查支付单状态</div>
+          <div>⑥ 未支付 → 自动关单 + 释放库存</div>
+          <div>⑦ 已支付 → 直接忽略</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline Demo -->
+    <div style="margin-top:12px;">
+      <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">时间轴演示（加速模拟）</div>
+      <div class="timeline-track" id="timeline">
+        <div class="timeline-marker" style="left:5%;"><div class="timeline-label">创建支付单</div></div>
+        <div class="timeline-marker" style="left:30%;"><div class="timeline-label">10分钟</div></div>
+        <div class="timeline-marker" style="left:60%;"><div class="timeline-label">20分钟</div></div>
+        <div class="timeline-marker" style="left:90%;"><div class="timeline-label">30分钟</div></div>
+        <div class="timeline-dot" id="timeDot" style="left:5%;background:#bc8cff;"></div>
+      </div>
+      <div style="font-size:12px;color:#8b949e;" id="timeStatus">点击按钮模拟支付超时场景</div>
+    </div>
+
+    <div class="flex gap-8 flex-wrap mt-8">
+      <button class="btn btn-purple" onclick="simDelayTimeout()">⏰ 模拟30分钟超时关单</button>
+      <button class="btn btn-green" onclick="simDelayPaid()">✅ 模拟提前支付成功</button>
+      <button class="btn btn-gray" onclick="resetDelay()">重置</button>
+    </div>
+    <div class="log-box mt-8" id="delayLog"></div>
+  </div>
+
+  <div class="card">
+    <h3>Pulsar vs 其他延迟方案</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>方案</th><th>精度</th><th>可靠性</th><th>实现复杂度</th><th>支付场景建议</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Pulsar 原生</td>
+          <td class="good">秒级</td>
+          <td class="good">持久化，重启不丢</td>
+          <td class="good">直接用 API</td>
+          <td class="good">首选</td>
+        </tr>
+        <tr>
+          <td>Redis ZSet</td>
+          <td class="good">秒级</td>
+          <td class="bad">内存，可能丢</td>
+          <td>中等</td>
+          <td>适合低重要性</td>
+        </tr>
+        <tr>
+          <td>Kafka自实现</td>
+          <td>级别固定</td>
+          <td class="good">可靠</td>
+          <td class="bad">复杂，要维护</td>
+          <td class="bad">不推荐</td>
+        </tr>
+        <tr>
+          <td>数据库扫描</td>
+          <td class="bad">分钟级</td>
+          <td>一般</td>
+          <td class="good">简单</td>
+          <td class="bad">性能差</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ===== SECTION 5: DLQ ===== -->
+<div class="section" id="sec4">
+  <div class="card">
+    <h3>死信队列(DLQ) — 消费失败兜底</h3>
+    <div class="grid-2">
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">配置</div>
+        <div style="background:#010409;border-radius:6px;padding:10px;font-family:monospace;font-size:12px;line-height:1.8;">
+          <div style="color:#e3b341;">// Consumer 配置死信策略</div>
+          <div style="color:#3fb950;">consumer.newBuilder()</div>
+          <div style="color:#3fb950;">  .deadLetterPolicy(</div>
+          <div style="color:#3fb950;">    DeadLetterPolicy.builder()</div>
+          <div style="color:#3fb950;">      .maxRedeliverCount(3)</div>
+          <div style="color:#3fb950;">      .deadLetterTopic("dlq-pay")</div>
+          <div style="color:#3fb950;">      .retryLetterTopic("retry-pay")</div>
+          <div style="color:#3fb950;">      .build())</div>
+          <div style="color:#3fb950;">  .subscribe();</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">消息重试 & 死信流程</div>
+        <div style="font-size:13px;color:#c9d1d9;line-height:1.8;">
+          <div>① 消费失败 → 自动进重试 Topic</div>
+          <div>② 重试第1次 → 延迟10s后重投</div>
+          <div>③ 重试第2次 → 延迟30s后重投</div>
+          <div>④ 重试第3次 → 延迟60s后重投</div>
+          <div>⑤ 第3次仍失败 → 进 DLQ</div>
+          <div>⑥ DLQ 触发告警 → 人工处理</div>
+          <div class="text-green" style="margin-top:4px;">✓ 不影响其他消息的正常处理</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DLQ Demo -->
+    <div style="margin-top:12px;">
+      <div class="text-orange mb-8" style="font-size:13px;font-weight:600;">消息处理状态模拟</div>
+      <div id="dlqList">
+        <div class="dlq-msg" id="dlq0">
+          <span>msg-001: 支付回调处理 (out_order_no=P20240101001)</span>
+          <span class="badge badge-orange" id="dlq0-status">待处理</span>
+        </div>
+        <div class="dlq-msg" id="dlq1">
+          <span>msg-002: 支付通知下游 (out_order_no=P20240101002)</span>
+          <span class="badge badge-orange" id="dlq1-status">待处理</span>
+        </div>
+        <div class="dlq-msg" id="dlq2">
+          <span>msg-003: 账单生成任务 (order_date=2024-01-01)</span>
+          <span class="badge badge-orange" id="dlq2-status">待处理</span>
+        </div>
+      </div>
+
+      <div class="flex gap-8 flex-wrap mt-8">
+        <button class="btn btn-green" onclick="processSuccess(0)">msg-001 处理成功</button>
+        <button class="btn btn-red" onclick="processFail(1)">msg-002 持续失败 → 进DLQ</button>
+        <button class="btn btn-orange" onclick="processRetry(2)">msg-003 重试后成功</button>
+        <button class="btn btn-gray" onclick="resetDlq()">重置</button>
+      </div>
+      <div class="log-box mt-8" id="dlqLog"></div>
+    </div>
+
+    <div class="interview-tip">
+      <div class="label">支付场景DLQ策略</div>
+      <p>支付回调处理失败 → 重试3次（10s/30s/60s延迟）→ 仍失败进 DLQ → 监控告警 → 人工排查（是 DB 故障？下游超时？） → 修复后从 DLQ 重新消费。<strong style="color:#bc8cff;">Kafka 需自己实现这套逻辑，Pulsar 内置。</strong></p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SECTION 6: VS KAFKA ===== -->
+<div class="section" id="sec5">
+  <div class="card">
+    <h3>Pulsar vs Kafka — 全面对比</h3>
+    <table class="compare-table">
+      <thead>
+        <tr><th>维度</th><th>Kafka</th><th>Pulsar</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>架构</td>
+          <td class="bad">存算耦合，Broker 有状态，扩容要迁数据</td>
+          <td class="good">存算分离，Broker 无状态，计算/存储独立扩容</td>
+        </tr>
+        <tr>
+          <td>消费模型</td>
+          <td>只有 Consumer Group（流模型）</td>
+          <td class="good">4种订阅模式（流+队列）兼容 Kafka/RabbitMQ</td>
+        </tr>
+        <tr>
+          <td>延迟消息</td>
+          <td class="bad">不原生支持，需自实现</td>
+          <td class="good">原生支持，deliverAfter/deliverAt</td>
+        </tr>
+        <tr>
+          <td>死信队列</td>
+          <td class="bad">不原生支持，需自实现</td>
+          <td class="good">内置，maxRedeliverCount 配置即可</td>
+        </tr>
+        <tr>
+          <td>多租户</td>
+          <td class="bad">无原生多租户</td>
+          <td class="good">原生支持 Tenant/Namespace 层级隔离</td>
+        </tr>
+        <tr>
+          <td>消息堆积</td>
+          <td class="bad">堆积多影响性能（存算耦合）</td>
+          <td class="good">存储独立，堆积不影响 Broker 性能</td>
+        </tr>
+        <tr>
+          <td>消息确认</td>
+          <td>批量 offset 提交</td>
+          <td class="good">消息级别单条确认</td>
+        </tr>
+        <tr>
+          <td>跨地域复制</td>
+          <td class="bad">需 MirrorMaker 外部工具</td>
+          <td class="good">原生内置 Geo-Replication</td>
+        </tr>
+        <tr>
+          <td>顺序保证</td>
+          <td>分区内有序</td>
+          <td class="good">Key_Shared 同Key顺序 + 多消费者并发</td>
+        </tr>
+        <tr>
+          <td>适用场景</td>
+          <td>日志采集、大数据流、高吞吐简单消息</td>
+          <td class="good">支付业务、多租户 SaaS、延迟消息、复杂消费</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="interview-tip" style="margin-top:16px;">
+      <div class="label">为什么支付选 Pulsar？（面试标准答案）</div>
+      <p>1. <strong style="color:#bc8cff;">原生延迟消息+死信队列</strong>：支付超时关单、重试兜底直接用，Kafka 需自造轮子；2. <strong style="color:#bc8cff;">多租户隔离</strong>：支付/订单/对账不同业务互不影响；3. <strong style="color:#bc8cff;">存算分离</strong>：大促加 Broker 即可，不用迁移数据，运维简单。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(i) {
+  document.querySelectorAll('.section').forEach((s,idx) => s.classList.toggle('active', idx===i));
+  document.querySelectorAll('.tab').forEach((t,idx) => t.classList.toggle('active', idx===i));
+}
+
+// ===== ARCH DETAIL =====
+const archDetails = {
+  producer: `<strong style="color:#58a6ff;">Producer 生产者</strong><br><br>
+  • 连接 Broker（通过 ZK/Service Discovery 找 Topic Owner）<br>
+  • 发送消息，收到 BookKeeper AckQuorum 确认后返回成功<br>
+  • 支持同步/异步/批量发送<br>
+  • 支持指定 deliverAfter 延迟发送<br>
+  • 支持幂等发送（sequenceId 去重）`,
+
+  consumer: `<strong style="color:#58a6ff;">Consumer 消费者</strong><br><br>
+  • 连接 Broker 订阅 Topic<br>
+  • 选择订阅模式（Exclusive/Shared/Failover/Key_Shared）<br>
+  • 处理消息后调用 acknowledge() 确认<br>
+  • 失败不 ack → 自动重试 → 进死信队列<br>
+  • cursor 存储在 BookKeeper，消费进度持久化`,
+
+  broker: `<strong style="color:#bc8cff;">Broker 计算层（无状态）</strong><br><br>
+  • 负责接收 Producer 消息，分发给 Consumer<br>
+  • <strong>不存储消息</strong>，只做路由和分发<br>
+  • 每个 Topic Partition 由一个 Broker 作为 Owner 服务<br>
+  • Broker 挂了 → ZK 检测 → 另一个 Broker 接管该 Partition<br>
+  • 无数据迁移！接管后直接读 BookKeeper 数据继续服务<br>
+  • 水平扩容只加机器，不迁数据`,
+
+  bookie: `<strong style="color:#3fb950;">Bookie 存储层（BookKeeper）</strong><br><br>
+  • 实际存储消息，以 Ledger 为单位分片<br>
+  • 每个 Ledger 条带化写入 Ensemble 个 Bookie（默认3个）<br>
+  • WriteQuorum=3：写3个副本才返回成功<br>
+  • AckQuorum=2：至少2个 Bookie 确认即返回<br>
+  • 独立扩容：加 Bookie 节点，存储自动均衡<br>
+  • 消息堆积不影响 Broker 性能（存算分离）`,
+
+  zk: `<strong style="color:#e3b341;">ZooKeeper</strong><br><br>
+  • 存储集群元数据：Topic 路由，Broker 列表，Namespace 配置<br>
+  • Broker Owner 选举：哪个 Broker 负责哪个 Topic Partition<br>
+  • BookKeeper 元数据：Ledger 信息，Bookie 列表<br>
+  • 新版本支持 BookKeeper 自管理元数据（减少 ZK 依赖）<br>
+  • Consumer 的订阅 cursor 也存在 BK 里，不在 ZK`
+};
+
+function showArchDetail(key) {
+  document.getElementById('arch-detail').innerHTML = archDetails[key] || '未找到详情';
+}
+
+// ===== FLOW DEMO =====
+function addFlowLog(msg, type='') {
+  const log = document.getElementById('flowLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+async function playFlow() {
+  const desc = document.getElementById('flowDesc');
+  const broker = document.getElementById('broker-flow');
+  const bk = document.getElementById('bk-flow');
+
+  const steps = [
+    [broker, '#bc8cff', '① Producer 发送消息 → Broker 接收'],
+    [bk, '#3fb950', '② Broker 将消息写入 BookKeeper Ledger（3副本）'],
+    [bk, '#e3b341', '③ 至少2个 Bookie 写入成功 → AckQuorum 满足'],
+    [broker, '#58a6ff', '④ Broker 向 Producer 返回确认（msgId）'],
+  ];
+
+  for (const [el, color, msg] of steps) {
+    el.style.boxShadow = `0 0 12px ${color}`;
+    desc.textContent = msg;
+    desc.style.color = color;
+    addFlowLog(msg, 'info');
+    await sleep(900);
+    el.style.boxShadow = '';
+  }
+  desc.textContent = '✅ 消息发送成功，持久化到 BookKeeper';
+}
+
+async function playConsume() {
+  const desc = document.getElementById('flowDesc');
+  const broker = document.getElementById('broker-flow');
+  const consumer = document.getElementById('consumer-flow');
+
+  const steps = [
+    [broker, '#bc8cff', '① Consumer 通过 Broker 订阅 Topic'],
+    [broker, '#e3b341', '② Broker 从 BookKeeper 读取消息'],
+    [consumer, '#58a6ff', '③ Broker 将消息 push 给 Consumer'],
+    [consumer, '#3fb950', '④ Consumer 处理完毕，调用 acknowledge(msgId)'],
+    [broker, '#3fb950', '⑤ Broker 更新 cursor（消费进度持久化到 BK）'],
+  ];
+
+  for (const [el, color, msg] of steps) {
+    el.style.boxShadow = `0 0 12px ${color}`;
+    desc.textContent = msg;
+    desc.style.color = color;
+    addFlowLog(msg, 'purple');
+    await sleep(900);
+    el.style.boxShadow = '';
+  }
+}
+
+function resetFlow() {
+  document.getElementById('flowDesc').textContent = '点击播放按钮开始演示...';
+  document.getElementById('flowLog').innerHTML = '';
+}
+
+// ===== SUBSCRIPTION MODES =====
+function showSubMode(mode) {
+  const demo = document.getElementById('subModeDemo');
+  const modes = {
+    exclusive: {
+      title: '① Exclusive 独占订阅 — 只有一个消费者',
+      color: '#bc8cff',
+      desc: '同一个订阅只允许一个消费者存在，消费者挂了另一个自动接管',
+      consumers: [
+        { name: 'Consumer-1', status: 'active', msgs: ['M1','M2','M3','M4','M5'] },
+        { name: 'Consumer-2', status: 'waiting', msgs: [] },
+      ],
+      note: '消费者2处于等待状态，消费者1挂了才会接管'
+    },
+    shared: {
+      title: '② Shared 共享订阅 — 多消费者轮询分发',
+      color: '#58a6ff',
+      desc: '消息 Round-Robin 分发给多个消费者，无顺序保证，水平扩展消费能力',
+      consumers: [
+        { name: 'Consumer-1', status: 'active', msgs: ['M1','M3','M5'] },
+        { name: 'Consumer-2', status: 'active', msgs: ['M2','M4'] },
+        { name: 'Consumer-3', status: 'active', msgs: ['M6','M7'] },
+      ],
+      note: '不同消息被不同消费者处理，无法保证顺序'
+    },
+    failover: {
+      title: '③ Failover 灾备订阅 — 主备切换',
+      color: '#e3b341',
+      desc: '主消费者处理所有消息，主挂了备消费者无缝接管，保证高可用',
+      consumers: [
+        { name: 'Consumer-1 (主)', status: 'active', msgs: ['M1','M2','M3','M4'] },
+        { name: 'Consumer-2 (备)', status: 'standby', msgs: [] },
+      ],
+      note: '备消费者实时待命，主挂了5秒内完成切换'
+    },
+    key_shared: {
+      title: '④ Key_Shared 订阅 — 同Key有序 + 多消费者并发 ⭐',
+      color: '#3fb950',
+      desc: '同一个Key的消息总是路由到同一个消费者（保证顺序），不同Key并发消费（高吞吐）',
+      consumers: [
+        { name: 'Consumer-1', status: 'key-active', msgs: ['P001-创建','P001-支付','P001-完成'] },
+        { name: 'Consumer-2', status: 'key-active', msgs: ['P002-创建','P002-支付'] },
+        { name: 'Consumer-3', status: 'key-active', msgs: ['P003-创建','P003-退款'] },
+      ],
+      note: '每个消费者处理特定Key(订单号)的所有消息，顺序保证 + 并发处理'
+    }
+  };
+
+  const m = modes[mode];
+  let html = `<div style="background:#010409;border:1px solid #21262d;border-radius:8px;padding:14px;">
+    <div style="font-size:14px;font-weight:600;color:${m.color};margin-bottom:8px;">${m.title}</div>
+    <div style="font-size:12px;color:#8b949e;margin-bottom:12px;">${m.desc}</div>`;
+
+  m.consumers.forEach(c => {
+    const statusColor = c.status === 'active' || c.status === 'key-active' ? m.color : c.status === 'waiting' ? '#3a1a1a' : '#3a2a00';
+    const statusText = c.status === 'active' || c.status === 'key-active' ? '消费中' : c.status === 'waiting' ? '等待中' : '待命中';
+    html += `<div class="consumer-row">
+      <div class="consumer-box ${c.status === 'key-active' ? 'key-active' : c.status === 'active' ? 'active' : ''}" style="border:1px solid ${statusColor};">
+        ${c.name}<br><span style="font-size:10px;color:${statusColor};">${statusText}</span>
+      </div>
+      <div style="font-size:12px;">←</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        ${c.msgs.map(msg => `<span class="msg-pill delivered">${msg}</span>`).join('')}
+        ${c.msgs.length === 0 ? '<span style="font-size:11px;color:#8b949e;">无消息</span>' : ''}
+      </div>
+    </div>`;
+  });
+
+  html += `<div style="margin-top:8px;font-size:12px;color:#e3b341;">💡 ${m.note}</div></div>`;
+  demo.innerHTML = html;
+}
+
+// ===== DELAY MSG =====
+let delayTimer = null;
+function addDelayLog(msg, type='') {
+  const log = document.getElementById('delayLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function simDelayTimeout() {
+  if (delayTimer) return;
+  const dot = document.getElementById('timeDot');
+  document.getElementById('timeStatus').textContent = '⏰ 支付超时倒计时中...';
+  addDelayLog('支付单 P20240101001 创建，发送30分钟延迟消息', 'purple');
+  addDelayLog('消息暂存在 Pulsar 延迟消息 Topic 中...', 'gray');
+  dot.style.left = '5%'; dot.style.background = '#bc8cff';
+
+  let pos = 5;
+  delayTimer = setInterval(() => {
+    pos += 3;
+    if (pos >= 90) { pos = 90; clearInterval(delayTimer); delayTimer = null; }
+    dot.style.left = pos + '%';
+  }, 200);
+
+  setTimeout(() => addDelayLog('10分钟：用户未支付...', 'gray'), 700);
+  setTimeout(() => addDelayLog('20分钟：用户未支付...', 'gray'), 1400);
+  setTimeout(() => {
+    addDelayLog('30分钟到！Pulsar 将延迟消息投递到业务 Topic', 'warn');
+    dot.style.background = '#f85149';
+    setTimeout(() => {
+      addDelayLog('消费者收到消息，查询支付单 P20240101001 状态: 未支付', 'err');
+      addDelayLog('执行自动关单 + 释放库存 + 通知用户', 'err');
+      document.getElementById('timeStatus').textContent = '✅ 关单成功';
+    }, 500);
+  }, 6000);
+}
+
+function simDelayPaid() {
+  if (delayTimer) clearInterval(delayTimer); delayTimer = null;
+  const dot = document.getElementById('timeDot');
+  dot.style.left = '5%'; dot.style.background = '#bc8cff';
+  addDelayLog('支付单 P20240101002 创建，发送30分钟延迟消息', 'purple');
+  setTimeout(() => {
+    addDelayLog('用户在5分钟内完成支付 ✓', 'info');
+    dot.style.left = '20%'; dot.style.background = '#3fb950';
+    document.getElementById('timeStatus').textContent = '✅ 用户已支付';
+  }, 500);
+  setTimeout(() => {
+    addDelayLog('30分钟到，消费者收到延迟消息', 'gray');
+    addDelayLog('查询支付单状态: 已支付 → 直接忽略该消息', 'info');
+    addDelayLog('ack 消息，流程结束', 'info');
+  }, 1500);
+}
+
+function resetDelay() {
+  if (delayTimer) clearInterval(delayTimer); delayTimer = null;
+  document.getElementById('timeDot').style.left = '5%';
+  document.getElementById('timeDot').style.background = '#bc8cff';
+  document.getElementById('timeStatus').textContent = '点击按钮模拟支付超时场景';
+  document.getElementById('delayLog').innerHTML = '';
+}
+
+// ===== DLQ =====
+function addDlqLog(msg, type='') {
+  const log = document.getElementById('dlqLog');
+  const ts = new Date().toLocaleTimeString('zh', {hour12:false});
+  const line = document.createElement('div'); line.className = 'log-line ' + type;
+  line.textContent = `[${ts}] ${msg}`; log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+
+function processSuccess(idx) {
+  const el = document.getElementById(`dlq${idx}`);
+  const badge = document.getElementById(`dlq${idx}-status`);
+  el.className = 'dlq-msg success';
+  badge.className = 'badge badge-green'; badge.textContent = '已处理';
+  addDlqLog(`msg-00${idx+1} 处理成功，acknowledge() ✓`, 'info');
+}
+
+function processFail(idx) {
+  const el = document.getElementById(`dlq${idx}`);
+  const badge = document.getElementById(`dlq${idx}-status`);
+  el.className = 'dlq-msg retrying';
+  badge.className = 'badge badge-orange'; badge.textContent = '重试中...';
+  addDlqLog(`msg-00${idx+1} 处理失败（DB 超时）→ 进入重试`, 'warn');
+  setTimeout(() => {
+    addDlqLog(`msg-00${idx+1} 重试#1 失败，延迟10s后重试...`, 'warn');
+  }, 600);
+  setTimeout(() => {
+    addDlqLog(`msg-00${idx+1} 重试#2 失败，延迟30s后重试...`, 'warn');
+  }, 1200);
+  setTimeout(() => {
+    addDlqLog(`msg-00${idx+1} 重试#3 失败，已达 maxRedeliverCount=3`, 'err');
+    addDlqLog(`⚠ msg-00${idx+1} 转入死信队列 dlq-pay，触发告警通知`, 'err');
+    el.className = 'dlq-msg dead';
+    badge.className = 'badge badge-red'; badge.textContent = '死信队列';
+  }, 1800);
+}
+
+function processRetry(idx) {
+  const el = document.getElementById(`dlq${idx}`);
+  const badge = document.getElementById(`dlq${idx}-status`);
+  el.className = 'dlq-msg retrying';
+  badge.className = 'badge badge-orange'; badge.textContent = '重试中...';
+  addDlqLog(`msg-00${idx+1} 处理失败（下游超时）→ 重试#1`, 'warn');
+  setTimeout(() => {
+    addDlqLog(`msg-00${idx+1} 重试#1 失败，重试#2...`, 'warn');
+  }, 700);
+  setTimeout(() => {
+    el.className = 'dlq-msg success';
+    badge.className = 'badge badge-green'; badge.textContent = '重试成功';
+    addDlqLog(`msg-00${idx+1} 重试#2 成功 ✓ 不进死信，正常结束`, 'info');
+  }, 1400);
+}
+
+function resetDlq() {
+  ['dlq0','dlq1','dlq2'].forEach((id,i) => {
+    document.getElementById(id).className = 'dlq-msg';
+    const badge = document.getElementById(`${id}-status`);
+    badge.className = 'badge badge-orange'; badge.textContent = '待处理';
+  });
+  document.getElementById('dlqLog').innerHTML = '';
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
