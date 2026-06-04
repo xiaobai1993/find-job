@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>先享后付 · 零食柜业务流程</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+
+  :root {
+    --bg: #06080f;
+    --bg2: #0d1117;
+    --bg3: #161b27;
+    --border: #1e2a3a;
+    --border-bright: #2a3f5a;
+    --text: #c9d1d9;
+    --text-dim: #6e7f96;
+    --text-bright: #e6edf3;
+    --cyan: #39d0f5;
+    --green: #3de886;
+    --yellow: #f5c542;
+    --orange: #f5882a;
+    --red: #f55a5a;
+    --purple: #a78bfa;
+    --cyan-glow: rgba(57,208,245,0.15);
+    --green-glow: rgba(61,232,134,0.15);
+    --yellow-glow: rgba(245,197,66,0.12);
+    --red-glow: rgba(245,90,90,0.12);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ─── GRID NOISE BACKGROUND ─── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(57,208,245,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(57,208,245,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page-wrap { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* ─── HERO ─── */
+  .hero {
+    padding: 80px 0 60px;
+    text-align: center;
+    position: relative;
+  }
+  .hero-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--cyan);
+    border: 1px solid rgba(57,208,245,0.3);
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 24px;
+    background: rgba(57,208,245,0.06);
+    animation: fadeSlideDown 0.6s ease both;
+  }
+  .hero h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 700;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+    animation: fadeSlideDown 0.6s 0.1s ease both;
+  }
+  .hero h1 span { color: var(--cyan); }
+  .hero-sub {
+    margin-top: 16px;
+    font-size: 15px;
+    color: var(--text-dim);
+    max-width: 600px;
+    margin: 16px auto 0;
+    animation: fadeSlideDown 0.6s 0.2s ease both;
+  }
+  .hero-scene {
+    margin-top: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 24px;
+    font-size: 13px;
+    color: var(--text);
+    animation: fadeSlideDown 0.6s 0.3s ease both;
+  }
+  .hero-scene .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ─── SECTION ─── */
+  .section { margin-bottom: 64px; }
+  .section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, var(--border-bright), transparent); }
+
+  /* ─── CONCEPT CARDS (4 tables) ─── */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  @media(max-width:640px){ .concept-grid{ grid-template-columns:1fr; } }
+
+  .concept-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.25s, transform 0.25s;
+  }
+  .concept-card:hover { border-color: var(--border-bright); transform: translateY(-2px); }
+  .concept-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .concept-card.cyan::before { background: linear-gradient(90deg, var(--cyan), transparent); }
+  .concept-card.green::before { background: linear-gradient(90deg, var(--green), transparent); }
+  .concept-card.yellow::before { background: linear-gradient(90deg, var(--yellow), transparent); }
+  .concept-card.purple::before { background: linear-gradient(90deg, var(--purple), transparent); }
+
+  .concept-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    display: inline-block;
+  }
+  .cyan .concept-tag { background:rgba(57,208,245,0.1); color:var(--cyan); border:1px solid rgba(57,208,245,0.2); }
+  .green .concept-tag { background:rgba(61,232,134,0.1); color:var(--green); border:1px solid rgba(61,232,134,0.2); }
+  .yellow .concept-tag { background:rgba(245,197,66,0.1); color:var(--yellow); border:1px solid rgba(245,197,66,0.2); }
+  .purple .concept-tag { background:rgba(167,139,250,0.1); color:var(--purple); border:1px solid rgba(167,139,250,0.2); }
+
+  .concept-card h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 6px;
+  }
+  .concept-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+  .concept-card .field-list { list-style: none; }
+  .concept-card .field-list li {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    display: flex;
+    justify-content: space-between;
+  }
+  .concept-card .field-list li:last-child { border-bottom: none; }
+  .concept-card .field-list .key { color: var(--text); }
+
+  .relation-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 8px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* ─── TIMELINE ─── */
+  .timeline { position: relative; }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 28px;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg, var(--cyan) 0%, var(--border) 40%, transparent 100%);
+  }
+
+  .timeline-item {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 32px;
+    animation: fadeSlideLeft 0.5s ease both;
+  }
+  .timeline-item:nth-child(1){ animation-delay:0.1s }
+  .timeline-item:nth-child(2){ animation-delay:0.2s }
+  .timeline-item:nth-child(3){ animation-delay:0.3s }
+  .timeline-item:nth-child(4){ animation-delay:0.4s }
+  .timeline-item:nth-child(5){ animation-delay:0.5s }
+  .timeline-item:nth-child(6){ animation-delay:0.6s }
+
+  .timeline-icon {
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    position: relative;
+    z-index: 1;
+    border: 2px solid var(--border);
+    background: var(--bg2);
+  }
+  .timeline-icon.active { border-color: var(--cyan); background: rgba(57,208,245,0.1); box-shadow: 0 0 20px rgba(57,208,245,0.2); }
+  .timeline-icon.success { border-color: var(--green); background: rgba(61,232,134,0.1); box-shadow: 0 0 20px rgba(61,232,134,0.2); }
+  .timeline-icon.warning { border-color: var(--yellow); background: rgba(245,197,66,0.1); }
+  .timeline-icon.danger  { border-color: var(--red); background: rgba(245,90,90,0.1); }
+
+  .timeline-content {
+    flex: 1;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+  }
+  .timeline-content::before {
+    content: '';
+    position: absolute;
+    left: -8px; top: 20px;
+    width: 8px; height: 8px;
+    background: var(--border);
+    clip-path: polygon(100% 50%, 0 0, 0 100%);
+  }
+
+  .timeline-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .timeline-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-bright);
+  }
+  .timeline-subtitle { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .timeline-who {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .who-biz { background: rgba(167,139,250,0.1); color:var(--purple); border:1px solid rgba(167,139,250,0.2); }
+  .who-user { background: rgba(245,197,66,0.1); color:var(--yellow); border:1px solid rgba(245,197,66,0.2); }
+  .who-wx { background: rgba(57,208,245,0.1); color:var(--cyan); border:1px solid rgba(57,208,245,0.2); }
+  .who-sys { background: rgba(61,232,134,0.1); color:var(--green); border:1px solid rgba(61,232,134,0.2); }
+
+  /* API call block */
+  .api-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .api-block .api-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 4px; }
+  .api-block .api-name { color: var(--cyan); font-weight: 500; }
+  .api-block .api-desc { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+
+  /* State changes */
+  .state-changes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .state-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    border-radius: 6px;
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .state-chip .table-name { font-size: 9px; letter-spacing: 0.08em; opacity: 0.6; }
+  .state-chip .state-arrow { display: flex; align-items: center; gap: 6px; }
+  .state-chip .s-from { opacity: 0.6; text-decoration: line-through; }
+  .state-chip .arr { opacity: 0.5; }
+
+  .state-chip.cyan { background:rgba(57,208,245,0.06); border-color:rgba(57,208,245,0.2); color:var(--cyan); }
+  .state-chip.green { background:rgba(61,232,134,0.06); border-color:rgba(61,232,134,0.2); color:var(--green); }
+  .state-chip.yellow { background:rgba(245,197,66,0.06); border-color:rgba(245,197,66,0.2); color:var(--yellow); }
+  .state-chip.purple { background:rgba(167,139,250,0.06); border-color:rgba(167,139,250,0.2); color:var(--purple); }
+  .state-chip.new { background:rgba(61,232,134,0.08); border-color:rgba(61,232,134,0.3); color:var(--green); }
+
+  /* MQ messages */
+  .mq-list { margin-top: 12px; display:flex; flex-direction:column; gap:6px; }
+  .mq-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .mq-item .mq-icon { font-size: 14px; }
+  .mq-topic { color: var(--yellow); }
+  .mq-desc { color: var(--text-dim); }
+
+  /* ─── STATUS TABLE ─── */
+  .status-matrix {
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead { background: var(--bg3); }
+  thead th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    padding: 12px 16px;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  thead th:first-child { color: var(--text-bright); }
+  tbody tr { transition: background 0.2s; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+  tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  .step-label {
+    font-weight: 600;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+  .step-label small { display:block; font-size:11px; font-weight:400; color:var(--text-dim); margin-top:2px; }
+
+  .badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .badge-na { background:rgba(255,255,255,0.04); color:var(--text-dim); border:1px solid var(--border); }
+  .badge-unsign { background:rgba(245,197,66,0.08); color:var(--yellow); border:1px solid rgba(245,197,66,0.2); }
+  .badge-signed { background:rgba(57,208,245,0.08); color:var(--cyan); border:1px solid rgba(57,208,245,0.2); }
+  .badge-completing { background:rgba(245,136,42,0.08); color:var(--orange); border:1px solid rgba(245,136,42,0.2); }
+  .badge-payed { background:rgba(61,232,134,0.08); color:var(--green); border:1px solid rgba(61,232,134,0.2); }
+  .badge-timeout { background:rgba(245,90,90,0.08); color:var(--red); border:1px solid rgba(245,90,90,0.2); }
+  .badge-canceled { background:rgba(245,90,90,0.08); color:var(--red); border:1px solid rgba(245,90,90,0.2); }
+  .badge-pending { background:rgba(167,139,250,0.08); color:var(--purple); border:1px solid rgba(167,139,250,0.2); }
+  .badge-success { background:rgba(61,232,134,0.08); color:var(--green); border:1px solid rgba(61,232,134,0.2); }
+  .badge-failed { background:rgba(245,90,90,0.08); color:var(--red); border:1px solid rgba(245,90,90,0.2); }
+  .badge-new { background:rgba(57,208,245,0.05); color:var(--cyan); border:1px dashed rgba(57,208,245,0.3); }
+
+  /* ─── API REFERENCE ─── */
+  .api-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .api-ref-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: border-color 0.2s;
+  }
+  .api-ref-card:hover { border-color: var(--border-bright); }
+  .api-method {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--cyan);
+    margin-bottom: 4px;
+  }
+  .api-ref-card .desc { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .api-when {
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    gap: 8px;
+  }
+  .api-when .label { color: var(--text-dim); white-space: nowrap; }
+  .api-when .val { color: var(--text); }
+
+  /* ─── EXCEPTION CARDS ─── */
+  .exception-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .exception-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .exception-card::before {
+    content: '';
+    position: absolute;
+    top:0; left:0; right:0; height:2px;
+  }
+  .exc-timeout::before { background: linear-gradient(90deg, var(--yellow), transparent); }
+  .exc-fail::before    { background: linear-gradient(90deg, var(--orange), transparent); }
+  .exc-cancel::before  { background: linear-gradient(90deg, var(--red), transparent); }
+
+  .exc-icon { font-size: 28px; margin-bottom: 10px; }
+  .exc-title { font-size: 15px; font-weight: 700; color: var(--text-bright); margin-bottom: 6px; }
+  .exc-trigger { font-size: 11px; color: var(--text-dim); margin-bottom: 12px; }
+  .exc-steps { list-style: none; counter-reset: step; }
+  .exc-steps li {
+    counter-increment: step;
+    font-size: 12px;
+    color: var(--text);
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    padding-left: 24px;
+    position: relative;
+  }
+  .exc-steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    width: 16px; height: 16px;
+    background: var(--bg3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    top: 7px;
+    color: var(--text-dim);
+  }
+  .exc-steps li:last-child { border-bottom: none; }
+
+  /* ─── ANIMATIONS ─── */
+  @keyframes fadeSlideDown {
+    from { opacity:0; transform:translateY(-16px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  @keyframes fadeSlideLeft {
+    from { opacity:0; transform:translateX(-16px); }
+    to   { opacity:1; transform:translateX(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity:0; }
+    to   { opacity:1; }
+  }
+
+  /* ─── KEY INSIGHT BOX ─── */
+  .insight {
+    background: rgba(57,208,245,0.04);
+    border: 1px solid rgba(57,208,245,0.15);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .insight .icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .insight strong { color: var(--cyan); }
+
+  /* ─── FOOTER ─── */
+  footer {
+    text-align: center;
+    padding: 40px 0 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-badge">PAYMENT SYSTEM · TECHNICAL OVERVIEW</div>
+    <h1>先享后付 <span>业务流程</span></h1>
+    <p class="hero-sub">基于微信支付分（信用付）的先享后付完整业务流程 · 数据状态 · 服务接口</p>
+    <div class="hero-scene">
+      <div class="dot"></div>
+      <span>场景：美餐智能零食柜 — 张三扫码开门 → 拿零食 → 关门 → 自动扣款</span>
+    </div>
+  </div>
+
+  <!-- SECTION 1: 核心数据模型 -->
+  <div class="section">
+    <div class="section-title">01 · 核心数据模型</div>
+
+    <div class="insight">
+      <span class="icon">💡</span>
+      <div>
+        <strong>关键理解：</strong>整个流程分为两个独立域。<strong>签约域</strong>（pay_after 系列）负责「授权阶段」，扫码时就创建，此时不知道金额；<strong>支付域</strong>（payment 系列）负责「结算阶段」，关门确认商品后才创建。两域通过 <code style="color:var(--cyan);background:rgba(57,208,245,0.1);padding:1px 5px;border-radius:3px;">pay_after_slip.payment_slip_id</code> 关联。
+      </div>
+    </div>
+
+    <div class="concept-grid">
+      <div class="concept-card cyan">
+        <div class="concept-tag">签约域 · 主单</div>
+        <h3>pay_after_slip</h3>
+        <p>后付主单。描述「这个用户为这个订单开通了先享后付」这件事。扫码时创建，与业务订单号一一对应。</p>
+        <ul class="field-list">
+          <li><span class="key">out_order_no</span><span>业务方订单号</span></li>
+          <li><span class="key">user_id / mch_id</span><span>用户 / 商户</span></li>
+          <li><span class="key">risk_fund_amount</span><span>风险保障金（授权上限）</span></li>
+          <li><span class="key">deadline</span><span>签约后超时时间（+7天）</span></li>
+          <li><span class="key">payment_slip_id</span><span>关联支付单（关门后填入）</span></li>
+          <li><span class="key">status</span><span>0~7 见状态说明</span></li>
+        </ul>
+      </div>
+
+      <div class="concept-card purple">
+        <div class="concept-tag">签约域 · 子单</div>
+        <h3>pay_after_sub_slip</h3>
+        <p>后付执行子单。描述「用哪个具体支付账户（微信支付分）来执行签约和扣款」。支持多渠道扩展。</p>
+        <ul class="field-list">
+          <li><span class="key">slip_id</span><span>关联 pay_after_slip.id</span></li>
+          <li><span class="key">account_type / sub_type</span><span>支付渠道（微信/支付宝）</span></li>
+          <li><span class="key">tpw_pay_scene</span><span>扣款场景</span></li>
+          <li><span class="key">tpw_external_trade_no</span><span>微信侧交易号（签约后写入）</span></li>
+          <li><span class="key">status</span><span>0~4 见状态说明</span></li>
+        </ul>
+      </div>
+
+      <div class="concept-card yellow">
+        <div class="concept-tag">支付域 · 主单</div>
+        <h3>payment_slip</h3>
+        <p>支付主单。描述「这笔消费要收多少钱，收了多少了」。<strong>关门确认金额后才创建</strong>，与后付主单通过外部订单号关联。</p>
+        <ul class="field-list">
+          <li><span class="key">out_order_no</span><span>同后付单的订单号</span></li>
+          <li><span class="key">amount</span><span>应收总金额（分）</span></li>
+          <li><span class="key">paid_amount</span><span>已收金额（累加）</span></li>
+          <li><span class="key">option_bits</span><span>标志位（含先享后付标记）</span></li>
+          <li><span class="key">status</span><span>Success / FullPayFailed 等</span></li>
+        </ul>
+      </div>
+
+      <div class="concept-card green">
+        <div class="concept-tag">支付域 · 子单</div>
+        <h3>payment_sub_slip</h3>
+        <p>支付执行子单。每一次实际扣款动作对应一条记录。自动扣款一条，手动补付时再追加一条。</p>
+        <ul class="field-list">
+          <li><span class="key">slip_id</span><span>关联 payment_slip.id</span></li>
+          <li><span class="key">amount</span><span>本次扣款金额</span></li>
+          <li><span class="key">effective_amount</span><span>实际到账（成功后填入）</span></li>
+          <li><span class="key">option=IsPayAfter</span><span>标记为先享后付扣款</span></li>
+          <li><span class="key">tpw_external_trade_no</span><span>微信流水号（成功后填入）</span></li>
+          <li><span class="key">status</span><span>Pending → Succeeded / Failed</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 关系说明 -->
+    <div style="margin-top:20px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:0.08em;">TABLE RELATIONSHIPS</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);overflow-x:auto;white-space:nowrap;line-height:2;">
+        <span style="color:var(--cyan)">pay_after_slip</span>
+        <span style="color:var(--text-dim)"> (1) ──────── (N) </span>
+        <span style="color:var(--purple)">pay_after_sub_slip</span>
+        <span style="color:var(--text-dim)">  [slip_id 关联]</span><br>
+        <span style="color:var(--cyan)">pay_after_slip</span>
+        <span style="color:var(--text-dim)"> (1) ──────── (1) </span>
+        <span style="color:var(--yellow)">payment_slip</span>
+        <span style="color:var(--text-dim)">       [payment_slip_id 关联，关门后建立]</span><br>
+        <span style="color:var(--yellow)">payment_slip</span>
+        <span style="color:var(--text-dim)">  (1) ──────── (N) </span>
+        <span style="color:var(--green)">payment_sub_slip</span>
+        <span style="color:var(--text-dim)">   [slip_id 关联，每次扣款一条]</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: 正常流程时序 -->
+  <div class="section">
+    <div class="section-title">02 · 正常流程时序（以张三为例）</div>
+
+    <div class="timeline">
+
+      <!-- STEP 1 -->
+      <div class="timeline-item">
+        <div class="timeline-icon active">🔍</div>
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <div>
+              <div class="timeline-title">阶段 1 · 扫码开门</div>
+              <div class="timeline-subtitle">张三用微信扫零食柜二维码</div>
+            </div>
+            <span class="timeline-who who-biz">业务系统调用</span>
+          </div>
+          <div class="api-block">
+            <div class="api-label">API CALL → TransactionMeican</div>
+            <div class="api-name">CreatePayAfterSlip()</div>
+            <div class="api-desc">传入：mch_id, user_id, out_order_no, risk_fund_amount=10000分(100元), service_introduction, device_id</div>
+          </div>
+          <div class="api-block">
+            <div class="api-label">API CALL → TransactionMeican</div>
+            <div class="api-name">PayAfterSign()</div>
+            <div class="api-desc">获取微信支付分签约链接，引导张三跳转授权页面</div>
+          </div>
+          <div class="state-changes">
+            <div class="state-chip new">
+              <span class="table-name">pay_after_slip</span>
+              <div class="state-arrow">
+                <span>status = 1 · UnSign</span>
+                <span style="font-size:9px;color:var(--text-dim)">新建</span>
+              </div>
+            </div>
+            <div class="state-chip new">
+              <span class="table-name">pay_after_sub_slip</span>
+              <div class="state-arrow">
+                <span>status = 0 · UnSign</span>
+                <span style="font-size:9px;color:var(--text-dim)">新建</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2 -->
+      <div class="timeline-item">
+        <div class="timeline-icon active">✍️</div>
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <div>
+              <div class="timeline-title">阶段 2 · 张三在微信授权签约</div>
+              <div class="timeline-subtitle">微信支付分回调支付系统</div>
+            </div>
+            <span class="timeline-who who-wx">微信侧回调</span>
+          </div>
+          <div class="api-block">
+            <div class="api-label">MQ CONSUMER → Consumer</div>
+            <div class="api-name">PayAfterCallback() → HandleTpwSignCallback()</div>
+            <div class="api-desc">处理微信签约回调 · Redis 分布式锁防并发 · Double-check 幂等</div>
+          </div>
+          <div class="state-changes">
+            <div class="state-chip cyan">
+              <span class="table-name">pay_after_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">UnSign(1)</span>
+                <span class="arr">→</span>
+                <span>Signed(2)</span>
+              </div>
+            </div>
+            <div class="state-chip cyan">
+              <span class="table-name">pay_after_slip</span>
+              <div class="state-arrow">
+                <span>deadline = 签约时间 + 7天</span>
+              </div>
+            </div>
+            <div class="state-chip purple">
+              <span class="table-name">pay_after_sub_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">UnSign(0)</span>
+                <span class="arr">→</span>
+                <span>Signed(1)</span>
+              </div>
+            </div>
+          </div>
+          <div class="mq-list">
+            <div class="mq-item">
+              <span class="mq-icon">📨</span>
+              <span>发出延迟MQ：</span>
+              <span class="mq-topic">PaymentSlipTimeoutCheckV2</span>
+              <span class="mq-desc">· 7天后触发超时检查</span>
+            </div>
+            <div class="mq-item">
+              <span class="mq-icon">📨</span>
+              <span>发出即时MQ：</span>
+              <span class="mq-topic">ResultNotify</span>
+              <span class="mq-desc">· 通知业务方签约成功 → 零食柜门开</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 3 -->
+      <div class="timeline-item">
+        <div class="timeline-icon" style="border-color:var(--yellow);background:rgba(245,197,66,0.1)">🛒</div>
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <div>
+              <div class="timeline-title">阶段 3 · 张三拿商品关门</div>
+              <div class="timeline-subtitle">薯片×1(800分) + 饮料×2(2400分) = 共 3200分（32元）</div>
+            </div>
+            <span class="timeline-who who-biz">业务系统调用</span>
+          </div>
+          <div class="api-block">
+            <div class="api-label">API CALL → TransactionMeican</div>
+            <div class="api-name">CompletePayAfterSlip()</div>
+            <div class="api-desc">传入：out_order_no, 商品清单（薯片/饮料），金额 3200 分 · 此接口触发创建 payment_slip</div>
+          </div>
+          <div class="state-changes">
+            <div class="state-chip new">
+              <span class="table-name">payment_slip</span>
+              <div class="state-arrow">
+                <span>amount=3200, status=FullPayFailed</span>
+                <span style="font-size:9px;color:var(--text-dim)">新建</span>
+              </div>
+            </div>
+            <div class="state-chip new">
+              <span class="table-name">payment_sub_slip</span>
+              <div class="state-arrow">
+                <span>amount=3200, status=Pending, IsPayAfter</span>
+                <span style="font-size:9px;color:var(--text-dim)">新建</span>
+              </div>
+            </div>
+            <div class="state-chip yellow">
+              <span class="table-name">pay_after_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">Signed(2)</span>
+                <span class="arr">→</span>
+                <span>Completing(4)</span>
+              </div>
+            </div>
+            <div class="state-chip purple">
+              <span class="table-name">pay_after_sub_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">Signed(1)</span>
+                <span class="arr">→</span>
+                <span>Completing(2)</span>
+              </div>
+            </div>
+          </div>
+          <div class="mq-list">
+            <div class="mq-item">
+              <span class="mq-icon">📨</span>
+              <span>发出MQ：</span>
+              <span class="mq-topic">PayAfterSlipComplete</span>
+              <span class="mq-desc">· 通知微信支付分完结，含商品清单和金额</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 4 -->
+      <div class="timeline-item">
+        <div class="timeline-icon success">💳</div>
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <div>
+              <div class="timeline-title">阶段 4 · 微信自动扣款成功</div>
+              <div class="timeline-subtitle">微信从张三账户扣款 3200分，回调支付服务</div>
+            </div>
+            <span class="timeline-who who-wx">微信侧回调</span>
+          </div>
+          <div class="api-block">
+            <div class="api-label">MQ CONSUMER → Consumer</div>
+            <div class="api-name">TpwPaymentCallback() → HandleAsyncPayCallback()</div>
+            <div class="api-desc">处理微信扣款成功回调 · 事务内更新全部状态 · 防重复扣款（取消同单其他 Pending 子单）</div>
+          </div>
+          <div class="state-changes">
+            <div class="state-chip green">
+              <span class="table-name">payment_sub_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">Pending</span>
+                <span class="arr">→</span>
+                <span>Succeeded</span>
+              </div>
+            </div>
+            <div class="state-chip green">
+              <span class="table-name">payment_slip</span>
+              <div class="state-arrow">
+                <span>paid_amount=3200, status=Success</span>
+              </div>
+            </div>
+            <div class="state-chip green">
+              <span class="table-name">pay_after_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">Completing(4)</span>
+                <span class="arr">→</span>
+                <span>Payed(5) ✓</span>
+              </div>
+            </div>
+            <div class="state-chip green">
+              <span class="table-name">pay_after_sub_slip</span>
+              <div class="state-arrow">
+                <span class="s-from">Completing(2)</span>
+                <span class="arr">→</span>
+                <span>Completed(3) ✓</span>
+              </div>
+            </div>
+          </div>
+          <div class="mq-list">
+            <div class="mq-item">
+              <span class="mq-icon">📨</span>
+              <span>发出MQ：</span>
+              <span class="mq-topic">ResultNotify</span>
+              <span class="mq-desc">· 通知业务方支付成功，张三微信收到扣款通知</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SECTION 3: 状态矩阵 -->
+  <div class="section">
+    <div class="section-title">03 · 各阶段数据状态快照</div>
+    <div class="status-matrix">
+      <table>
+        <thead>
+          <tr>
+            <th>时间节点</th>
+            <th>pay_after_slip</th>
+            <th>pay_after_sub_slip</th>
+            <th>payment_slip</th>
+            <th>payment_sub_slip</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="step-label">扫码开门<small>CreatePayAfterSlip</small></td>
+            <td><span class="badge badge-unsign">UnSign · 1</span></td>
+            <td><span class="badge badge-unsign">UnSign · 0</span></td>
+            <td><span class="badge badge-na">— 不存在 —</span></td>
+            <td><span class="badge badge-na">— 不存在 —</span></td>
+          </tr>
+          <tr>
+            <td class="step-label">张三授权签约<small>PayAfterCallback</small></td>
+            <td><span class="badge badge-signed">Signed · 2</span><br><small style="font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">+deadline</small></td>
+            <td><span class="badge badge-signed">Signed · 1</span></td>
+            <td><span class="badge badge-na">— 不存在 —</span></td>
+            <td><span class="badge badge-na">— 不存在 —</span></td>
+          </tr>
+          <tr>
+            <td class="step-label">关门完结<small>CompletePayAfterSlip</small></td>
+            <td><span class="badge badge-completing">Completing · 4</span></td>
+            <td><span class="badge badge-completing">Completing · 2</span></td>
+            <td><span class="badge badge-new">新建 · FullPayFailed</span></td>
+            <td><span class="badge badge-new">新建 · Pending</span></td>
+          </tr>
+          <tr>
+            <td class="step-label">扣款成功<small>TpwPaymentCallback</small></td>
+            <td><span class="badge badge-payed">Payed · 5</span></td>
+            <td><span class="badge badge-payed">Completed · 3</span></td>
+            <td><span class="badge badge-success">Success</span></td>
+            <td><span class="badge badge-success">Succeeded</span></td>
+          </tr>
+          <tr style="background:rgba(245,136,42,0.03)">
+            <td class="step-label" style="color:var(--orange)">⚠ 扣款失败<small>自动扣款失败回调</small></td>
+            <td><span class="badge badge-completing">Completing · 4</span></td>
+            <td><span class="badge badge-completing">Completing · 2</span></td>
+            <td><span class="badge badge-failed">FullPayFailed</span></td>
+            <td><span class="badge badge-failed">Failed</span></td>
+          </tr>
+          <tr style="background:rgba(245,136,42,0.03)">
+            <td class="step-label" style="color:var(--orange)">⚠ 手动补付成功<small>CreateManualPay</small></td>
+            <td><span class="badge badge-payed">Payed · 5</span></td>
+            <td><span class="badge badge-payed">Completed · 3</span></td>
+            <td><span class="badge badge-success">Success</span></td>
+            <td><span class="badge badge-success">Succeeded</span><br><small style="font-size:10px;color:var(--text-dim)">新增一条子单</small></td>
+          </tr>
+          <tr style="background:rgba(245,197,66,0.03)">
+            <td class="step-label" style="color:var(--yellow)">⏱ 超时关闭<small>PayAfterTimeoutTask (7天)</small></td>
+            <td><span class="badge badge-timeout">TimeoutClosed · 6</span></td>
+            <td><span class="badge badge-canceled">Canceled · 4</span></td>
+            <td><span class="badge badge-na">— 不存在 —</span></td>
+            <td><span class="badge badge-na">— 不存在 —</span></td>
+          </tr>
+          <tr style="background:rgba(245,90,90,0.03)">
+            <td class="step-label" style="color:var(--red)">✕ 退款取消<small>HandleRefundCancel</small></td>
+            <td><span class="badge badge-timeout">FullRefundClosed · 7</span></td>
+            <td><span class="badge badge-canceled">Canceled · 4</span></td>
+            <td><span class="badge badge-failed">退款处理</span></td>
+            <td><span class="badge badge-na">—</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SECTION 4: 服务接口速查 -->
+  <div class="section">
+    <div class="section-title">04 · 服务接口速查</div>
+    <div class="api-grid">
+      <div class="api-ref-card">
+        <div class="api-method">CreatePayAfterSlip()</div>
+        <div class="desc">创建后付主单和子单，返回 payAfterSlipId</div>
+        <div class="api-when"><span class="label">调用时机：</span><span class="val">扫码开门时，业务系统主动调用</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">创建 pay_after_slip(UnSign) + sub_slip(UnSign)</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">PayAfterSign()</div>
+        <div class="desc">向微信支付分申请签约链接，让前端跳转用户授权</div>
+        <div class="api-when"><span class="label">调用时机：</span><span class="val">CreatePayAfterSlip 后立即调用</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">返回微信签约 URL / 小程序跳转参数</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">QueryPayAfterSlip()</div>
+        <div class="desc">查询后付单当前状态，供前端轮询判断签约结果</div>
+        <div class="api-when"><span class="label">调用时机：</span><span class="val">前端等待签约结果时轮询</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">返回 pay_after_slip 状态信息</span></div>
+      </div>
+      <div class="api-ref-card" style="border-color:rgba(57,208,245,0.2)">
+        <div class="api-method" style="color:var(--green)">CompletePayAfterSlip()</div>
+        <div class="desc">完结后付单 —— 真正创建 payment_slip，发起自动扣款</div>
+        <div class="api-when"><span class="label">调用时机：</span><span class="val">设备识别用户拿走商品后（关门）</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">建 payment_slip + sub_slip，后付单→Completing，MQ 通知微信扣款</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">Consumer.PayAfterCallback()</div>
+        <div class="desc">MQ 消费者，处理微信支付分签约成功回调</div>
+        <div class="api-when"><span class="label">触发来源：</span><span class="val">微信签约回调 → TPW → MQ</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">后付单→Signed，设置7天超时，通知业务方开门</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">Consumer.TpwPaymentCallback()</div>
+        <div class="desc">MQ 消费者，处理微信扣款结果（成功/失败）</div>
+        <div class="api-when"><span class="label">触发来源：</span><span class="val">微信扣款回调 → TPW → MQ</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">成功→所有单据终态 Payed/Success；失败→触发手动支付报警</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">CreateManualPay()</div>
+        <div class="desc">自动扣款失败后，唤起用户手动收银台支付</div>
+        <div class="api-when"><span class="label">调用时机：</span><span class="val">TpwPaymentCallback 收到扣款失败通知后</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">追加一条 payment_sub_slip，弹出微信收银台</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">PayAfterTimeoutCompleteTask()</div>
+        <div class="desc">MQ 延迟消费者，处理签约后7天未完结的超时关闭</div>
+        <div class="api-when"><span class="label">触发来源：</span><span class="val">签约时投递的延迟MQ，7天后触发</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">后付单→TimeoutClosed，子单→Canceled，通知微信撤销授权</span></div>
+      </div>
+      <div class="api-ref-card">
+        <div class="api-method">CancelPayAfterSlip()</div>
+        <div class="desc">主动取消后付单（订单取消/退款场景）</div>
+        <div class="api-when"><span class="label">调用时机：</span><span class="val">业务方取消订单，或发起退款时</span></div>
+        <div class="api-when" style="margin-top:4px"><span class="label">触发结果：</span><span class="val">后付单→FullRefundClosed，MQ 通知微信撤销授权</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 5: 异常场景 -->
+  <div class="section">
+    <div class="section-title">05 · 异常场景处理</div>
+    <div class="exception-grid">
+
+      <div class="exception-card exc-timeout">
+        <div class="exc-icon">⏱</div>
+        <div class="exc-title">签约后超时未完结</div>
+        <div class="exc-trigger">触发：签约时投递的延迟 MQ 到期（7天后触发 PayAfterTimeoutCompleteTask）</div>
+        <ol class="exc-steps">
+          <li>检查后付单状态是否仍为 Signed（若已完结则跳过）</li>
+          <li>Redis 加锁防并发</li>
+          <li>pay_after_slip.status → TimeoutClosed(6)</li>
+          <li>pay_after_sub_slip.status → Canceled(4)</li>
+          <li>发 MQ 通知微信支付分撤销授权</li>
+        </ol>
+      </div>
+
+      <div class="exception-card exc-fail">
+        <div class="exc-icon">💸</div>
+        <div class="exc-title">自动扣款失败</div>
+        <div class="exc-trigger">触发：微信扣款后回调失败（注意：微信侧实际上会持续重试，失败回调罕见）</div>
+        <ol class="exc-steps">
+          <li>payment_sub_slip.status → Failed</li>
+          <li>发送报警 MQ（sendPayAfterAlert）</li>
+          <li>调用 CreateManualPay() 唤起用户手动支付</li>
+          <li>用户手动支付成功后走正常回调路径</li>
+          <li>payment_slip 成功后，后付单随之 → Payed</li>
+        </ol>
+      </div>
+
+      <div class="exception-card exc-cancel">
+        <div class="exc-icon">🚫</div>
+        <div class="exc-title">退款 / 取消订单</div>
+        <div class="exc-trigger">触发：业务方调用 CancelPayAfterSlip 或发起退款</div>
+        <ol class="exc-steps">
+          <li>查询处于 Signed/Completing 状态的子单</li>
+          <li>pay_after_slip.status → FullRefundClosed(7)</li>
+          <li>pay_after_sub_slip.status → Canceled(4)</li>
+          <li>发 MQ (PayAfterSlipCancel) 通知微信撤销授权</li>
+          <li>若支付单存在，同步处理退款流程</li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SECTION 6: 状态枚举速查 -->
+  <div class="section">
+    <div class="section-title">06 · 状态枚举速查</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--cyan);margin-bottom:12px;letter-spacing:0.08em;">PayAfterSlipStatus</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">0</span><span class="badge badge-unsign">New · 初始</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">1</span><span class="badge badge-unsign">UnSign · 待签约</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">2</span><span class="badge badge-signed">Signed · 已签约</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">3</span><span class="badge badge-pending">Paying · 支付中</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">4</span><span class="badge badge-completing">Completing · 完结中</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">5</span><span class="badge badge-payed">Payed · 已支付</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">6</span><span class="badge badge-timeout">TimeoutClosed · 超时</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">7</span><span class="badge badge-canceled">FullRefundClosed · 退款</span></div>
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--purple);margin-bottom:12px;letter-spacing:0.08em;">PayAfterSubSlipStatus</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">0</span><span class="badge badge-unsign">UnSign · 待签约</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">1</span><span class="badge badge-signed">Signed · 已签约</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">2</span><span class="badge badge-completing">Completing · 完结中</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">3</span><span class="badge badge-payed">Completed · 已完结</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim)">4</span><span class="badge badge-canceled">Canceled · 已取消</span></div>
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--yellow);margin-bottom:12px;letter-spacing:0.08em;">关键业务规则</div>
+        <div style="font-size:12px;color:var(--text);display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--cyan);font-size:16px;line-height:1.2">·</span><span>签约后立即设置 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace">deadline = +7天</code>，超时自动关闭</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--cyan);font-size:16px;line-height:1.2">·</span><span>payment_slip 在 <strong>CompletePayAfterSlip</strong> 时才创建，扫码时不创建</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--cyan);font-size:16px;line-height:1.2">·</span><span>Redis 分布式锁 + double-check 保证签约回调幂等</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--cyan);font-size:16px;line-height:1.2">·</span><span>超时前先查微信侧状态，已扣款则不取消（防资损）</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--cyan);font-size:16px;line-height:1.2">·</span><span>扣款成功时取消同单所有其他 Pending 子单（防重复扣）</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SECTION 07 · 手动支付触发机制
+  ══════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-number">07</div>
+    <div class="section-title">手动支付触发机制</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+
+      <!-- 微信侧行为说明 -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--yellow);margin-bottom:14px;letter-spacing:0.08em;">微信支付分扣款行为</div>
+        <div style="background:rgba(255,90,90,0.08);border:1px solid rgba(255,90,90,0.3);border-radius:8px;padding:12px;margin-bottom:14px;">
+          <div style="font-size:11px;color:#ff6b6b;font-family:'JetBrains Mono',monospace;margin-bottom:6px;">⚠ 关键认知</div>
+          <div style="font-size:12px;color:var(--text);line-height:1.7;">微信支付分<strong>不会主动推送扣款失败通知</strong>，失败时会在后台静默重试，<code style="color:var(--yellow);font-family:'JetBrains Mono',monospace">handleAsyncPayCallbackFiled</code> 几乎不会被触发。</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <div style="width:28px;height:28px;border-radius:50%;background:rgba(57,208,245,0.15);border:1px solid var(--cyan);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:11px;color:var(--cyan);font-family:'JetBrains Mono',monospace;">1</span>
+            </div>
+            <div style="font-size:12px;color:var(--text);line-height:1.6;padding-top:4px;">微信发起扣款后，若余额不足或扣款中，状态变为 <code style="color:var(--green);font-family:'JetBrains Mono',monospace;">Completing</code></div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <div style="width:28px;height:28px;border-radius:50%;background:rgba(57,208,245,0.15);border:1px solid var(--cyan);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:11px;color:var(--cyan);font-family:'JetBrains Mono',monospace;">2</span>
+            </div>
+            <div style="font-size:12px;color:var(--text);line-height:1.6;padding-top:4px;">微信在后台周期性重试扣款（通常 3 天内），业务侧通过 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">queryPayAfterOrder</code> 主动轮询结果</div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <div style="width:28px;height:28px;border-radius:50%;background:rgba(57,208,245,0.15);border:1px solid var(--cyan);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:11px;color:var(--cyan);font-family:'JetBrains Mono',monospace;">3</span>
+            </div>
+            <div style="font-size:12px;color:var(--text);line-height:1.6;padding-top:4px;">扣款最终失败才落入 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">handleAsyncPayCallbackFiled</code>，触发手动支付流程</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- startPayAfterPayConsumer 决策树 -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--yellow);margin-bottom:14px;letter-spacing:0.08em;">startPayAfterPayConsumer 决策树</div>
+        <div style="display:flex;flex-direction:column;gap:0;">
+          <!-- 起点 -->
+          <div style="display:flex;justify-content:center;">
+            <div style="background:rgba(57,208,245,0.12);border:1px solid var(--cyan);border-radius:6px;padding:7px 18px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--cyan);">收到 StartPayAfterPayTask MQ</div>
+          </div>
+          <div style="display:flex;justify-content:center;"><div style="width:1px;height:16px;background:var(--border);"></div></div>
+          <!-- 判断1 -->
+          <div style="display:flex;justify-content:center;">
+            <div style="background:rgba(255,200,80,0.1);border:1px solid var(--yellow);border-radius:6px;padding:7px 18px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--yellow);">GetAutoManualPayMethod() != nil?</div>
+          </div>
+          <!-- 分支 -->
+          <div style="display:flex;gap:10px;margin-top:0;">
+            <!-- 左 YES -->
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;">
+              <div style="width:1px;height:16px;background:var(--border);"></div>
+              <div style="font-size:10px;color:var(--green);font-family:'JetBrains Mono',monospace;">YES (有帮点余额)</div>
+              <div style="width:1px;height:10px;background:var(--border);"></div>
+              <div style="display:flex;justify-content:center;">
+                <div style="background:rgba(255,200,80,0.1);border:1px solid var(--yellow);border-radius:6px;padding:7px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--yellow);text-align:center;">余额 ≥ 扣款金额?</div>
+              </div>
+              <div style="display:flex;gap:6px;width:100%;">
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="width:1px;height:12px;background:var(--border);"></div>
+                  <div style="font-size:10px;color:var(--green);font-family:'JetBrains Mono',monospace;">YES</div>
+                  <div style="width:1px;height:8px;background:var(--border);"></div>
+                  <div style="background:rgba(61,232,134,0.12);border:1px solid var(--green);border-radius:6px;padding:5px 8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:center;">ManualAutoPay<br>帮点自动扣</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
+                  <div style="width:1px;height:12px;background:var(--border);"></div>
+                  <div style="font-size:10px;color:#ff6b6b;font-family:'JetBrains Mono',monospace;">NO</div>
+                  <div style="width:1px;height:8px;background:var(--border);"></div>
+                  <div style="background:rgba(255,90,90,0.1);border:1px solid rgba(255,90,90,0.4);border-radius:6px;padding:5px 8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:#ff9090;text-align:center;">AutoPay<br>调微信扣款</div>
+                </div>
+              </div>
+            </div>
+            <!-- 右 NO -->
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0;">
+              <div style="width:1px;height:16px;background:var(--border);"></div>
+              <div style="font-size:10px;color:#ff6b6b;font-family:'JetBrains Mono',monospace;">NO (无帮点)</div>
+              <div style="width:1px;height:10px;background:var(--border);"></div>
+              <div style="background:rgba(255,90,90,0.1);border:1px solid rgba(255,90,90,0.4);border-radius:6px;padding:5px 8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:#ff9090;text-align:center;">直接发起<br>AutoPay</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 手动支付完整链路 -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--yellow);margin-bottom:16px;letter-spacing:0.08em;">手动支付完整链路（自动扣款最终失败后）</div>
+      <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;row-gap:10px;">
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="background:rgba(255,90,90,0.1);border:1px solid rgba(255,90,90,0.4);border-radius:8px;padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#ff9090;text-align:center;min-width:90px;">微信回调<br>失败通知</div>
+          <div style="font-size:10px;color:var(--muted);">NotifyURL</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;padding:0 6px;">
+          <div style="font-size:18px;color:var(--border);">→</div>
+          <div style="font-size:9px;color:var(--muted);">handleAsync<br>PayCallbackFiled</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="background:rgba(57,208,245,0.1);border:1px solid var(--cyan);border-radius:8px;padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--cyan);text-align:center;min-width:90px;">业务侧检测<br>扣款失败</div>
+          <div style="font-size:10px;color:var(--muted);">轮询 or 回调</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;padding:0 6px;">
+          <div style="font-size:18px;color:var(--border);">→</div>
+          <div style="font-size:9px;color:var(--muted);">gRPC 调用</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="background:rgba(57,208,245,0.1);border:1px solid var(--cyan);border-radius:8px;padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--cyan);text-align:center;min-width:100px;">CreateManualPay()<br>创建手动支付单</div>
+          <div style="font-size:10px;color:var(--muted);">application svc</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;padding:0 6px;">
+          <div style="font-size:18px;color:var(--border);">→</div>
+          <div style="font-size:9px;color:var(--muted);">返回 Params</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="background:rgba(61,232,134,0.1);border:1px solid var(--green);border-radius:8px;padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:center;min-width:100px;">获得支付参数<br>{ Id, Params }</div>
+          <div style="font-size:10px;color:var(--muted);">CreateManualPayResult</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;padding:0 6px;">
+          <div style="font-size:18px;color:var(--border);">→</div>
+          <div style="font-size:9px;color:var(--muted);">sendUserPayMsg</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0;">
+          <div style="background:rgba(255,200,80,0.1);border:1px solid var(--yellow);border-radius:8px;padding:10px 14px;font-family:'JetBrains Mono',monospace;text-align:center;min-width:120px;">
+            <div style="font-size:11px;color:var(--yellow);">长连接推送</div>
+            <div style="font-size:9px;color:var(--muted);margin-top:4px;">KeepAlive.Notify30Message<br>（电卡用户）</div>
+            <div style="margin:6px 0;border-top:1px solid var(--border);"></div>
+            <div style="font-size:9px;color:var(--muted);">DownwardMeicanCode<br>UserPayMessage<br>（美餐码用户）</div>
+          </div>
+          <div style="font-size:10px;color:var(--muted);">主动推到用户端</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;padding:0 6px;">
+          <div style="font-size:18px;color:var(--border);">→</div>
+          <div style="font-size:9px;color:var(--muted);">用户操作</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="background:rgba(61,232,134,0.15);border:1px solid var(--green);border-radius:8px;padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:center;min-width:80px;">用户完成<br>手动支付</div>
+          <div style="font-size:10px;color:var(--muted);">→ Payed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 帮点补充说明 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--cyan);margin-bottom:10px;letter-spacing:0.08em;">ManualAutoPay（帮点）机制</div>
+        <div style="font-size:12px;color:var(--text);display:flex;flex-direction:column;gap:7px;line-height:1.7;">
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>帮点 = 用户绑定的美餐钱包余额，<code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">CanAutoPay=true</code></span></div>
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>余额充足时，系统<strong>无感知</strong>自动从钱包扣款，用户无需手动操作</span></div>
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>帮点失败后会重发 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">AutoPayTask</code> MQ，回退到微信扣款流程</span></div>
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>防重复扣：成功时调用 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">UpdateManualPayPendingSubSlipFailed</code> 取消其余待支付子单</span></div>
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--cyan);margin-bottom:10px;letter-spacing:0.08em;">QueryManualPayResult 轮询</div>
+        <div style="font-size:12px;color:var(--text);display:flex;flex-direction:column;gap:7px;line-height:1.7;">
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>用户端收到推送后拉起收银台，支付完成后需查询结果</span></div>
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>调用 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">QueryManualPayResult</code> 查询手动支付单状态</span></div>
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>支付成功后 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">pay_after_slip.status → Payed</code>，流程结束</span></div>
+          <div style="display:flex;gap:8px;"><span style="color:var(--cyan)">·</span><span>长连接推送确保用户端实时感知，无需依赖端侧主动轮询</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SECTION 08 · 取消订单时机
+  ══════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-number">08</div>
+    <div class="section-title">取消订单时机</div>
+
+    <!-- 状态取消矩阵 -->
+    <div style="overflow-x:auto;margin-bottom:20px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr>
+            <th style="background:var(--bg2);border:1px solid var(--border);padding:10px 14px;text-align:left;font-family:'JetBrains Mono',monospace;color:var(--yellow);font-size:11px;letter-spacing:0.06em;white-space:nowrap;">pay_after_slip 状态</th>
+            <th style="background:var(--bg2);border:1px solid var(--border);padding:10px 14px;text-align:center;font-family:'JetBrains Mono',monospace;color:var(--yellow);font-size:11px;letter-spacing:0.06em;">可取消?</th>
+            <th style="background:var(--bg2);border:1px solid var(--border);padding:10px 14px;text-align:left;font-family:'JetBrains Mono',monospace;color:var(--yellow);font-size:11px;letter-spacing:0.06em;">取消行为 / 注意事项</th>
+            <th style="background:var(--bg2);border:1px solid var(--border);padding:10px 14px;text-align:left;font-family:'JetBrains Mono',monospace;color:var(--yellow);font-size:11px;letter-spacing:0.06em;">典型触发场景</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">0 ·</span> <span style="color:var(--text)">New</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:var(--green);font-size:15px;">✓</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">直接关闭后付单，无需调用微信</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">极少见，刚创建立即取消</td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.015);">
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">1 ·</span> <span style="color:var(--cyan)">UnSign</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:var(--green);font-size:15px;">✓</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">直接取消，用户未签约微信无预授权需撤销</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">用户扫码后放弃开门，或业务侧超时</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">2 ·</span> <span style="color:var(--cyan)">Signed</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:var(--green);font-size:15px;">✓</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">调用微信取消授权（签约撤销），关闭子单</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">签约后门没开成功，硬件故障取消</td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.015);">
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">3 ·</span> <span style="color:var(--yellow)">Paying</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:var(--green);font-size:15px;">✓</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">先调 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">RollBackPendingPaymentSlip</code> 回滚支付单，再取消</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">识别商品出错（0元），运营介入取消</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">4 ·</span> <span style="color:var(--yellow)">Completing</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:var(--cyan);font-size:13px;font-family:'JetBrains Mono',monospace;">△ 有条件</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;">
+              <div style="color:var(--text);">先查微信侧 <code style="color:var(--cyan);font-family:'JetBrains Mono',monospace;">QueryPayAfterOrder</code></div>
+              <div style="font-size:11px;color:#ff6b6b;margin-top:4px;">若已扣款成功 → <strong>禁止取消</strong>，防资损</div>
+              <div style="font-size:11px;color:var(--green);margin-top:2px;">若未扣款 → 允许取消，回滚支付单</div>
+            </td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">扣款中用户投诉，运营紧急干预</td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.015);">
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">5 ·</span> <span style="color:var(--green)">Payed</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:#ff6b6b;font-size:15px;">✗</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">已完成支付，不可取消；需走<strong>退款</strong>流程</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">—</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">6 ·</span> <span style="color:var(--muted)">TimeoutClosed</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:#ff6b6b;font-size:15px;">✗</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">已超时关闭，终态，不可操作</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">—</td>
+          </tr>
+          <tr style="background:rgba(255,255,255,0.015);">
+            <td style="border:1px solid var(--border);padding:10px 14px;font-family:'JetBrains Mono',monospace;"><span style="color:var(--muted)">7 ·</span> <span style="color:var(--muted)">FullRefundClosed</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;text-align:center;"><span style="color:#ff6b6b;font-size:15px;">✗</span></td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--text);">全额退款关闭，终态，不可操作</td>
+            <td style="border:1px solid var(--border);padding:10px 14px;color:var(--muted);font-size:11px;">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <!-- Completing 状态竞态保护 -->
+      <div style="background:var(--bg2);border:1px solid rgba(255,90,90,0.4);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#ff6b6b;margin-bottom:12px;letter-spacing:0.08em;">⚠ Completing 状态竞态保护</div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="background:rgba(6,8,15,0.6);border-radius:6px;padding:10px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);line-height:1.8;">
+            <span style="color:var(--muted)">// CancelPayAfterSlip 内部逻辑</span><br>
+            <span style="color:var(--cyan)">if</span> slip.IsPaying() || slip.IsCompleting() {<br>
+            &nbsp;&nbsp;<span style="color:var(--muted)">// 先查微信侧实际状态</span><br>
+            &nbsp;&nbsp;result = <span style="color:var(--yellow)">QueryPayAfterOrder</span>()<br>
+            &nbsp;&nbsp;<span style="color:var(--cyan)">if</span> result.IsPaid {<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#ff6b6b)">return</span> <span style="color:#ff9090">ErrAlreadyPaid</span><br>
+            &nbsp;&nbsp;}<br>
+            &nbsp;&nbsp;<span style="color:var(--yellow)">RollBackPendingPaymentSlip</span>()<br>
+            }
+          </div>
+          <div style="font-size:12px;color:var(--text);line-height:1.7;">
+            取消发起时微信可能已悄悄扣款成功，若不查询直接取消会造成<strong style="color:#ff6b6b;">钱扣了但订单取消</strong>的资损问题。
+          </div>
+        </div>
+      </div>
+
+      <!-- 实际业务触发场景 -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--cyan);margin-bottom:12px;letter-spacing:0.08em;">实际取消触发场景</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text);">
+          <div style="display:flex;gap:10px;align-items:flex-start;">
+            <span style="background:rgba(57,208,245,0.15);border:1px solid var(--cyan);border-radius:4px;padding:1px 7px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--cyan);white-space:nowrap;flex-shrink:0;">用户主动</span>
+            <span>扫码后反悔，关门前手动取消订单</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;">
+            <span style="background:rgba(255,200,80,0.1);border:1px solid var(--yellow);border-radius:4px;padding:1px 7px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--yellow);white-space:nowrap;flex-shrink:0;">硬件故障</span>
+            <span>门锁异常、柜机断网，系统自动取消未完成订单</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;">
+            <span style="background:rgba(61,232,134,0.1);border:1px solid var(--green);border-radius:4px;padding:1px 7px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--green);white-space:nowrap;flex-shrink:0;">识别异常</span>
+            <span>商品识别出错（金额为 0），业务侧判断后取消</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;">
+            <span style="background:rgba(255,90,90,0.1);border:1px solid rgba(255,90,90,0.4);border-radius:4px;padding:1px 7px;font-size:10px;font-family:'JetBrains Mono',monospace;color:#ff9090;white-space:nowrap;flex-shrink:0;">运营介入</span>
+            <span>运营后台强制取消异常订单</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;">
+            <span style="background:rgba(255,90,90,0.1);border:1px solid rgba(255,90,90,0.4);border-radius:4px;padding:1px 7px;font-size:10px;font-family:'JetBrains Mono',monospace;color:#ff9090;white-space:nowrap;flex-shrink:0;">超时系统</span>
+            <span>7 天签约截止，<code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">PayAfterTimeoutTask</code> 自动触发关闭</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;">
+            <span style="background:rgba(57,208,245,0.15);border:1px solid var(--cyan);border-radius:4px;padding:1px 7px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--cyan);white-space:nowrap;flex-shrink:0;">退款诉求</span>
+            <span>已支付但用户申请退款，走 <code style="color:var(--yellow);font-family:'JetBrains Mono',monospace;">CreateRefundSlip</code> 流程</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  美餐支付系统 · 先享后付业务流程文档 · 基于微信支付分（WeChat Pay Score）
+</footer>
+
+</body>
+</html>
