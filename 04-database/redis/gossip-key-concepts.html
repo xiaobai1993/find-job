@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gossip 协议关键概念 — 面试必知</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.7; }
+h1 { text-align: center; padding: 24px; font-size: 22px; color: #f85149; border-bottom: 1px solid #21262d; }
+h2 { color: #f85149; font-size: 17px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #21262d; }
+
+.card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+.section { padding: 20px; }
+.table-wrap { overflow-x: auto; }
+
+.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0; }
+.compare-table th { background: #21262d; padding: 10px 12px; text-align: left; color: #e3b341; border: 1px solid #30363d; }
+.compare-table td { padding: 9px 12px; border: 1px solid #21262d; color: #c9d1d9; }
+.compare-table tr:hover td { background: #1a1f27; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-red { background: #3a1a1a; color: #f85149; }
+.badge-blue { background: #1f3a5f; color: #58a6ff; }
+.badge-green { background: #1a3a2a; color: #3fb950; }
+.badge-orange { background: #3a2a00; color: #e3b341; }
+.badge-purple { background: #2a1a4a; color: #bc8cff; }
+.badge-gray { background: #21262d; color: #8b949e; }
+
+.text-red { color: #f85149; } .text-green { color: #3fb950; }
+.text-blue { color: #58a6ff; } .text-orange { color: #e3b341; } .text-purple { color: #bc8cff; }
+.text-muted { color: #8b949e; }
+
+.key-point { background: #1a2a1a; border-left: 3px solid #3fb950; padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+.key-point .label { font-size: 11px; color: #3fb950; font-weight: 600; margin-bottom: 4px; }
+.key-point p { font-size: 13px; color: #c9d1d9; line-height: 1.7; }
+
+.warn-point { background: #2a2a1a; border-left: 3px solid #e3b341; padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+.warn-point .label { font-size: 11px; color: #e3b341; font-weight: 600; margin-bottom: 4px; }
+.warn-point p { font-size: 13px; color: #c9d1d9; line-height: 1.7; }
+
+.flow-box { background: #010409; border: 1px solid #21262d; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.8; margin: 12px 0; overflow-x: auto; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+.vs-box { border-radius: 8px; padding: 14px; }
+.vs-box h4 { font-size: 14px; margin-bottom: 8px; }
+.vs-box ul { padding-left: 18px; font-size: 13px; color: #c9d1d9; }
+.vs-box ul li { margin: 4px 0; }
+
+.timeline { position: relative; padding-left: 28px; margin: 12px 0; }
+.timeline::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: #30363d; }
+.tl-item { position: relative; margin-bottom: 14px; }
+.tl-item::before { content: ''; position: absolute; left: -22px; top: 6px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #f85149; background: #0d1117; }
+.tl-item.active::before { background: #f85149; }
+.tl-item.done::before { background: #3fb950; border-color: #3fb950; }
+.tl-time { font-size: 12px; color: #e3b341; font-family: monospace; }
+.tl-text { font-size: 13px; color: #c9d1d9; }
+
+.canvas-wrap { position: relative; background: #010409; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; margin: 12px 0; }
+canvas { display: block; width: 100%; }
+
+.btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 4px; transition: all .2s; }
+.btn-red { background: #b91c1c; color: #fff; } .btn-red:hover { background: #dc2626; }
+.btn-blue { background: #1f6feb; color: #fff; } .btn-blue:hover { background: #388bfd; }
+.btn-green { background: #238636; color: #fff; } .btn-green:hover { background: #2ea043; }
+.btn-gray { background: #30363d; color: #e6edf3; } .btn-gray:hover { background: #3d444d; }
+.btn-purple { background: #6e40c9; color: #fff; } .btn-purple:hover { background: #8957e5; }
+.btn-orange { background: #9e6a03; color: #fff; } .btn-orange:hover { background: #bb8009; }
+.ctrl-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.ctrl-bar label { font-size: 13px; color: #8b949e; }
+.ctrl-bar select { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+
+.summary-box { background: linear-gradient(135deg, #1a0d0d, #0d1a2a); border: 1px solid #f8514940; border-radius: 10px; padding: 20px; margin: 16px 0; }
+.summary-box h3 { color: #f85149; font-size: 16px; margin-bottom: 10px; }
+.summary-box p { font-size: 15px; color: #e6edf3; line-height: 1.8; }
+</style>
+</head>
+<body>
+
+<h1>Gossip 协议关键概念 — 面试必知</h1>
+
+<div class="section">
+
+<!-- ========== 1. Gossip 到底在干什么 ========== -->
+<div class="card">
+<h2>1. Gossip 到底在干什么？</h2>
+<p>公司 100 个人，怎么让所有人都知道"张三离职了"？</p>
+<div class="grid-2" style="margin-top:12px;">
+  <div class="vs-box" style="background:#1a0d0d; border:1px solid #f8514930;">
+    <h4 class="text-red">方案 A — 中心化广播</h4>
+    <ul>
+      <li>找个人站中间喊一嗓子</li>
+      <li>这个人请假了 → 没人喊了</li>
+      <li class="text-red">单点故障</li>
+    </ul>
+  </div>
+  <div class="vs-box" style="background:#0d1a0d; border:1px solid #3fb95030;">
+    <h4 class="text-green">方案 B — Gossip 模式</h4>
+    <ul>
+      <li>每人每秒随机找一个同事聊一句</li>
+      <li>"嘿，张三离职了，李四说王五也调岗了"</li>
+      <li>收到的人继续跟别人聊</li>
+      <li class="text-green">没有中心，每个人都是传播者</li>
+    </ul>
+  </div>
+</div>
+<div class="key-point">
+  <div class="label">核心思想</div>
+  <p>每个节点像"传闲话"一样，定期随机找邻居交换情报。一次聊天不只确认对方活着，还顺带传播其他人的消息。经过 O(log N) 轮传播，所有节点都知道了集群的完整状态。</p>
+</div>
+</div>
+
+<!-- ========== 2. PING 携带信息的目的是什么 ========== -->
+<div class="card">
+<h2>2. PING 为什么要携带其他节点信息？</h2>
+<p>如果 PING 只是心跳（只确认对方活着），那每个节点只知道直接通信的邻居状态：</p>
+<div class="flow-box">
+<span class="text-muted">没有 Gossip 段：</span>
+M1 只知道 M2 还活着
+M1 只知道 M3 还活着
+<span class="text-red">但 M1 不知道 M2 知不知道 M3 的情况</span>
+</div>
+<p>有了 Gossip 段之后：</p>
+<div class="flow-box">
+<span class="text-green">有 Gossip 段：</span>
+M1 → M2: PING
+  顺带说: "M3 5秒前还活着"
+  顺带说: "M4 我15秒没收到回复，怀疑挂了"
+<span class="text-green">一次 PING，"一拖多"，交换了整个集群的情报</span>
+</div>
+
+<div class="table-wrap">
+<table class="compare-table">
+  <tr><th>传播的信息</th><th>为什么每个节点需要知道</th></tr>
+  <tr><td>集群里有哪些节点</td><td>客户端请求过来，我需要知道该路由给谁</td></tr>
+  <tr><td>每个节点负责哪些 slot</td><td>key 属于哪个 slot，该找哪个节点</td></tr>
+  <tr><td>哪个节点挂了</td><td>目标节点挂了，我需要返回重定向或报错</td></tr>
+  <tr><td>哪个 slave 提升成了 master</td><td>故障转移后，路由表要更新</td></tr>
+</table>
+</div>
+
+<div class="key-point">
+  <div class="label">最终实现</div>
+  <p>每个节点都拥有一份完整的集群状态表，能独立做出正确的路由决策。这就是为什么 Redis Cluster 不需要 ZooKeeper 那样的中心协调器——每个节点都是"信息中心"。</p>
+</div>
+</div>
+
+<!-- ========== 3. 数据层 vs 控制层 ========== -->
+<div class="card">
+<h2>3. 哈希槽路由 vs Gossip — 数据层 vs 控制层</h2>
+<p>这两个是不同层面的东西，不要搞混：</p>
+<div class="table-wrap">
+<table class="compare-table">
+  <tr><th></th><th class="text-blue">数据层（客户端请求）</th><th class="text-orange">控制层（集群内部）</th></tr>
+  <tr><td>干什么</td><td>处理 SET/GET 这些命令</td><td>维护集群该由哪些节点组成</td></tr>
+  <tr><td>协议</td><td><span class="text-blue">哈希槽路由</span> — CRC16(key) % 16384</td><td><span class="text-orange">Gossip 协议</span> — 节点间交换状态</td></tr>
+  <tr><td>谁参与</td><td>客户端 → Redis 节点</td><td>Redis 节点 → Redis 节点</td></tr>
+</table>
+</div>
+<div class="flow-box">
+<span class="text-blue">数据层：</span>
+客户端发 SET user:123 "hello"
+  → CRC16("user:123") % 16384 = 6918
+  → 路由到负责 slot 6918 的 M2
+  → M2 不归它管？返回 MOVED 10.0.0.2:6379
+
+<span class="text-orange">控制层：</span>
+M1 → M3: PING（我活着，M2 我15秒没收到回复了）
+  → 维护集群状态，故障检测
+</div>
+<div class="key-point">
+  <div class="label">一句话区分</div>
+  <p>哈希槽管的是<span class="text-blue">"这个 key 该找谁"</span>，Gossip 管的是<span class="text-orange">"集群里都有谁、谁还活着"</span>。</p>
+</div>
+</div>
+
+<!-- ========== 4. 哨兵 vs Cluster ========== -->
+<div class="card">
+<h2>4. 哨兵模式 vs Cluster 模式</h2>
+<div class="table-wrap">
+<table class="compare-table">
+  <tr><th>维度</th><th class="text-blue">哨兵模式（Sentinel）</th><th class="text-red">Cluster 模式</th></tr>
+  <tr><td>架构</td><td>1主N从 + 独立的哨兵进程</td><td>多主多从，无哨兵</td></tr>
+  <tr><td>谁来监控</td><td>哨兵（独立的第三方）</td><td>节点自己（通过 Gossip）</td></tr>
+  <tr><td>谁来故障转移</td><td>哨兵投票决定</td><td>节点通过 Gossip PFAIL→FAIL 投票</td></tr>
+  <tr><td>数据分片</td><td>不分片，所有数据在 master 上</td><td>分 16384 个 slot，分布在不同 master</td></tr>
+  <tr><td>适用规模</td><td>数据量不大，主要求高可用</td><td>数据量大，需要水平扩展</td></tr>
+</table>
+</div>
+<div class="key-point">
+  <div class="label">核心区别</div>
+  <p>哨兵模式：多雇了一群"保安"（Sentinel 进程）专门盯着 Redis 主从，谁挂了保安来处理。数据不分片。<br>Cluster 模式：不要保安了，节点自己通过 Gossip 互相盯着。数据分片到多个 master 上。<br><strong>Gossip 就是 Cluster 模式下的"哨兵替代品"</strong>——不需要额外进程，节点自己搞定监控和故障转移。</p>
+</div>
+</div>
+
+<!-- ========== 5. Gossip 谁和谁通信 ========== -->
+<div class="card">
+<h2>5. Gossip 谁和谁通信？</h2>
+<p><strong>每个节点都参与 Gossip，不区分主从。</strong></p>
+<div class="canvas-wrap">
+  <canvas id="topoCanvas" width="900" height="300"></canvas>
+</div>
+<div class="ctrl-bar">
+  <button class="btn btn-blue" onclick="animateTopo()">演示 Gossip 通信</button>
+  <button class="btn btn-gray" onclick="resetTopo()">重置</button>
+</div>
+<div class="warn-point">
+  <div class="label">注意</div>
+  <p>从节点参与 Gossip <strong>通信</strong>，但<strong>投票权只有 master 有</strong>。PFAIL→FAIL 的判断只算 master 的票。可以理解为：slave 能"传闲话"，但不能"投票定罪"。</p>
+</div>
+</div>
+
+<!-- ========== 6. 主节点挂了，选举规则 ========== -->
+<div class="card">
+<h2>6. 主节点挂了，从节点如何提升为主节点？</h2>
+
+<h3 style="color:#e3b341; font-size:14px; margin:12px 0 8px;">找从节点——不用"找"，从节点自己知道</h3>
+<p>每个从节点通过 Gossip 已经知道自己的 master 是谁、状态如何。master 被 FAIL 后，<strong>从节点自己发起选举</strong>。</p>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">选举流程（4 步）</h3>
+<div class="flow-box">
+步骤1：从节点发现 master 被 FAIL
+         │
+         ▼
+步骤2：从节点等一小会儿（延迟 = 基础延迟 + 排名偏移）
+       排名越靠前（复制数据越新），等得越短，越先发起选举
+         │
+         ▼
+步骤3：从节点向所有 master 发起选举请求
+       携带自己的 last_epoch 和复制偏移量
+         │
+         ▼
+步骤4：每个 master 投票
+       规则：每个 epoch 每个 master 只能投一票
+       获得多数 master 同意 → 当选新 master
+</div>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">选举规则（面试重点）</h3>
+<div class="table-wrap">
+<table class="compare-table">
+  <tr><th>规则</th><th>说明</th></tr>
+  <tr><td><span class="badge badge-orange">谁先发起</span></td><td>复制偏移量最大的从节点（数据最新），排名最靠前，延迟最短，最先发起</td></tr>
+  <tr><td><span class="badge badge-blue">谁有投票权</span></td><td>只有 master 能投票，slave 不参与投票</td></tr>
+  <tr><td><span class="badge badge-red">多数派</span></td><td>需要获得<strong>超过半数 master</strong> 的同意票</td></tr>
+  <tr><td><span class="badge badge-purple">一票制</span></td><td>每个 config_epoch 每个 master 只能投一票，防止脑裂</td></tr>
+  <tr><td><span class="badge badge-green">config_epoch</span></td><td>递增的全局版本号，谁的 epoch 更大谁说了算，解决冲突</td></tr>
+</table>
+</div>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">为什么复制偏移量最大的优先？</h3>
+<div class="flow-box">
+M2 有两个从节点 S2a 和 S2b
+  S2a 复制偏移量 = <span class="text-green">1000</span>（收到了 1000 条写命令）
+  S2b 复制偏移量 = <span class="text-orange">800</span>（落后了 200 条）
+
+  → S2a 排名靠前，延迟更短，先发起选举
+  → 因为 S2a 数据更全，<span class="text-green">丢数据最少</span>
+</div>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">两个从节点同时发起怎么办？</h3>
+<p>config_epoch 保证不会冲突：从节点发起选举时自增 epoch，master 如果已给相同或更高 epoch 投过票就拒绝。<strong>先到先得</strong>。</p>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">完整时间线</h3>
+<div class="timeline">
+  <div class="tl-item"><span class="tl-time">T+0s</span><br><span class="tl-text">M2 宕机</span></div>
+  <div class="tl-item"><span class="tl-time">T+15s</span><br><span class="tl-text">M1、M3 超时未收到 M2 的 PONG，标记 PFAIL</span></div>
+  <div class="tl-item"><span class="tl-time">T+15s~</span><br><span class="tl-text">通过 Gossip 交换，M1、M3 都知道 M2 PFAIL</span></div>
+  <div class="tl-item"><span class="tl-time">T+15s</span><br><span class="tl-text">2/3 master 确认 → M2 升级为 FAIL，广播 FAIL 消息</span></div>
+  <div class="tl-item"><span class="tl-time">T+15s+</span><br><span class="tl-text">S2a（偏移量更大）延迟更短，先发起选举，向 M1、M3 发 AUTH_REQUEST</span></div>
+  <div class="tl-item active"><span class="tl-time">T+16s</span><br><span class="tl-text">M1、M3 投票同意（多数派 2/3），S2a 当选新 master，接管 M2 的 slot</span></div>
+  <div class="tl-item done"><span class="tl-time">T+16s</span><br><span class="tl-text">S2a 通过 Gossip 传播自己的新角色（master + config_epoch 更新）</span></div>
+</div>
+</div>
+
+<!-- ========== 7. Gossip vs Raft ========== -->
+<div class="card">
+<h2>7. 为什么有 Gossip 还需要 Raft？</h2>
+<p>Gossip 有一个根本代价——<strong>它只能做到最终一致</strong>。</p>
+
+<h3 style="color:#e3b341; font-size:14px; margin:12px 0 8px;">同样的故障，两种协议的反应速度</h3>
+<div class="grid-2">
+  <div class="vs-box" style="background:#1a0d0d; border:1px solid #f8514930;">
+    <h4 class="text-red">Gossip 反应（15 秒级）</h4>
+    <div class="flow-box" style="border:none; padding:8px;">
+M2 在 T+0s 宕机
+
+T+0s ~ T+15s 窗口期：
+  M1 <span class="text-red">还认为</span> M2 活着
+    → 继续路由给 M2 → 超时/失败
+  M3 <span class="text-red">还认为</span> M2 活着
+    → 继续路由给 M2 → 超时/失败
+    </div>
+    <p class="text-sm text-muted" style="margin-top:8px;">集群状态不一致，有人觉得活着有人觉得死了</p>
+  </div>
+  <div class="vs-box" style="background:#0d1a0d; border:1px solid #3fb95030;">
+    <h4 class="text-green">Raft 反应（毫秒级）</h4>
+    <div class="flow-box" style="border:none; padding:8px;">
+Leader M2 宕机
+
+T+0.1s  M1、M3 心跳超时（几百毫秒）
+T+0.2s  M1、M3 立刻发起选举
+T+0.3s  获得多数票，新 Leader 产生
+T+0.3s  <span class="text-green">全集群立刻达成一致</span>
+    </div>
+    <p class="text-sm text-muted" style="margin-top:8px;">不存在"有人觉得活着有人觉得死了"的窗口期</p>
+  </div>
+</div>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">核心区别就一个：一致性强度</h3>
+<div class="table-wrap">
+<table class="compare-table">
+  <tr><th></th><th class="text-orange">Gossip</th><th class="text-blue">Raft</th></tr>
+  <tr><td>一致性</td><td>最终一致（有窗口期不一致）</td><td class="text-green">强一致（任何时候都是最新值）</td></tr>
+  <tr><td>故障检测</td><td>15 秒级</td><td class="text-green">毫秒级</td></tr>
+  <tr><td>脑裂风险</td><td>靠 config_epoch 事后解决</td><td class="text-green">多数派机制事前防止</td></tr>
+  <tr><td>网络开销</td><td class="text-green">每秒 N 次 PING，很轻</td><td>每次写要多数派确认日志，较重</td></tr>
+</table>
+</div>
+
+<h3 style="color:#e3b341; font-size:14px; margin:16px 0 8px;">选择标准：集群状态不一致的那几秒，能不能接受？</h3>
+<div class="table-wrap">
+<table class="compare-table">
+  <tr><th>场景</th><th>选择</th><th>原因</th></tr>
+  <tr><td>Redis Cluster</td><td><span class="badge badge-orange">Gossip</span></td><td>缓存而已，15 秒窗口期可以接受，轻量更重要</td></tr>
+  <tr><td>etcd / ZooKeeper</td><td><span class="badge badge-blue">Raft</span></td><td>存的是配置、锁、选主，差一秒都不行</td></tr>
+  <tr><td>TiKV</td><td><span class="badge badge-blue">Raft</span></td><td>数据库，写进去的数据不能丢不能不一致</td></tr>
+  <tr><td>Consul</td><td><span class="badge badge-orange">Gossip</span> + <span class="badge badge-blue">Raft</span></td><td>成员管理用 Gossip（可以等），共识用 Raft（不能等）</td></tr>
+</table>
+</div>
+
+<div class="summary-box">
+  <h3>最精辟的理解</h3>
+  <p><strong class="text-orange">Gossip 管的是"谁在集群里"——晚几秒知道无所谓</strong></p>
+  <p><strong class="text-blue">Raft 管的是"数据写没写成功"——少一秒都不行</strong></p>
+  <p style="margin-top:12px; font-size:13px; color:#8b949e;">Redis Cluster 用 Gossip 是因为缓存场景用轻量级协议够了，不值得背上 Raft 的开销。如果你存的是银行余额，那 15 秒内两个节点对同一笔交易做出不同判断，钱就错了。</p>
+</div>
+</div>
+
+<!-- ========== 8. 总结 ========== -->
+<div class="card">
+<h2>8. 面试一句话总结</h2>
+<div class="summary-box">
+  <h3>三句话记住 Gossip</h3>
+  <p><strong>1.</strong> Gossip 是所有节点参与的"传闲话"协议，一次 PING 不只心跳，还顺带传播 1/3 节点状态。</p>
+  <p><strong>2.</strong> 主节点挂了，数据最新的从节点最先发起选举，获得多数 master 同意就提升为新 master，config_epoch 防脑裂。</p>
+  <p><strong>3.</strong> Gossip 只能最终一致，适合缓存/成员管理等可以等几秒的场景；需要强一致就用 Raft。</p>
+</div>
+</div>
+
+</div>
+
+<script>
+// ========== 拓扑图动画 ==========
+const topoCanvas = document.getElementById('topoCanvas');
+const topoCtx = topoCanvas.getContext('2d');
+
+const topoNodes = [
+  { id: 0, name: 'M1', role: 'master', x: 180, y: 100 },
+  { id: 1, name: 'M2', role: 'master', x: 450, y: 80 },
+  { id: 2, name: 'M3', role: 'master', x: 720, y: 100 },
+  { id: 3, name: 'S1', role: 'slave',  x: 180, y: 220 },
+  { id: 4, name: 'S2', role: 'slave',  x: 450, y: 230 },
+  { id: 5, name: 'S3', role: 'slave',  x: 720, y: 220 }
+];
+
+let topoMsgs = [];
+let topoAnimId = null;
+
+function drawTopo() {
+  topoCtx.clearRect(0, 0, topoCanvas.width, topoCanvas.height);
+
+  // Draw master-slave links
+  for (let i = 0; i < 3; i++) {
+    const m = topoNodes[i], s = topoNodes[i + 3];
+    topoCtx.beginPath();
+    topoCtx.moveTo(m.x, m.y + 24);
+    topoCtx.lineTo(s.x, s.y - 24);
+    topoCtx.strokeStyle = '#21262d';
+    topoCtx.lineWidth = 1;
+    topoCtx.setLineDash([4, 4]);
+    topoCtx.stroke();
+    topoCtx.setLineDash([]);
+  }
+
+  // Draw messages
+  topoMsgs = topoMsgs.filter(msg => {
+    msg.progress += 0.03;
+    if (msg.progress >= 1) return false;
+    const px = msg.sx + (msg.tx - msg.sx) * msg.progress;
+    const py = msg.sy + (msg.ty - msg.sy) * msg.progress;
+    // Trail
+    topoCtx.beginPath();
+    topoCtx.moveTo(msg.sx, msg.sy);
+    topoCtx.lineTo(px, py);
+    topoCtx.strokeStyle = msg.color;
+    topoCtx.lineWidth = 2;
+    topoCtx.globalAlpha = 0.5;
+    topoCtx.stroke();
+    topoCtx.globalAlpha = 1;
+    // Dot
+    topoCtx.beginPath();
+    topoCtx.arc(px, py, 5, 0, Math.PI * 2);
+    topoCtx.fillStyle = msg.color;
+    topoCtx.fill();
+    // Label
+    topoCtx.fillStyle = msg.color;
+    topoCtx.font = 'bold 10px monospace';
+    topoCtx.textAlign = 'center';
+    topoCtx.fillText(msg.label, px, py - 10);
+    return true;
+  });
+
+  // Draw nodes
+  topoNodes.forEach(n => {
+    const r = 22;
+    topoCtx.beginPath();
+    topoCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    const bg = n.role === 'master' ? '#1a0d0d' : '#0d1a0d';
+    const border = n.role === 'master' ? '#f85149' : '#3fb950';
+    topoCtx.fillStyle = bg;
+    topoCtx.fill();
+    topoCtx.strokeStyle = border;
+    topoCtx.lineWidth = 2;
+    topoCtx.stroke();
+
+    topoCtx.fillStyle = border;
+    topoCtx.font = 'bold 13px monospace';
+    topoCtx.textAlign = 'center';
+    topoCtx.textBaseline = 'middle';
+    topoCtx.fillText(n.name, n.x, n.y);
+
+    topoCtx.fillStyle = '#8b949e';
+    topoCtx.font = '9px sans-serif';
+    topoCtx.fillText(n.role, n.x, n.y + r + 12);
+  });
+
+  // Legend
+  topoCtx.fillStyle = '#58a6ff';
+  topoCtx.font = '11px sans-serif';
+  topoCtx.textAlign = 'left';
+  topoCtx.fillText('← 所有节点之间都有 Gossip 通信', 20, 290);
+
+  if (topoMsgs.length > 0 || topoAnimId) {
+    topoAnimId = requestAnimationFrame(drawTopo);
+  }
+}
+
+let topoStep = 0;
+function animateTopo() {
+  resetTopo();
+  topoAnimId = requestAnimationFrame(drawTopo);
+
+  const pairs = [
+    [0, 1, 'PING', '#58a6ff'],   // M1 → M2
+    [3, 5, 'PING', '#bc8cff'],   // S1 → S3
+    [2, 4, 'PING', '#58a6ff'],   // M3 → S2
+    [1, 5, 'PING', '#3fb950'],   // M2 → S3
+    [4, 0, 'PING', '#58a6ff'],   // S2 → M1
+    [3, 2, 'PING', '#bc8cff'],   // S1 → M3
+    [5, 1, 'PONG', '#3fb950'],   // S3 → M2
+    [0, 4, 'PONG', '#3fb950'],   // M1 → S2
+  ];
+
+  function sendNext() {
+    if (topoStep >= pairs.length) return;
+    const [si, ti, label, color] = pairs[topoStep];
+    topoMsgs.push({
+      sx: topoNodes[si].x, sy: topoNodes[si].y,
+      tx: topoNodes[ti].x, ty: topoNodes[ti].y,
+      progress: 0, label: label, color: color
+    });
+    topoStep++;
+    setTimeout(sendNext, 800);
+  }
+  sendNext();
+}
+
+function resetTopo() {
+  topoStep = 0;
+  topoMsgs = [];
+  if (topoAnimId) { cancelAnimationFrame(topoAnimId); topoAnimId = null; }
+  drawTopoStatic();
+}
+
+function drawTopoStatic() {
+  topoCtx.clearRect(0, 0, topoCanvas.width, topoCanvas.height);
+  for (let i = 0; i < 3; i++) {
+    const m = topoNodes[i], s = topoNodes[i + 3];
+    topoCtx.beginPath();
+    topoCtx.moveTo(m.x, m.y + 24);
+    topoCtx.lineTo(s.x, s.y - 24);
+    topoCtx.strokeStyle = '#21262d';
+    topoCtx.lineWidth = 1;
+    topoCtx.setLineDash([4, 4]);
+    topoCtx.stroke();
+    topoCtx.setLineDash([]);
+  }
+  // Draw light connection lines between all nodes
+  for (let i = 0; i < topoNodes.length; i++) {
+    for (let j = i + 1; j < topoNodes.length; j++) {
+      topoCtx.beginPath();
+      topoCtx.moveTo(topoNodes[i].x, topoNodes[i].y);
+      topoCtx.lineTo(topoNodes[j].x, topoNodes[j].y);
+      topoCtx.strokeStyle = '#21262d20';
+      topoCtx.lineWidth = 0.5;
+      topoCtx.stroke();
+    }
+  }
+  topoNodes.forEach(n => {
+    const r = 22;
+    topoCtx.beginPath();
+    topoCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    topoCtx.fillStyle = n.role === 'master' ? '#1a0d0d' : '#0d1a0d';
+    topoCtx.fill();
+    topoCtx.strokeStyle = n.role === 'master' ? '#f85149' : '#3fb950';
+    topoCtx.lineWidth = 2;
+    topoCtx.stroke();
+    topoCtx.fillStyle = n.role === 'master' ? '#f85149' : '#3fb950';
+    topoCtx.font = 'bold 13px monospace';
+    topoCtx.textAlign = 'center';
+    topoCtx.textBaseline = 'middle';
+    topoCtx.fillText(n.name, n.x, n.y);
+    topoCtx.fillStyle = '#8b949e';
+    topoCtx.font = '9px sans-serif';
+    topoCtx.fillText(n.role, n.x, n.y + r + 12);
+  });
+  topoCtx.fillStyle = '#58a6ff';
+  topoCtx.font = '11px sans-serif';
+  topoCtx.textAlign = 'left';
+  topoCtx.fillText('← 点击"演示 Gossip 通信"查看节点间消息传递', 20, 290);
+}
+
+drawTopoStatic();
+</script>
+</body>
+</html>

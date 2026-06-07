@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C程序执行全过程 — CPU·内存·Cache·TLB 动画</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'PingFang SC','Microsoft YaHei',sans-serif; background:#0f1117; color:#e2e8f0; height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+
+/* ===== TOP BAR ===== */
+.top-bar { background:#1a1d2e; border-bottom:1px solid #2d3148; padding:10px 20px; display:flex; align-items:center; gap:12px; flex-shrink:0; }
+.top-bar h1 { font-size:16px; color:#a5b4fc; font-weight:700; }
+.step-badge { background:#6366f1; color:#fff; padding:3px 10px; border-radius:10px; font-size:12px; font-weight:700; }
+.step-title-text { font-size:14px; color:#e2e8f0; font-weight:600; }
+
+/* ===== MAIN LAYOUT ===== */
+.main-layout { display:flex; flex:1; overflow:hidden; }
+
+/* ===== LEFT: CODE PANEL ===== */
+.code-panel { width:38%; background:#13151f; border-right:1px solid #2d3148; display:flex; flex-direction:column; overflow:hidden; flex-shrink:0; }
+.code-header { padding:10px 14px; background:#1e2235; border-bottom:1px solid #2d3148; font-size:12px; color:#818cf8; font-weight:700; flex-shrink:0; }
+.code-scroll { flex:1; overflow-y:auto; padding:6px 0; }
+.c-line { display:flex; align-items:flex-start; padding:2px 0; transition:background .35s; position:relative; }
+.c-line.active { background:rgba(99,102,241,0.22); }
+.c-line.active::before { content:'▶'; position:absolute; left:2px; color:#6366f1; font-size:10px; top:3px; }
+.line-num { min-width:32px; text-align:right; padding-right:10px; color:#3d4166; font-size:12px; font-family:'Courier New',monospace; padding-top:2px; flex-shrink:0; }
+.line-code { font-family:'Courier New',monospace; font-size:12.5px; line-height:1.65; flex:1; padding-right:12px; white-space:pre; }
+.kw { color:#c792ea; } .ty { color:#82aaff; } .fn { color:#82aaff; } .fn2 { color:#ffcb6b; }
+.str { color:#c3e88d; } .num { color:#f78c6c; } .cmt { color:#546e7a; font-style:italic; }
+.ptr-op { color:#ff5370; } .var { color:#eeffff; } .punc { color:#89ddff; }
+
+/* ===== EXPLANATION BOX ===== */
+.explanation-box { padding:14px; background:#1a1d2e; border-top:1px solid #2d3148; flex-shrink:0; max-height:170px; overflow-y:auto; }
+.exp-title { font-size:12px; font-weight:700; color:#a5b4fc; margin-bottom:7px; }
+.exp-text { font-size:12.5px; color:#94a3b8; line-height:1.7; }
+.exp-text strong { color:#e2e8f0; }
+.tag { display:inline-block; padding:1px 7px; border-radius:8px; font-size:11px; font-weight:700; margin:1px; }
+.t-stack { background:#14532d; color:#4ade80; }
+.t-heap  { background:#451a03; color:#fbbf24; }
+.t-cpu   { background:#1e3a5f; color:#60a5fa; }
+.t-kernel{ background:#2a1050; color:#c084fc; }
+.t-cache { background:#1a3e1e; color:#86efac; }
+.t-tlb   { background:#1e3a1a; color:#4ade80; }
+
+/* ===== CENTER: MEMORY DIAGRAM ===== */
+.vis-area { flex:1; display:flex; overflow:hidden; }
+.mem-diagram-wrap { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.mem-diagram-title { padding:8px 14px; background:#1a1d2e; border-bottom:1px solid #2d3148; font-size:11px; color:#64748b; flex-shrink:0; display:flex; justify-content:space-between; }
+.mem-scroll { flex:1; overflow-y:auto; padding:12px; }
+.mem-diagram { display:flex; flex-direction:column; gap:3px; position:relative; }
+
+/* Address labels */
+.addr-label { font-size:10px; color:#3d4166; font-family:monospace; text-align:right; padding-right:6px; align-self:flex-end; }
+
+/* Memory blocks */
+.mem-block { border-radius:8px; padding:9px 12px; position:relative; transition:all .4s; border:2px solid transparent; }
+.mb-kernel { background:#2a1050; border-color:#7c3aed; }
+.mb-env    { background:#1e1a30; border-color:#4c3a6e; }
+.mb-stack  { background:#0f2a1a; border-color:#166534; min-height:80px; }
+.mb-heap   { background:#2a1a05; border-color:#92400e; min-height:50px; }
+.mb-bss    { background:#2a2810; border-color:#78716c; }
+.mb-data   { background:#0f2a28; border-color:#115e59; }
+.mb-text   { background:#101530; border-color:#1e3a8a; }
+.mb-label  { font-size:12px; font-weight:700; display:flex; justify-content:space-between; align-items:center; }
+.mb-addr   { font-size:10px; font-family:monospace; opacity:.6; margin-top:2px; }
+.mb-detail { font-size:11px; color:#64748b; margin-top:4px; }
+
+/* Highlighted block */
+.mem-block.glow { box-shadow:0 0 12px rgba(99,102,241,0.5); border-color:#6366f1 !important; }
+.mem-block.glow-green { box-shadow:0 0 12px rgba(34,197,94,0.5); border-color:#22c55e !important; }
+.mem-block.glow-orange { box-shadow:0 0 12px rgba(251,146,60,0.5); border-color:#f59e0b !important; }
+.mem-block.glow-red { box-shadow:0 0 12px rgba(239,68,68,0.5); border-color:#ef4444 !important; }
+
+/* Stack frames */
+.stack-frames { margin-top:6px; display:flex; flex-direction:column; gap:3px; }
+.sf { border-radius:6px; padding:7px 10px; border:1px solid; font-size:11px; transition:all .4s; }
+.sf-main { background:#0a3020; border-color:#16a34a; }
+.sf-add  { background:#0a1e3a; border-color:#2563eb; }
+.sf-title { font-weight:700; font-size:11px; margin-bottom:4px; display:flex; justify-content:space-between; }
+.sf-vars { display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; }
+.sf-var  { background:rgba(255,255,255,0.06); border-radius:4px; padding:2px 7px; font-family:monospace; font-size:11px; }
+.vn { color:#93c5fd; }
+.vv { color:#fbbf24; }
+.sf-ra   { font-family:monospace; font-size:10px; color:#64748b; margin-top:3px; }
+
+.sf-enter { animation:sfEnter .4s ease; }
+@keyframes sfEnter { from{opacity:0;transform:translateY(-15px);max-height:0} to{opacity:1;transform:translateY(0);max-height:200px} }
+
+/* Heap blocks */
+.heap-items { margin-top:6px; display:flex; flex-direction:column; gap:3px; }
+.hb { border-radius:6px; padding:6px 10px; font-size:11px; font-family:monospace; transition:all .4s; }
+.hb-alloc { background:#2a1500; border:1px solid #f59e0b; color:#fde68a; }
+.hb-free  { background:#1e2235; border:1px dashed #374151; color:#4a5568; }
+.hb-enter { animation:hbEnter .5s ease; }
+@keyframes hbEnter { from{opacity:0;transform:scaleY(0.2);transform-origin:top} to{opacity:1;transform:scaleY(1)} }
+
+/* Arrow indicator */
+.access-row { display:flex; align-items:center; gap:6px; margin-top:6px; font-size:11px; padding:5px 8px; border-radius:5px; animation:fadeSlide .4s ease; }
+@keyframes fadeSlide { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
+.access-row.read  { background:#1a2f4a; color:#93c5fd; border:1px solid #2563eb; }
+.access-row.write { background:#1a3a1a; color:#86efac; border:1px solid #16a34a; }
+.access-row.syscall { background:#2a0a4e; color:#c084fc; border:1px solid #7c3aed; }
+
+/* ===== RIGHT: CPU + CACHE PANEL ===== */
+.right-panel { width:230px; border-left:1px solid #2d3148; display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0; }
+.rp-section { padding:12px; border-bottom:1px solid #2d3148; }
+.rp-title { font-size:11px; font-weight:700; color:#818cf8; margin-bottom:8px; letter-spacing:.5px; text-transform:uppercase; }
+
+/* Mode badge */
+.mode-badge { padding:4px 0; border-radius:8px; font-size:12px; font-weight:700; text-align:center; margin-bottom:8px; transition:all .4s; }
+.mode-user   { background:#1e3a5f; color:#60a5fa; border:1px solid #2563eb; }
+.mode-kernel { background:#2a0a4e; color:#c084fc; border:1px solid #7c3aed; animation:kernelPulse 1s infinite; }
+@keyframes kernelPulse { 0%,100%{box-shadow:0 0 0 0 rgba(147,51,234,0.4)} 50%{box-shadow:0 0 8px 3px rgba(147,51,234,0.4)} }
+
+/* Registers */
+.reg-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+.reg-item { background:#131624; border-radius:5px; padding:5px 8px; transition:all .3s; }
+.reg-item.flash { animation:regFlash .5s ease; }
+@keyframes regFlash { 0%{background:#4c1d1d;border:1px solid #ef4444} 50%{background:#3a1515} 100%{background:#131624} }
+.rn { font-size:10px; color:#64748b; font-family:monospace; }
+.rv { font-size:11px; color:#fbbf24; font-family:monospace; font-weight:600; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rv.updated { color:#f87171; }
+
+/* Cache */
+.cache-list { display:flex; flex-direction:column; gap:4px; }
+.cl-item { border-radius:5px; padding:6px 9px; display:flex; justify-content:space-between; align-items:center; transition:all .4s; }
+.cl-hot  { background:#14532d; border:1px solid #16a34a; }
+.cl-miss { background:#4c1d1d; border:1px solid #ef4444; animation:cacheMiss .6s; }
+@keyframes cacheMiss { 0%{background:#7f1d1d} 100%{background:#4c1d1d} }
+.cl-cold { background:#1e2235; border:1px solid #2d3148; }
+.cl-write{ background:#1a2f4a; border:1px solid #2563eb; animation:cacheWrite .6s; }
+@keyframes cacheWrite { 0%{background:#1e3a5f} 100%{background:#1a2f4a} }
+.cl-name { font-size:11px; font-weight:700; }
+.cl-status { font-size:10px; }
+
+/* TLB */
+.tlb-list { display:flex; flex-direction:column; gap:3px; font-family:monospace; font-size:10px; }
+.tl-item { padding:4px 7px; border-radius:4px; display:flex; gap:5px; transition:all .4s; }
+.tl-active   { background:#0f2a1a; border:1px solid #16a34a; }
+.tl-inactive { background:#1e2235; border:1px solid #1e2235; color:#374151; }
+.tl-new { animation:tlbNew .5s; }
+@keyframes tlbNew { from{background:#1a4a1a} to{background:#0f2a1a} }
+.tl-va { color:#93c5fd; }
+.tl-arrow { color:#4a5568; }
+.tl-pa { color:#4ade80; }
+
+/* ALU animation */
+.alu-box { background:#131624; border:1px solid #3d4166; border-radius:6px; padding:8px; text-align:center; font-family:monospace; font-size:12px; transition:all .4s; }
+.alu-box.computing { border-color:#fbbf24; background:#2a2005; animation:aluCalc .6s; }
+@keyframes aluCalc { 0%{box-shadow:0 0 0 0 rgba(251,191,36,0.5)} 100%{box-shadow:0 0 8px 3px rgba(251,191,36,0.3)} }
+.alu-expr { color:#fbbf24; font-weight:700; }
+.alu-result { color:#4ade80; font-weight:700; }
+
+/* ===== CONTROLS ===== */
+.controls { background:#1a1d2e; border-top:1px solid #2d3148; padding:10px 20px; display:flex; align-items:center; gap:10px; justify-content:center; flex-shrink:0; }
+.ctrl-btn { padding:7px 18px; border-radius:7px; border:none; cursor:pointer; font-size:13px; font-weight:600; transition:all .2s; }
+.ctrl-btn:hover { opacity:.85; transform:translateY(-1px); }
+.ctrl-btn:disabled { opacity:.4; cursor:not-allowed; transform:none; }
+.btn-prev { background:#374151; color:#d1d5db; }
+.btn-next { background:#6366f1; color:#fff; }
+.btn-play { background:#22c55e; color:#fff; }
+.btn-reset { background:#374151; color:#d1d5db; }
+.progress-wrap { flex:1; max-width:280px; }
+.prog-bar { height:3px; background:#2d3148; border-radius:2px; }
+.prog-fill { height:100%; background:#6366f1; border-radius:2px; transition:width .4s; }
+.prog-text { font-size:11px; color:#64748b; text-align:center; margin-top:4px; }
+
+/* Syscall overlay */
+.sc-overlay { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:100; background:#1a0a4e; border:2px solid #9333ea; border-radius:14px; padding:22px 30px; text-align:center; display:none; box-shadow:0 0 50px rgba(147,51,234,0.5); min-width:280px; }
+.sc-overlay.show { display:block; animation:scIn .4s ease; }
+@keyframes scIn { from{opacity:0;transform:translate(-50%,-50%) scale(.7)} to{opacity:1;transform:translate(-50%,-50%) scale(1)} }
+.sc-title { color:#c084fc; font-size:20px; font-weight:800; margin-bottom:10px; }
+.sc-detail { color:#94a3b8; font-size:13px; line-height:1.7; }
+.sc-close { margin-top:14px; padding:6px 16px; background:#6366f1; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+.backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:99; display:none; }
+.backdrop.show { display:block; }
+
+/* SP arrow */
+.sp-arrow { font-size:10px; color:#22c55e; font-weight:700; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>C程序执行全过程</h1>
+  <div class="step-badge" id="badge">步骤 1/11</div>
+  <div class="step-title-text" id="step-title">程序加载</div>
+</div>
+
+<div class="main-layout">
+
+  <!-- LEFT: C CODE -->
+  <div class="code-panel">
+    <div class="code-header">📄 example.c — 逐行执行追踪</div>
+    <div class="code-scroll" id="code-scroll">
+      <!-- Lines populated by JS -->
+    </div>
+    <div class="explanation-box">
+      <div class="exp-title" id="exp-title">正在初始化...</div>
+      <div class="exp-text" id="exp-text">请点击"下一步"开始</div>
+    </div>
+  </div>
+
+  <!-- CENTER: MEMORY DIAGRAM -->
+  <div class="vis-area">
+    <div class="mem-diagram-wrap">
+      <div class="mem-diagram-title">
+        <span>🗺️ 进程虚拟地址空间</span>
+        <span>高地址 ↑ 顶部  |  低地址 ↓ 底部</span>
+      </div>
+      <div class="mem-scroll">
+        <div class="mem-diagram">
+
+          <!-- KERNEL -->
+          <div class="mem-block mb-kernel" id="mb-kernel">
+            <div class="mb-label"><span>🔒 内核空间</span><span style="font-size:10px;font-family:monospace">0xFFFF800...</span></div>
+            <div class="mb-detail">操作系统专属，用户代码禁止访问</div>
+          </div>
+
+          <!-- ENV/ARGS -->
+          <div class="mem-block mb-env" id="mb-env">
+            <div class="mb-label"><span>📋 环境变量 / 命令行参数</span></div>
+            <div class="mb-detail">argc, argv, environ</div>
+          </div>
+
+          <!-- STACK -->
+          <div class="mem-block mb-stack" id="mb-stack">
+            <div class="mb-label">
+              <span>📦 栈 Stack <span class="sp-arrow" id="sp-arrow"></span></span>
+              <span id="sp-display" style="font-size:10px;font-family:monospace;color:#4ade80;"></span>
+            </div>
+            <div class="mb-addr">向低地址增长 ↓ | SP 指向栈顶</div>
+            <div class="stack-frames" id="stack-frames">
+              <div style="font-size:11px;color:#3d4166;padding:4px 0;">（等待函数调用）</div>
+            </div>
+            <div id="stack-access"></div>
+          </div>
+
+          <div style="text-align:center;font-size:11px;color:#3d4166;padding:4px 0;">⋯⋯ 未映射区域（guard page） ⋯⋯</div>
+
+          <!-- HEAP -->
+          <div class="mem-block mb-heap" id="mb-heap">
+            <div class="mb-label">
+              <span>🔼 堆 Heap</span>
+              <span id="brk-display" style="font-size:10px;font-family:monospace;color:#fbbf24;"></span>
+            </div>
+            <div class="mb-addr">向高地址增长 ↑ | brk 指向堆顶</div>
+            <div class="heap-items" id="heap-items">
+              <div style="font-size:11px;color:#3d4166;padding:4px 0;">（空，暂未分配）</div>
+            </div>
+            <div id="heap-access"></div>
+          </div>
+
+          <!-- BSS -->
+          <div class="mem-block mb-bss" id="mb-bss">
+            <div class="mb-label"><span>📋 BSS 段</span></div>
+            <div class="mb-detail">未初始化全局变量，OS 自动清零</div>
+            <div id="bss-vars" style="margin-top:5px;font-size:11px;font-family:monospace;color:#4a5568;"></div>
+          </div>
+
+          <!-- DATA -->
+          <div class="mem-block mb-data" id="mb-data">
+            <div class="mb-label"><span>📊 数据段 Data</span></div>
+            <div class="mb-detail">已初始化全局/静态变量（可读写）</div>
+            <div id="data-vars" style="margin-top:5px;font-size:11px;font-family:monospace;"></div>
+          </div>
+
+          <!-- TEXT -->
+          <div class="mem-block mb-text" id="mb-text">
+            <div class="mb-label"><span>💻 代码段 Text</span></div>
+            <div class="mb-detail">程序机器指令，只读，可被多进程共享</div>
+            <div id="text-fns" style="margin-top:5px;font-size:11px;font-family:monospace;"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: CPU + CACHE -->
+    <div class="right-panel">
+
+      <!-- Mode -->
+      <div class="rp-section">
+        <div class="rp-title">执行模式</div>
+        <div class="mode-badge mode-user" id="mode-badge">🟢 用户态 (Ring 3)</div>
+      </div>
+
+      <!-- Registers -->
+      <div class="rp-section">
+        <div class="rp-title">CPU 寄存器</div>
+        <div class="reg-grid">
+          <div class="reg-item" id="reg-rip"><div class="rn">RIP (PC)</div><div class="rv" id="v-rip">—</div></div>
+          <div class="reg-item" id="reg-rsp"><div class="rn">RSP (栈顶)</div><div class="rv" id="v-rsp">—</div></div>
+          <div class="reg-item" id="reg-rbp"><div class="rn">RBP (帧底)</div><div class="rv" id="v-rbp">—</div></div>
+          <div class="reg-item" id="reg-rax"><div class="rn">RAX (返回值)</div><div class="rv" id="v-rax">—</div></div>
+          <div class="reg-item" id="reg-rdi"><div class="rn">RDI (arg1)</div><div class="rv" id="v-rdi">—</div></div>
+          <div class="reg-item" id="reg-rsi"><div class="rn">RSI (arg2)</div><div class="rv" id="v-rsi">—</div></div>
+        </div>
+      </div>
+
+      <!-- ALU -->
+      <div class="rp-section">
+        <div class="rp-title">ALU 运算器</div>
+        <div class="alu-box" id="alu-box">
+          <div style="font-size:10px;color:#4a5568;">待机中</div>
+        </div>
+      </div>
+
+      <!-- Cache -->
+      <div class="rp-section">
+        <div class="rp-title">Cache 缓存</div>
+        <div class="cache-list">
+          <div class="cl-item cl-cold" id="cache-l1">
+            <span class="cl-name">L1 Cache</span>
+            <span class="cl-status" id="cl1-status">cold</span>
+          </div>
+          <div class="cl-item cl-cold" id="cache-l2">
+            <span class="cl-name">L2 Cache</span>
+            <span class="cl-status" id="cl2-status">cold</span>
+          </div>
+          <div class="cl-item cl-cold" id="cache-l3">
+            <span class="cl-name">L3 Cache</span>
+            <span class="cl-status" id="cl3-status">cold</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- TLB -->
+      <div class="rp-section">
+        <div class="rp-title">TLB 地址缓存</div>
+        <div class="tlb-list" id="tlb-list">
+          <div style="font-size:10px;color:#3d4166;">（空）</div>
+        </div>
+      </div>
+
+      <!-- MMU -->
+      <div class="rp-section">
+        <div class="rp-title">MMU 说明</div>
+        <div id="mmu-text" style="font-size:11px;color:#64748b;line-height:1.6;">等待内存访问</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- CONTROLS -->
+<div class="controls">
+  <button class="ctrl-btn btn-reset" onclick="resetAll()">↺ 重置</button>
+  <button class="ctrl-btn btn-prev" id="btn-prev" onclick="prevStep()" disabled>◀ 上一步</button>
+  <div class="progress-wrap">
+    <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+    <div class="prog-text" id="prog-text">步骤 0 / 11</div>
+  </div>
+  <button class="ctrl-btn btn-next" id="btn-next" onclick="nextStep()">下一步 ▶</button>
+  <button class="ctrl-btn btn-play" id="btn-play" onclick="togglePlay()">▶ 自动播放</button>
+</div>
+
+<!-- Syscall overlay -->
+<div class="backdrop" id="backdrop" onclick="closeSyscall()"></div>
+<div class="sc-overlay" id="sc-overlay">
+  <div class="sc-title" id="sc-title">系统调用</div>
+  <div class="sc-detail" id="sc-detail"></div>
+  <button class="sc-close" onclick="closeSyscall()">继续 ▶</button>
+</div>
+
+<script>
+// =================== C CODE ===================
+const codeLines = [
+  { n: 1,  html: `<span class="cmt">// example.c — 完整示例程序</span>` },
+  { n: 2,  html: `<span class="kw">#include</span> <span class="str">&lt;stdio.h&gt;</span>` },
+  { n: 3,  html: `<span class="kw">#include</span> <span class="str">&lt;stdlib.h&gt;</span>` },
+  { n: 4,  html: `` },
+  { n: 5,  html: `<span class="ty">int</span> <span class="var">global</span> <span class="punc">=</span> <span class="num">42</span><span class="punc">;</span>  <span class="cmt">// 数据段（已初始化全局变量）</span>` },
+  { n: 6,  html: `` },
+  { n: 7,  html: `<span class="ty">int</span> <span class="fn">add</span><span class="punc">(</span><span class="ty">int</span> <span class="var">a</span><span class="punc">,</span> <span class="ty">int</span> <span class="var">b</span><span class="punc">)</span> <span class="punc">{</span>` },
+  { n: 8,  html: `    <span class="ty">int</span> <span class="var">result</span> <span class="punc">=</span> <span class="var">a</span> <span class="punc">+</span> <span class="var">b</span><span class="punc">;</span>  <span class="cmt">// ALU 运算</span>` },
+  { n: 9,  html: `    <span class="kw">return</span> <span class="var">result</span><span class="punc">;</span>` },
+  { n: 10, html: `<span class="punc">}</span>` },
+  { n: 11, html: `` },
+  { n: 12, html: `<span class="ty">int</span> <span class="fn">main</span><span class="punc">()</span> <span class="punc">{</span>` },
+  { n: 13, html: `    <span class="ty">int</span> <span class="var">x</span> <span class="punc">=</span> <span class="num">10</span><span class="punc">;</span>             <span class="cmt">// 局部变量 → 栈</span>` },
+  { n: 14, html: `    <span class="ty">int</span> <span class="var">y</span> <span class="punc">=</span> <span class="num">20</span><span class="punc">;</span>             <span class="cmt">// 局部变量 → 栈</span>` },
+  { n: 15, html: `    <span class="ty">int</span> <span class="ptr-op">*</span><span class="var">ptr</span> <span class="punc">=</span> <span class="fn2">malloc</span><span class="punc">(</span><span class="num">16</span><span class="punc">);</span> <span class="cmt">// 申请堆内存</span>` },
+  { n: 16, html: `    <span class="ptr-op">*</span><span class="var">ptr</span> <span class="punc">=</span> <span class="fn2">add</span><span class="punc">(</span><span class="var">x</span><span class="punc">,</span> <span class="var">y</span><span class="punc">);</span>      <span class="cmt">// 调用函数，结果写堆</span>` },
+  { n: 17, html: `    <span class="fn2">printf</span><span class="punc">(</span><span class="str">"sum=%d\\n"</span><span class="punc">,</span> <span class="ptr-op">*</span><span class="var">ptr</span><span class="punc">);</span> <span class="cmt">// 系统调用 write()</span>` },
+  { n: 18, html: `    <span class="fn2">free</span><span class="punc">(</span><span class="var">ptr</span><span class="punc">);</span>             <span class="cmt">// 释放堆内存</span>` },
+  { n: 19, html: `    <span class="kw">return</span> <span class="num">0</span><span class="punc">;</span>` },
+  { n: 20, html: `<span class="punc">}</span>` },
+];
+
+// =================== STEPS ===================
+const STEPS = [
+  {
+    title: "① 程序加载 (ELF → 内存)",
+    lines: [],
+    expTitle: "OS 加载 ELF 可执行文件",
+    expHtml: `OS 把编译好的 <strong>ELF 文件</strong>解析后映射到内存：<br>
+• <span class="tag t-cpu">代码段 Text</span> ← 函数指令（只读）<br>
+• <span class="tag t-cache">数据段 Data</span> ← global=42（已初始化）<br>
+• BSS 段 ← 未初始化变量全部清零<br>
+• 创建初始栈帧，SP 指向栈顶<br>
+堆此刻是空的，等待 <code>malloc</code> 调用。`,
+    regs: { RIP:'_start', RSP:'0x7fff·f0', RBP:'0', RAX:'0', RDI:'0', RSI:'0' },
+    stackFrames: [],
+    heapBlocks: [],
+    mode: 'user',
+    cache: { l1:'cold', l2:'cold', l3:'cold' },
+    tlb: [],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>  <span style="color:#546e7a">// 0x601060</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540`,
+    alu: null,
+    mmu: '程序加载时 OS 建立页表映射，代码段/数据段虚拟地址 → 物理地址',
+    brk: '0x602000（初始）',
+    sp: '0x7fff·f0',
+  },
+  {
+    title: "② 进入 main() — 建立栈帧",
+    lines: [12],
+    expTitle: "main() 函数调用 — 建立栈帧",
+    expHtml: `OS/CRT 调用 <code>main()</code>：<br>
+<span class="tag t-stack">栈操作</span> ①将返回地址 push 到栈上<br>
+<span class="tag t-stack">栈操作</span> ②将旧的 <code>RBP</code> push，RBP = RSP（新帧底）<br>
+<span class="tag t-stack">栈操作</span> ③RSP 向低地址移动，为局部变量留空间<br>
+<span class="tag t-cpu">RIP</span> 现在指向 main() 第一条指令。`,
+    regs: { RIP:'main+0', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'0', RDI:'1', RSI:'0x7fff·f8' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'返回地址: _start+N', vars:[] }
+    ],
+    heapBlocks: [],
+    mode: 'user',
+    cache: { l1:'cold', l2:'cold', l3:'cold' },
+    tlb: [{ va:'0x7fff·d0', pa:'0x1a2000', active:true }],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: null,
+    mmu: 'TLB miss → 查页表 → 建立栈虚拟地址到物理地址映射 → 写入 TLB',
+    brk: '0x602000',
+    sp: '0x7fff·d0',
+    glowBlock: 'mb-stack',
+  },
+  {
+    title: "③ int x=10; int y=20; — 局部变量入栈",
+    lines: [13, 14],
+    expTitle: "局部变量分配在栈上",
+    expHtml: `<span class="tag t-stack">MOV</span> 指令将立即数写入栈上地址：<br>
+• <code>[RBP-4] = 10</code>（x 的位置）<br>
+• <code>[RBP-8] = 20</code>（y 的位置）<br>
+<span class="tag t-cache">TLB 命中</span> 栈地址之前已缓存，直接拿到物理地址<br>
+<span class="tag t-cache">L1 cache 写入</span> 写到 L1 cache（write-back 策略）<br>
+局部变量<strong>不在堆上</strong>，函数结束自动释放。`,
+    regs: { RIP:'main+12', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'0', RDI:'1', RSI:'0x7fff·f8' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'返回地址: _start+N',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'—'}] }
+    ],
+    heapBlocks: [],
+    mode: 'user',
+    cache: { l1:'write', l2:'cold', l3:'cold' },
+    tlb: [{ va:'0x7fff·d0', pa:'0x1a2000', active:true }],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: null,
+    mmu: 'TLB hit → 栈地址直接翻译，写入 x=10, y=20',
+    brk: '0x602000',
+    sp: '0x7fff·c8',
+    glowBlock: 'mb-stack',
+  },
+  {
+    title: "④ malloc(16) — 向 OS 申请堆内存",
+    lines: [15],
+    expTitle: "malloc → brk/mmap 系统调用",
+    expHtml: `<code>malloc(16)</code> 内部流程：<br>
+<span class="tag t-heap">1</span> malloc 先检查自身的 <strong>空闲链表</strong>（freelist）<br>
+<span class="tag t-heap">2</span> 空闲链表没有合适块 → 调用 <strong>brk()</strong> 系统调用<br>
+<span class="tag t-kernel">系统调用</span> 进入内核，<strong>brk 指针上移</strong>，扩展堆区<br>
+<span class="tag t-heap">3</span> 返回虚拟地址 <code>0x602010</code>（含8字节元数据头）<br>
+<span class="tag t-cpu">RAX</span> = 0x602010，写入栈上 ptr 变量<br>
+⚠️ 此时只有<strong>虚拟地址</strong>，物理内存尚未映射！`,
+    regs: { RIP:'main+28', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'0x602010', RDI:'16', RSI:'0' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'返回地址: _start+N',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-alloc', text:'0x602000: [header 8B] | [data 16B] 0x602008', freed:false }
+    ],
+    mode: 'user',
+    cache: { l1:'miss', l2:'miss', l3:'miss' },
+    tlb: [
+      { va:'0x7fff·d0', pa:'0x1a2000', active:true },
+      { va:'0x602010', pa:'—（待缺页）', active:false }
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: null,
+    mmu: 'brk() 系统调用扩展堆 → OS 更新页表 → 但物理页尚未分配（按需分配）',
+    brk: '0x602020（已上移）',
+    sp: '0x7fff·c8',
+    glowBlock: 'mb-heap',
+    showSyscall: true,
+    syscallTitle: '⚙️ 系统调用: brk()',
+    syscallDetail: `用户态 → 内核态 (Ring 3 → Ring 0)<br><br>
+<strong>brk(new_end)</strong>：扩展进程数据段结束地址<br>
+内核更新进程的 vm_area_struct，<br>
+在 mm_struct 里记录新的堆边界。<br><br>
+<em>物理内存此时还没分配，等到真正访问堆地址时<br>才触发缺页中断（Page Fault）分配物理页。</em>`,
+  },
+  {
+    title: "⑤ 调用 add(x, y) — 新栈帧 + 参数传递",
+    lines: [16, 7],
+    expTitle: "函数调用约定 (System V AMD64 ABI)",
+    expHtml: `x86-64 前 6 个整数参数通过寄存器传递：<br>
+<span class="tag t-cpu">RDI</span> = x = 10（第一个参数）<br>
+<span class="tag t-cpu">RSI</span> = y = 20（第二个参数）<br>
+<span class="tag t-stack">CALL 指令</span>：push 返回地址 → RIP = add() 入口<br>
+<span class="tag t-stack">add() 序言</span>：push RBP → RBP = RSP（新帧底）<br>
+RSP 再向下移，为 <code>result</code> 留空间。`,
+    regs: { RIP:'add+0', RSP:'0x7fff·b8', RBP:'0x7fff·b8', RAX:'0', RDI:'10', RSI:'20' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧（调用方）', ra:'',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010'}] },
+      { id:'sf-add', cls:'sf-add', title:'add() 栈帧 ← SP', ra:'返回地址: main+35',
+        vars:[{n:'a',v:'10(RDI)'},{n:'b',v:'20(RSI)'},{n:'result',v:'?'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-alloc', text:'0x602010 [16B 已分配]', freed:false }
+    ],
+    mode: 'user',
+    cache: { l1:'write', l2:'cold', l3:'cold' },
+    tlb: [
+      { va:'0x7fff·b8', pa:'0x1a1000', active:true },
+      { va:'0x602010', pa:'—（待缺页）', active:false }
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500 ← RIP<br><span style="color:#82aaff">main()</span> 0x400540`,
+    alu: null,
+    mmu: '栈地址 TLB hit，新栈帧直接写入已映射物理页',
+    brk: '0x602020',
+    sp: '0x7fff·b8',
+    glowBlock: 'mb-stack',
+  },
+  {
+    title: "⑥ result = a + b — ALU 执行加法",
+    lines: [8],
+    expTitle: "CPU 执行加法指令 (ADD)",
+    expHtml: `<span class="tag t-cpu">ADD 指令</span> 从寄存器读取操作数：<br>
+<code>RDI(10) + RSI(20) = 30</code><br>
+<span class="tag t-cpu">ALU</span> 执行整数加法，结果放入 <code>RAX = 30</code><br>
+<span class="tag t-stack">MOV</span> 将 RAX 写入栈上 <code>[RBP-4]</code> = result<br>
+整个运算只在 <strong>CPU 寄存器内</strong>完成，不涉及内存访问！<br>
+（若有缓存 → L1 hit；无缓存则先缺页分配物理页）`,
+    regs: { RIP:'add+8', RSP:'0x7fff·b8', RBP:'0x7fff·b8', RAX:'30', RDI:'10', RSI:'20' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010'}] },
+      { id:'sf-add', cls:'sf-add', title:'add() 栈帧 ← SP', ra:'返回地址: main+35',
+        vars:[{n:'a',v:'10'},{n:'b',v:'20'},{n:'result',v:'30'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-alloc', text:'0x602010 [16B 已分配]', freed:false }
+    ],
+    mode: 'user',
+    cache: { l1:'hot', l2:'cold', l3:'cold' },
+    tlb: [
+      { va:'0x7fff·b8', pa:'0x1a1000', active:true },
+      { va:'0x602010', pa:'—（待缺页）', active:false }
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500 ← RIP<br><span style="color:#82aaff">main()</span> 0x400540`,
+    alu: { expr:'RDI(10) + RSI(20)', result:'RAX = 30', computing:true },
+    mmu: 'result 写入栈，TLB hit → 物理地址 0x1a1000+offset，L1 cache hit',
+    brk: '0x602020',
+    sp: '0x7fff·b8',
+    glowBlock: 'mb-stack',
+  },
+  {
+    title: "⑦ return result — 弹出 add() 栈帧",
+    lines: [9],
+    expTitle: "函数返回 — 恢复调用现场",
+    expHtml: `<code>return result</code> 对应指令序列：<br>
+<span class="tag t-cpu">1</span> <code>MOV RAX, [RBP-4]</code> — 把 result(30) 放入 RAX<br>
+<span class="tag t-stack">2</span> <code>LEAVE</code> — RSP = RBP, pop RBP（恢复旧帧底）<br>
+<span class="tag t-stack">3</span> <code>RET</code> — pop 返回地址 → RIP = main+35<br>
+add() 的栈帧<strong>瞬间消失</strong>（RSP 上移即可，无需清除）<br>
+返回值通过 <span class="tag t-cpu">RAX = 30</span> 传递给调用方。`,
+    regs: { RIP:'main+35', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'30', RDI:'10', RSI:'20' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧 ← SP（恢复）', ra:'返回地址: _start+N',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-alloc', text:'0x602010 [16B 已分配]', freed:false }
+    ],
+    mode: 'user',
+    cache: { l1:'hot', l2:'cold', l3:'cold' },
+    tlb: [
+      { va:'0x7fff·d0', pa:'0x1a2000', active:true },
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: { expr:'结果已在 RAX', result:'RAX = 30', computing:false },
+    mmu: 'RET 后 RIP 恢复，TLB 中栈地址继续有效',
+    brk: '0x602020',
+    sp: '0x7fff·d0',
+    glowBlock: 'mb-stack',
+  },
+  {
+    title: "⑧ *ptr = 30 — 写堆内存 + 缺页中断",
+    lines: [16],
+    expTitle: "首次访问堆地址 → Page Fault → 写入",
+    expHtml: `<code>MOV [0x602010], RAX</code> 执行过程：<br>
+<span class="tag t-tlb">TLB miss</span> 0x602010 不在 TLB → 查页表<br>
+<span class="tag t-tlb">Page Fault!</span> 页表项"不存在" → 触发缺页中断<br>
+<span class="tag t-kernel">内核</span> 分配物理页 0x3b5000，更新页表<br>
+<span class="tag t-tlb">写入 TLB</span> 0x602010 → 0x3b5000<br>
+<span class="tag t-cache">L1 write</span> 写入 L1 cache（30 写到堆地址）<br>
+这就是<strong>按需分配</strong>：malloc 只给虚拟地址，访问才给物理内存！`,
+    regs: { RIP:'main+42', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'30', RDI:'30', RSI:'0x602010' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-alloc', text:'*0x602010 = 30  [物理页 0x3b5000]', freed:false }
+    ],
+    mode: 'user',
+    cache: { l1:'write', l2:'cold', l3:'cold' },
+    tlb: [
+      { va:'0x7fff·d0', pa:'0x1a2000', active:true },
+      { va:'0x602010', pa:'0x3b5000', active:true }
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: null,
+    mmu: '⚡ Page Fault: 0x602010 无物理映射 → 内核分配物理页 → 更新页表 → TLB 写入 → 重新执行 MOV',
+    brk: '0x602020',
+    sp: '0x7fff·d0',
+    glowBlock: 'mb-heap',
+  },
+  {
+    title: "⑨ printf(\"sum=%d\\n\", *ptr) — 系统调用",
+    lines: [17],
+    expTitle: "printf → write() 系统调用 → 内核 → stdout",
+    expHtml: `<code>printf</code> 内部流程：<br>
+<span class="tag t-cpu">1</span> <strong>读 *ptr</strong>：0x602010 → TLB hit → L1 hit → 得到 30<br>
+<span class="tag t-cpu">2</span> printf <strong>格式化字符串</strong> → "sum=30\n"<br>
+<span class="tag t-kernel">3</span> 调用 <strong>write(1, buf, 8)</strong> 系统调用（syscall 指令）<br>
+<span class="tag t-kernel">内核态</span> Ring 3 → Ring 0，<strong>TLB 不清空</strong>（同进程）<br>
+<span class="tag t-kernel">4</span> 内核写 fd=1（stdout），通过 VFS → 终端驱动<br>
+<span class="tag t-kernel">5</span> 返回用户态，RAX = 写入字节数`,
+    regs: { RIP:'main+60', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'8', RDI:'1', RSI:'buf_addr' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-alloc', text:'*0x602010 = 30  (已读取)', freed:false }
+    ],
+    mode: 'kernel',
+    cache: { l1:'hot', l2:'hot', l3:'cold' },
+    tlb: [
+      { va:'0x7fff·d0', pa:'0x1a2000', active:true },
+      { va:'0x602010', pa:'0x3b5000', active:true }
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: null,
+    mmu: '0x602010 TLB hit → L1 cache hit → 读到 30，进入内核 write()，TLB 保持不变',
+    brk: '0x602020',
+    sp: '0x7fff·d0',
+    glowBlock: 'mb-kernel',
+    showSyscall: true,
+    syscallTitle: '⚙️ 系统调用: write(fd=1, buf, 8)',
+    syscallDetail: `用户态 → 内核态 (Ring 3 → Ring 0)<br><br>
+<strong>syscall</strong> 指令触发：<br>
+RIP → 保存到 RCX，跳转至内核 syscall 入口<br>
+RFLAGS → 保存到 R11<br><br>
+内核执行 sys_write()：<br>
+• 检查 fd=1 (stdout) 有效<br>
+• 把 buf 内容复制到内核空间<br>
+• 调用终端驱动，输出 "sum=30\\n"<br><br>
+<strong>sysret</strong>：从 RCX 恢复 RIP，返回用户态`,
+  },
+  {
+    title: "⑩ free(ptr) — 归还堆内存",
+    lines: [18],
+    expTitle: "free() 释放堆块（通常不归还 OS）",
+    expHtml: `<code>free(ptr)</code> 做了什么：<br>
+<span class="tag t-heap">1</span> 读取 ptr[-1] 的 <strong>malloc 元数据头</strong>（大小、标志位）<br>
+<span class="tag t-heap">2</span> 将该块标记为<strong>空闲</strong>，加入 free list<br>
+<span class="tag t-heap">3</span> 尝试与相邻空闲块<strong>合并</strong>（减少碎片）<br>
+⚠️ <strong>物理内存不释放</strong>，虚拟地址映射依然存在<br>
+⚠️ brk 指针通常不下移（glibc 策略）<br>
+<span class="tag t-kernel">只有</span> 释放的块非常大时才调用 <code>munmap()</code> 归还 OS`,
+    regs: { RIP:'main+72', RSP:'0x7fff·d0', RBP:'0x7fff·d0', RAX:'0', RDI:'0x602010', RSI:'0' },
+    stackFrames: [
+      { id:'sf-main', cls:'sf-main', title:'main() 栈帧', ra:'',
+        vars:[{n:'x',v:'10'},{n:'y',v:'20'},{n:'ptr',v:'0x602010（已free）'}] }
+    ],
+    heapBlocks: [
+      { id:'hb-0', cls:'hb-free', text:'0x602010 [已释放，在 freelist 中]', freed:true }
+    ],
+    mode: 'user',
+    cache: { l1:'hot', l2:'hot', l3:'cold' },
+    tlb: [
+      { va:'0x7fff·d0', pa:'0x1a2000', active:true },
+      { va:'0x602010', pa:'0x3b5000', active:true }
+    ],
+    dataVars: `<span style="color:#4ade80">global</span> = <span style="color:#fbbf24">42</span>`,
+    bssVars: `(无)`,
+    textFns: `<span style="color:#82aaff">add()</span>  0x400500<br><span style="color:#82aaff">main()</span> 0x400540 ← RIP`,
+    alu: null,
+    mmu: 'free() 只修改 malloc 内部数据结构，不触发系统调用，页表不变',
+    brk: '0x602020（不变）',
+    sp: '0x7fff·d0',
+    glowBlock: 'mb-heap',
+  },
+  {
+    title: "⑪ return 0 — 进程退出",
+    lines: [19],
+    expTitle: "main() 返回 → 进程清理 → OS 回收",
+    expHtml: `<code>return 0</code> 后：<br>
+<span class="tag t-stack">1</span> LEAVE + RET：弹出 main() 栈帧，跳回 <code>_start</code><br>
+<span class="tag t-kernel">2</span> CRT 调用 <code>exit(0)</code> → 系统调用 <code>exit_group(0)</code><br>
+<span class="tag t-kernel">3</span> 内核回收该进程的：<br>
+&nbsp;&nbsp;• 所有物理内存页（清空页表）<br>
+&nbsp;&nbsp;• 文件描述符<br>
+&nbsp;&nbsp;• 虚拟地址空间（所有 VMA）<br>
+<span class="tag t-tlb">TLB 全刷</span>（进程销毁，TLB 中所有条目失效）<br>
+进程从调度队列中移除，状态 → <strong>ZOMBIE → 消亡</strong>`,
+    regs: { RIP:'_start+N', RSP:'0x7fff·f0', RBP:'0', RAX:'0', RDI:'0', RSI:'0' },
+    stackFrames: [],
+    heapBlocks: [],
+    mode: 'kernel',
+    cache: { l1:'cold', l2:'cold', l3:'cold' },
+    tlb: [],
+    dataVars: `(已释放)`,
+    bssVars: `(已释放)`,
+    textFns: `(已释放)`,
+    alu: null,
+    mmu: 'exit_group() → 内核释放所有内存 → TLB flush → 进程消亡',
+    brk: '(已释放)',
+    sp: '(已清理)',
+    glowBlock: 'mb-kernel',
+    showSyscall: true,
+    syscallTitle: '⚙️ exit_group(0) — 进程退出',
+    syscallDetail: `_start 调用 exit(0) → glibc 执行 atexit() 回调<br>
+→ 刷新 stdio 缓冲区 → 调用 exit_group(0) 系统调用<br><br>
+内核执行 do_exit()：<br>
+• 给父进程发 SIGCHLD<br>
+• 关闭所有文件描述符<br>
+• 释放 mm_struct（所有虚拟内存映射）<br>
+• 所有物理页引用计数 -1（归零则释放）<br>
+• TLB 全部刷新<br><br>
+进程进入 ZOMBIE 状态，等待父进程 wait() 读取退出码`,
+  },
+];
+
+// =================== RENDER ===================
+let currentStep = 0;
+let playing = false;
+let playTimer = null;
+let prevRegs = {};
+
+function buildCode() {
+  const scroll = document.getElementById('code-scroll');
+  scroll.innerHTML = codeLines.map(l => `
+    <div class="c-line" id="cl-${l.n}">
+      <span class="line-num">${l.n}</span>
+      <span class="line-code">${l.html}</span>
+    </div>`).join('');
+}
+
+function renderStep(idx) {
+  const s = STEPS[idx];
+
+  // Badge
+  document.getElementById('badge').textContent = `步骤 ${idx+1}/${STEPS.length}`;
+  document.getElementById('step-title').textContent = s.title;
+
+  // Progress
+  const pct = ((idx+1)/STEPS.length*100).toFixed(0);
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('prog-text').textContent = `步骤 ${idx+1} / ${STEPS.length}`;
+
+  // Code highlight
+  document.querySelectorAll('.c-line').forEach(el => el.classList.remove('active'));
+  (s.lines || []).forEach(ln => {
+    const el = document.getElementById('cl-' + ln);
+    if (el) el.classList.add('active');
+  });
+
+  // Explanation
+  document.getElementById('exp-title').textContent = s.expTitle;
+  document.getElementById('exp-text').innerHTML = s.expHtml;
+
+  // Registers
+  const regNames = ['rip','rsp','rbp','rax','rdi','rsi'];
+  const regKeys  = ['RIP','RSP','RBP','RAX','RDI','RSI'];
+  regKeys.forEach((k,i) => {
+    const el = document.getElementById('v-' + regNames[i]);
+    const val = s.regs[k] || '—';
+    if (el) {
+      const changed = val !== (prevRegs[k] || '');
+      el.textContent = val;
+      el.className = 'rv' + (changed ? ' updated' : '');
+      if (changed) {
+        const item = document.getElementById('reg-' + regNames[i]);
+        if (item) { item.classList.add('flash'); setTimeout(()=>item.classList.remove('flash'), 600); }
+      }
+    }
+  });
+  prevRegs = {...s.regs};
+
+  // Mode
+  const mb = document.getElementById('mode-badge');
+  if (s.mode === 'kernel') {
+    mb.className = 'mode-badge mode-kernel';
+    mb.textContent = '🔴 内核态 (Ring 0)';
+  } else {
+    mb.className = 'mode-badge mode-user';
+    mb.textContent = '🟢 用户态 (Ring 3)';
+  }
+
+  // Stack frames
+  const sf = document.getElementById('stack-frames');
+  if ((s.stackFrames || []).length === 0) {
+    sf.innerHTML = '<div style="font-size:11px;color:#3d4166;padding:4px 0;">（无栈帧）</div>';
+  } else {
+    sf.innerHTML = s.stackFrames.map(f => `
+      <div class="sf ${f.cls} sf-enter" id="${f.id}">
+        <div class="sf-title">
+          <span style="color:${f.cls==='sf-main'?'#4ade80':'#93c5fd'}">${f.title}</span>
+        </div>
+        <div class="sf-vars">${(f.vars||[]).map(v=>`<div class="sf-var"><span class="vn">${v.n}</span>=<span class="vv">${v.v}</span></div>`).join('')}</div>
+        ${f.ra ? `<div class="sf-ra">↩ ${f.ra}</div>` : ''}
+      </div>`).join('');
+  }
+
+  // SP display
+  document.getElementById('sp-display').textContent = 'SP: ' + (s.sp || '');
+  document.getElementById('sp-arrow').textContent = s.stackFrames && s.stackFrames.length ? '↓' : '';
+
+  // Heap
+  const hi = document.getElementById('heap-items');
+  if ((s.heapBlocks || []).length === 0) {
+    hi.innerHTML = '<div style="font-size:11px;color:#3d4166;padding:4px 0;">（空，暂未分配）</div>';
+  } else {
+    hi.innerHTML = s.heapBlocks.map(h => `
+      <div class="hb ${h.cls} hb-enter" id="${h.id}">${h.text}</div>`).join('');
+  }
+  document.getElementById('brk-display').textContent = 'brk: ' + (s.brk || '');
+
+  // Segment vars
+  document.getElementById('data-vars').innerHTML = s.dataVars || '';
+  document.getElementById('bss-vars').innerHTML = s.bssVars || '';
+  document.getElementById('text-fns').innerHTML = s.textFns || '';
+
+  // Glow
+  document.querySelectorAll('.mem-block').forEach(el => {
+    el.classList.remove('glow','glow-green','glow-orange','glow-red');
+  });
+  if (s.glowBlock) {
+    const gb = document.getElementById(s.glowBlock);
+    if (gb) {
+      const cls = s.glowBlock==='mb-stack' ? 'glow-green' :
+                  s.glowBlock==='mb-heap'  ? 'glow-orange' :
+                  s.glowBlock==='mb-kernel'? 'glow-red' : 'glow';
+      gb.classList.add(cls);
+    }
+  }
+
+  // Cache
+  const cacheMap = { l1:'cache-l1', l2:'cache-l2', l3:'cache-l3' };
+  const statusMap = { l1:'cl1-status', l2:'cl2-status', l3:'cl3-status' };
+  const cacheLabels = { hot:'✅ hit', miss:'❌ miss', cold:'— cold', write:'📝 write' };
+  const cacheCls    = { hot:'cl-hot', miss:'cl-miss', cold:'cl-cold', write:'cl-write' };
+  ['l1','l2','l3'].forEach(k => {
+    const state = s.cache[k] || 'cold';
+    const el = document.getElementById(cacheMap[k]);
+    if (el) { el.className = 'cl-item ' + (cacheCls[state]||'cl-cold'); }
+    const st = document.getElementById(statusMap[k]);
+    if (st) st.textContent = cacheLabels[state] || state;
+  });
+
+  // TLB
+  const tlbEl = document.getElementById('tlb-list');
+  if ((s.tlb||[]).length === 0) {
+    tlbEl.innerHTML = '<div style="font-size:10px;color:#3d4166;">（空，已全部刷新）</div>';
+  } else {
+    tlbEl.innerHTML = s.tlb.map((t,i) => `
+      <div class="tl-item ${t.active ? 'tl-active tl-new' : 'tl-inactive'}">
+        <span class="tl-va">${t.va}</span>
+        <span class="tl-arrow">→</span>
+        <span class="tl-pa">${t.pa}</span>
+      </div>`).join('');
+  }
+
+  // ALU
+  const aluEl = document.getElementById('alu-box');
+  if (s.alu) {
+    aluEl.className = 'alu-box' + (s.alu.computing ? ' computing' : '');
+    aluEl.innerHTML = `<div class="alu-expr">${s.alu.expr}</div><div class="alu-result">${s.alu.result}</div>`;
+  } else {
+    aluEl.className = 'alu-box';
+    aluEl.innerHTML = `<div style="font-size:10px;color:#4a5568;">待机中</div>`;
+  }
+
+  // MMU
+  document.getElementById('mmu-text').textContent = s.mmu || '';
+
+  // Syscall overlay
+  if (s.showSyscall) {
+    document.getElementById('sc-title').innerHTML = s.syscallTitle;
+    document.getElementById('sc-detail').innerHTML = s.syscallDetail;
+    document.getElementById('sc-overlay').classList.add('show');
+    document.getElementById('backdrop').classList.add('show');
+  }
+
+  // Buttons
+  document.getElementById('btn-prev').disabled = idx === 0;
+  document.getElementById('btn-next').disabled = idx === STEPS.length - 1;
+
+  // Auto scroll code into view
+  const activeLine = s.lines && s.lines[0];
+  if (activeLine) {
+    const el = document.getElementById('cl-' + activeLine);
+    if (el) el.scrollIntoView({ behavior:'smooth', block:'center' });
+  }
+}
+
+function nextStep() {
+  if (currentStep < STEPS.length - 1) {
+    currentStep++;
+    renderStep(currentStep);
+  }
+}
+function prevStep() {
+  if (currentStep > 0) {
+    currentStep--;
+    renderStep(currentStep);
+  }
+}
+function resetAll() {
+  stopPlay();
+  currentStep = 0;
+  prevRegs = {};
+  renderStep(0);
+}
+function togglePlay() {
+  if (playing) { stopPlay(); return; }
+  playing = true;
+  document.getElementById('btn-play').textContent = '⏸ 暂停';
+  document.getElementById('btn-play').style.background = '#f59e0b';
+  playStep();
+}
+function playStep() {
+  if (!playing) return;
+  if (currentStep >= STEPS.length - 1) { stopPlay(); return; }
+  // Don't auto-advance if syscall is shown
+  if (STEPS[currentStep].showSyscall) { stopPlay(); return; }
+  setTimeout(() => {
+    if (!playing) return;
+    nextStep();
+    if (currentStep < STEPS.length - 1) {
+      playTimer = setTimeout(playStep, 2200);
+    } else { stopPlay(); }
+  }, STEPS[currentStep].showSyscall ? 5000 : 2200);
+}
+function stopPlay() {
+  playing = false;
+  clearTimeout(playTimer);
+  document.getElementById('btn-play').textContent = '▶ 自动播放';
+  document.getElementById('btn-play').style.background = '#22c55e';
+}
+function closeSyscall() {
+  document.getElementById('sc-overlay').classList.remove('show');
+  document.getElementById('backdrop').classList.remove('show');
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextStep(); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); prevStep(); }
+  if (e.key === 'Escape') closeSyscall();
+});
+
+// Init
+buildCode();
+renderStep(0);
+</script>
+</body>
+</html>

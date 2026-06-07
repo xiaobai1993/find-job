@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MySQL 内部操作流程 — 架构·Buffer Pool·日志落盘</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+.nav{display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px;background:#161b22;border-bottom:1px solid #30363d;position:sticky;top:0;z-index:100}
+.nav-btn{padding:7px 15px;border-radius:20px;border:1px solid #30363d;background:transparent;color:#8b949e;cursor:pointer;font-size:13px;transition:all .2s;font-family:inherit}
+.nav-btn.active,.nav-btn:hover{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.section{display:none;padding:24px 20px;max-width:1020px;margin:0 auto}
+.section.active{display:block}
+h1{font-size:22px;font-weight:700;color:#58a6ff;margin-bottom:4px}
+h2{font-size:16px;color:#79c0ff;margin:22px 0 10px}
+h3{font-size:14px;color:#ffa657;margin:16px 0 8px}
+.sub{color:#8b949e;font-size:13px;margin-bottom:20px}
+p{line-height:1.85;color:#c9d1d9;margin-bottom:10px;font-size:14px}
+code{background:#1c2333;padding:1px 6px;border-radius:4px;font-size:13px;color:#79c0ff;font-family:'Menlo','Monaco','Courier New',monospace}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px;margin-bottom:14px}
+.card.hl{border-color:#1f6feb;background:#0d1b2a}
+.tip{background:#0d1b0d;border-left:3px solid #3fb950;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-warn{background:#1b150d;border-left:3px solid #d29922;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-red{background:#1b0d0d;border-left:3px solid #f85149;border-radius:6px;padding:12px 14px;margin:12px 0}
+.tip-t{font-size:11px;font-weight:700;margin-bottom:5px;letter-spacing:.5px}
+.tip-t.g{color:#3fb950}.tip-t.y{color:#d29922}.tip-t.r{color:#f85149}
+.tip p,.tip-warn p,.tip-red p{color:#c9d1d9;font-size:13px;margin:0;line-height:1.7}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{background:#21262d;color:#79c0ff;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:8px 10px;border-bottom:1px solid #21262d;color:#c9d1d9;vertical-align:top}
+tr:hover td{background:#161b22}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.tg{color:#3fb950;background:#0d2818}.tr{color:#ff7b72;background:#3a1a1a}.ty{color:#d29922;background:#2a1a00}.tb{color:#79c0ff;background:#0d1f3a}.tp{color:#d2a8ff;background:#271052}
+
+/* btn */
+.btn{padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s;margin:4px;font-family:inherit}
+.btn-blue{background:#1f6feb;color:#fff}.btn-green{background:#238636;color:#fff}.btn-gray{background:#21262d;color:#c9d1d9;border:1px solid #30363d}.btn-red{background:#da3633;color:#fff}.btn-yellow{background:#d29922;color:#000}
+.btn:hover{opacity:.85;transform:translateY(-1px)}.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes flowRight{0%{left:-30%}100%{left:130%}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 8px rgba(31,111,235,.3)}50%{box-shadow:0 0 20px rgba(31,111,235,.7)}}
+.ani{animation:fadeIn .35s ease}
+
+/* ============ ARCH PAGE ============ */
+.arch-container{position:relative;margin:20px auto;max-width:900px}
+.arch-layer{border-radius:12px;padding:16px;margin-bottom:10px;position:relative;border:2px solid}
+.arch-server{background:#0d1f3a;border-color:#1f6feb}
+.arch-engine{background:#0d2818;border-color:#238636}
+.arch-disk{background:#1a0d0d;border-color:#da3633}
+.arch-label{position:absolute;top:-12px;left:20px;background:#0d1117;padding:0 10px;font-size:13px;font-weight:700}
+.arch-label.blue{color:#58a6ff}.arch-label.green{color:#3fb950}.arch-label.red{color:#ff7b72}
+.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:8px 0}
+.comp-box{border-radius:8px;padding:10px 12px;text-align:center;font-size:12px;border:1px solid;transition:all .3s;cursor:pointer;position:relative}
+.comp-box:hover{transform:scale(1.05);z-index:2}
+.comp-box .comp-icon{font-size:20px;margin-bottom:4px}
+.comp-box .comp-name{font-weight:700;margin-bottom:2px}
+.comp-box .comp-desc{font-size:10px;color:#8b949e;line-height:1.5}
+.cb-blue{background:#0d1f3a;border-color:#1a4a8a;color:#79c0ff}
+.cb-green{background:#0d2818;border-color:#1a6b2a;color:#3fb950}
+.cb-orange{background:#2a1a00;border-color:#8a6a1a;color:#ffa657}
+.cb-purple{background:#1a0d2a;border-color:#6a3aaa;color:#d2a8ff}
+.cb-red{background:#2a0d0d;border-color:#8a1a1a;color:#ff7b72}
+.cb-gray{background:#161b22;border-color:#30363d;color:#8b949e}
+
+/* flow arrow between layers */
+.layer-arrow{text-align:center;font-size:22px;color:#30363d;padding:4px 0;letter-spacing:8px}
+
+/* ============ UPDATE FLOW ============ */
+.flow-container{margin:16px 0}
+.flow-step{display:flex;gap:12px;align-items:flex-start;margin-bottom:6px;transition:all .3s}
+.flow-step.highlight .fs-content{border-color:#1f6feb;box-shadow:0 0 16px rgba(31,111,235,.3)}
+.flow-step.dim .fs-content{opacity:.35}
+.fs-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-top:4px}
+.fs-content{flex:1;border-radius:10px;padding:12px 14px;border:2px solid #30363d;transition:all .35s}
+.fs-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.fs-desc{font-size:12px;color:#8b949e;line-height:1.7}
+.fs-tag{margin-top:6px}
+
+.num-blue{background:#1f6feb;color:#fff}.num-green{background:#238636;color:#fff}
+.num-orange{background:#d29922;color:#000}.num-red{background:#da3633;color:#fff}
+.num-purple{background:#8957e5;color:#fff}.num-gray{background:#30363d;color:#c9d1d9}
+
+.flow-log{background:#0d1117;border-radius:8px;padding:14px;font-family:'Menlo','Monaco','Courier New',monospace;font-size:12px;color:#8b949e;line-height:2;min-height:120px;max-height:240px;overflow-y:auto;margin-top:14px;border:1px solid #21262d}
+.fl-ok{color:#3fb950}.fl-warn{color:#d29922}.fl-info{color:#79c0ff}.fl-red{color:#ff7b72}.fl-dim{color:#484f58}
+
+/* ============ BUFFER POOL ============ */
+.bp-visual{background:#0d1117;border-radius:12px;padding:20px;margin:16px 0;border:1px solid #21262d;position:relative}
+.bp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.bp-title{font-size:14px;font-weight:700;color:#58a6ff}
+.bp-stats{display:flex;gap:14px;font-size:12px}
+.bp-stat-item{display:flex;align-items:center;gap:4px}
+.bp-stat-dot{width:10px;height:10px;border-radius:3px}
+
+.bp-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-bottom:14px}
+.bp-block{height:40px;border-radius:6px;border:1px solid;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;cursor:pointer;transition:all .25s;position:relative}
+.bp-block:hover{transform:scale(1.1);z-index:2}
+.bp-block .bp-page{font-weight:700;font-size:10px}
+.bp-block .bp-state{font-size:8px;margin-top:1px}
+.bp-clean{background:#0d1f3a;border-color:#1a4a8a;color:#79c0ff}
+.bp-dirty{background:#2a1a00;border-color:#8a6a1a;color:#ffa657}
+.bp-free{background:#161b22;border-color:#21262d;color:#484f58}
+.bp-locked{background:#2a0d2a;border-color:#6a3aaa;color:#d2a8ff}
+
+/* LRU list */
+.lru-container{margin-top:16px}
+.lru-title{font-size:13px;font-weight:700;color:#ffa657;margin-bottom:8px}
+.lru-bar{display:flex;height:32px;border-radius:6px;overflow:hidden;margin-bottom:4px}
+.lru-seg{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;transition:width .5s}
+.lru-old{background:#0d2818;color:#3fb950}
+.lru-young{background:#0d1f3a;color:#79c0ff}
+.lru-midline{width:2px;background:#ff7b72}
+
+/* Flush list */
+.flush-list{margin-top:12px}
+.flush-title{font-size:13px;font-weight:700;color:#ff7b72;margin-bottom:8px}
+.flush-bar{height:28px;background:#21262d;border-radius:6px;position:relative;overflow:hidden}
+.flush-fill{height:100%;background:linear-gradient(90deg,#da3633,#d29922);border-radius:6px;transition:width .5s;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+
+/* ============ LOG STRUCTURE ============ */
+.log-struct{margin:16px 0}
+.log-row{display:flex;align-items:stretch;gap:0;margin-bottom:0;position:relative}
+.log-block{border:1px solid #30363d;padding:10px 14px;font-size:12px;position:relative;transition:all .3s;cursor:default;min-width:60px;text-align:center}
+.log-block:first-child{border-radius:8px 0 0 8px}
+.log-block:last-child{border-radius:0 8px 8px 0}
+.log-block:hover{border-color:#58a6ff;z-index:2;transform:translateY(-2px)}
+.log-block .lb-label{font-size:10px;color:#8b949e;margin-bottom:2px}
+.log-block .lb-value{font-weight:700;font-size:13px}
+.lb-blue{background:#0d1f3a;border-color:#1a4a8a;color:#79c0ff}
+.lb-green{background:#0d2818;border-color:#1a6b2a;color:#3fb950}
+.lb-orange{background:#2a1a00;border-color:#8a6a1a;color:#ffa657}
+.lb-red{background:#2a0d0d;border-color:#6a1a1a;color:#ff7b72}
+.lb-purple{background:#1a0d2a;border-color:#5a2a8a;color:#d2a8ff}
+
+/* write pattern visual */
+.write-pattern{margin:20px 0}
+.wp-row{display:flex;align-items:center;gap:16px;margin-bottom:16px}
+.wp-label{width:120px;text-align:right;font-size:13px;font-weight:700;flex-shrink:0}
+.wp-visual{flex:1;position:relative;height:60px;background:#0d1117;border:1px solid #21262d;border-radius:8px;overflow:hidden}
+.wp-block-row{display:flex;height:100%}
+.wp-sector{flex:1;border-right:1px solid #21262d;position:relative;display:flex;align-items:center;justify-content:center;font-size:9px;color:#484f58}
+.wp-sector .sector-num{font-size:10px}
+.wp-sector.written{background:#1f6feb33;color:#79c0ff}
+.wp-sector.written .sector-num{color:#79c0ff;font-weight:700}
+.wp-sector.dirty-flush{background:#d2992233;color:#ffa657}
+.wp-sector.dirty-flush .sector-num{color:#ffa657;font-weight:700}
+
+/* write head indicator */
+.wp-head{position:absolute;top:0;bottom:0;width:2px;background:#3fb950;z-index:3;transition:left .4s}
+.wp-head::after{content:'写入头';position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:10px;color:#3fb950;white-space:nowrap}
+
+/* disk platter visual */
+.disk-platter{width:200px;height:200px;border-radius:50%;border:3px solid #30363d;position:relative;margin:0 auto;background:radial-gradient(circle,#161b22 0%,#0d1117 70%)}
+.disk-track{position:absolute;border-radius:50%;border:1px dashed #21262d}
+.disk-head{position:absolute;width:4px;height:30px;background:#3fb950;top:50%;transform-origin:center -50px;transition:transform .4s}
+.disk-center{position:absolute;width:30px;height:30px;border-radius:50%;background:#30363d;top:50%;left:50%;transform:translate(-50%,-50%)}
+.disk-label{position:absolute;bottom:-24px;left:50%;transform:translateX(-50%);font-size:11px;color:#8b949e;white-space:nowrap}
+
+/* ============ COMPARE ============ */
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}
+@media(max-width:700px){.compare-grid{grid-template-columns:1fr}}
+.compare-card{border-radius:10px;padding:18px;border:2px solid}
+.cc-seq{background:#0d1f3a;border-color:#1f6feb}
+.cc-rand{background:#2a1a00;border-color:#d29922}
+.cc-title{font-size:15px;font-weight:700;margin-bottom:10px}
+.cc-seq .cc-title{color:#58a6ff}.cc-rand .cc-title{color:#ffa657}
+
+/* animated flow line */
+.flow-line{position:relative;height:4px;background:#21262d;border-radius:2px;margin:10px 0;overflow:hidden}
+.flow-line .fl-anim{position:absolute;top:0;height:100%;width:30%;border-radius:2px;animation:flowRight 1.5s linear infinite}
+.fl-anim-blue{background:linear-gradient(90deg,transparent,#1f6feb,transparent)}
+.fl-anim-orange{background:linear-gradient(90deg,transparent,#d29922,transparent)}
+
+/* tooltip */
+.tooltip{display:none;position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#21262d;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:11px;color:#c9d1d9;line-height:1.7;z-index:50;width:220px;text-align:left;pointer-events:none}
+.comp-box:hover .tooltip,.bp-block:hover .tooltip{display:block}
+.tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#30363d}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<div class="nav">
+  <button class="nav-btn active" onclick="show('arch')">① 整体架构</button>
+  <button class="nav-btn" onclick="show('update')">② UPDATE 流程</button>
+  <button class="nav-btn" onclick="show('select')">③ SELECT 流程</button>
+  <button class="nav-btn" onclick="show('bufpool')">④ Buffer Pool</button>
+  <button class="nav-btn" onclick="show('logstruct')">⑤ 日志结构</button>
+  <button class="nav-btn" onclick="show('seqvsrand')">⑥ 顺序写 vs 随机写</button>
+</div>
+
+<!-- ============ ① 整体架构 ============ -->
+<div id="s-arch" class="section active">
+  <h1>① MySQL 整体架构：Server 层 + 存储引擎层</h1>
+  <p class="sub">MySQL 采用可插拔存储引擎架构，Server 层负责 SQL 解析与优化，引擎层负责存储与读写</p>
+
+  <div class="arch-container">
+    <!-- Client -->
+    <div style="text-align:center;margin-bottom:8px">
+      <span style="background:#21262d;border:1px solid #30363d;padding:8px 24px;border-radius:8px;font-size:13px;color:#8b949e">客户端 (JDBC / Navicat / CLI)</span>
+    </div>
+    <div class="layer-arrow">▼ ▼ ▼</div>
+
+    <!-- Server Layer -->
+    <div class="arch-layer arch-server">
+      <span class="arch-label blue">Server 层 — 所有引擎共享</span>
+      <div class="comp-grid">
+        <div class="comp-box cb-blue">
+          <div class="comp-icon">🔗</div>
+          <div class="comp-name">连接器</div>
+          <div class="comp-desc">认证·权限·连接池</div>
+          <div class="tooltip"><b>连接器</b>：验证用户身份，管理连接。show processlist 可看连接。长连接占用内存，8小时默认断开</div>
+        </div>
+        <div class="comp-box cb-blue">
+          <div class="comp-icon">🔍</div>
+          <div class="comp-name">查询缓存</div>
+          <div class="comp-desc">8.0已移除</div>
+          <div class="tooltip"><b>查询缓存</b>：按 SQL 原文做 key 缓存结果。写频繁时失效率高，8.0 彻底删除。推荐用 Redis 替代</div>
+        </div>
+        <div class="comp-box cb-blue">
+          <div class="comp-icon">📝</div>
+          <div class="comp-name">解析器</div>
+          <div class="comp-desc">词法·语法分析→AST</div>
+          <div class="tooltip"><b>解析器</b>：词法分析拆分关键字/表名/列名，语法分析生成 AST。SQL 写错在这里报 1064 错误</div>
+        </div>
+        <div class="comp-box cb-blue">
+          <div class="comp-icon">🧹</div>
+          <div class="comp-name">预处理器</div>
+          <div class="comp-desc">表/列权限检查</div>
+          <div class="tooltip"><b>预处理器</b>：检查表和列是否存在、用户是否有 SELECT/UPDATE 权限。解析阶段的语义检查</div>
+        </div>
+        <div class="comp-box cb-orange">
+          <div class="comp-icon">🧠</div>
+          <div class="comp-name">优化器</div>
+          <div class="comp-desc">选索引·决定执行计划</div>
+          <div class="tooltip"><b>优化器</b>：选择索引、决定 JOIN 顺序、是否走范围扫描。基于代价估算(cost-based)。explain 查看其决策</div>
+        </div>
+        <div class="comp-box cb-purple">
+          <div class="comp-icon">⚡</div>
+          <div class="comp-name">执行器</div>
+          <div class="comp-desc">调用引擎接口·返回行</div>
+          <div class="tooltip"><b>执行器</b>：根据执行计划调用引擎 API (如 index_read/scan)。慢查询日志记录执行耗时。先查权限再执行</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-arrow">▼ API 调用 ▼</div>
+
+    <!-- Engine Layer -->
+    <div class="arch-layer arch-engine">
+      <span class="arch-label green">存储引擎层 — InnoDB (默认)</span>
+      <div class="comp-grid">
+        <div class="comp-box cb-green">
+          <div class="comp-icon">💾</div>
+          <div class="comp-name">Buffer Pool</div>
+          <div class="comp-desc">数据页·索引页缓存</div>
+          <div class="tooltip"><b>Buffer Pool</b>：缓存数据页和索引页，避免每次读磁盘。LRU 淘汰策略(改良版，冷热分区)。默认 128MB，生产建议 60-80% 物理内存</div>
+        </div>
+        <div class="comp-box cb-green">
+          <div class="comp-icon">📖</div>
+          <div class="comp-name">Change Buffer</div>
+          <div class="comp-desc">非唯一二级索引变更</div>
+          <div class="tooltip"><b>Change Buffer</b>：对非唯一二级索引的 DML 不立即读页，先缓存变更。后台 merge 到索引页。减少随机读</div>
+        </div>
+        <div class="comp-box cb-green">
+          <div class="comp-icon">📊</div>
+          <div class="comp-name">自适应哈希</div>
+          <div class="comp-desc">AHI·热点页加速</div>
+          <div class="tooltip"><b>自适应哈希索引(AHI)</b>：InnoDB 自动对频繁访问的索引页建立哈希索引，将 B+ 树查找降为 O(1)。不可手动配置</div>
+        </div>
+        <div class="comp-box cb-green">
+          <div class="comp-icon">🔄</div>
+          <div class="comp-name">Log Buffer</div>
+          <div class="comp-desc">Redo 日志缓冲区</div>
+          <div class="tooltip"><b>Log Buffer</b>：Redo log 先写内存缓冲区，再按策略刷到 redo log file。innodb_log_buffer_size 默认 16MB</div>
+        </div>
+        <div class="comp-box cb-orange">
+          <div class="comp-icon">📕</div>
+          <div class="comp-name">Redo Log</div>
+          <div class="comp-desc">WAL·崩溃恢复</div>
+          <div class="tooltip"><b>Redo Log</b>：WAL 机制，先写日志再写数据。保证持久性(D)。循环写，顺序追加。ib_logfile0/1</div>
+        </div>
+        <div class="comp-box cb-red">
+          <div class="comp-icon">📗</div>
+          <div class="comp-name">Undo Log</div>
+          <div class="comp-desc">回滚·MVCC</div>
+          <div class="tooltip"><b>Undo Log</b>：记录数据修改前的旧值。用于回滚(Rollback)和 MVCC 读旧版本。存在系统表空间/undo表空间中</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-arrow">▼ fsync / pwrite ▼</div>
+
+    <!-- Disk Layer -->
+    <div class="arch-layer arch-disk">
+      <span class="arch-label red">磁盘 — 持久化存储</span>
+      <div class="comp-grid">
+        <div class="comp-box cb-red">
+          <div class="comp-icon">💿</div>
+          <div class="comp-name">数据文件</div>
+          <div class="comp-desc">.ibd 表空间文件</div>
+          <div class="tooltip"><b>数据文件</b>：每个表一个 .ibd 文件(InnoDB file-per-table)。存储 B+ 树数据页(16KB)和索引页。脏页随机写落盘</div>
+        </div>
+        <div class="comp-box cb-red">
+          <div class="comp-icon">📋</div>
+          <div class="comp-name">Redo Log File</div>
+          <div class="comp-desc">ib_logfile0/1</div>
+          <div class="tooltip"><b>Redo Log File</b>：两个文件循环写，顺序追加。write pos 追赶 checkpoint。crash 后从此恢复</div>
+        </div>
+        <div class="comp-box cb-gray">
+          <div class="comp-icon">📁</div>
+          <div class="comp-name">系统表空间</div>
+          <div class="comp-desc">ibdata1</div>
+          <div class="tooltip"><b>系统表空间</b>：ibdata1 存储 Change Buffer、数据字典、双写缓冲(Doublewrite Buffer)。undo log 在 5.6+ 可独立表空间</div>
+        </div>
+        <div class="comp-box cb-gray">
+          <div class="comp-icon">🔐</div>
+          <div class="comp-name">Doublewrite</div>
+          <div class="comp-desc">双写缓冲·防页撕裂</div>
+          <div class="tooltip"><b>Doublewrite Buffer</b>：脏页落盘前先写一份到共享表空间的连续 2MB 区域。防止写一半断电导致页撕裂(partial write)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tip">
+    <div class="tip-t g">面试关键点</div>
+    <p>Server 层的组件是所有存储引擎共享的，执行器通过统一的 handler API 调用引擎。所以 <b>一条 SQL 的解析、优化在 Server 层</b>，而<b>数据的读写、事务、锁在引擎层</b>。binlog 在 Server 层，redo/undo log 在引擎层。</p>
+  </div>
+</div>
+
+<!-- ============ ② UPDATE 流程 ============ -->
+<div id="s-update" class="section">
+  <h1>② UPDATE 执行流程 — 从 SQL 到磁盘</h1>
+  <p class="sub">以 <code>UPDATE accounts SET balance = balance - 100 WHERE id = 1</code> 为例，逐步演示</p>
+
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+      <button class="btn btn-blue" onclick="updateStep(-1)">上一步</button>
+      <button class="btn btn-green" onclick="updateStep(1)">下一步</button>
+      <button class="btn btn-gray" onclick="updateReset()">重置</button>
+      <span id="update-counter" style="margin-left:12px;font-size:13px;color:#8b949e">步骤 0/12</span>
+    </div>
+  </div>
+
+  <div class="flow-container" id="update-flow">
+    <!-- Step 1 -->
+    <div class="flow-step dim" data-step="1">
+      <div class="fs-num num-blue">1</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">连接器 — 认证 & 获取连接</div>
+        <div class="fs-desc">客户端 TCP 连接到 MySQL，连接器验证用户名密码，从权限表加载权限。连接建立后保持，show processlist 可见。</div>
+        <div class="fs-tag"><span class="tag tb">Server 层</span><span class="tag tg">内存</span></div>
+      </div>
+    </div>
+    <!-- Step 2 -->
+    <div class="flow-step dim" data-step="2">
+      <div class="fs-num num-blue">2</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">解析器 — 词法/语法分析</div>
+        <div class="fs-desc">词法分析识别 UPDATE/accounts/SET/balance/WHERE/id 等关键字和标识符；语法分析构建 AST 语法树。SQL 有语法错误在此报 1064。</div>
+        <div class="fs-tag"><span class="tag tb">Server 层</span></div>
+      </div>
+    </div>
+    <!-- Step 3 -->
+    <div class="flow-step dim" data-step="3">
+      <div class="fs-num num-blue">3</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">预处理器 — 语义检查</div>
+        <div class="fs-desc">检查表 accounts 是否存在、列 balance 是否存在、用户是否有 UPDATE 权限。解析阶段会同时展开 * 和视图。</div>
+        <div class="fs-tag"><span class="tag tb">Server 层</span></div>
+      </div>
+    </div>
+    <!-- Step 4 -->
+    <div class="flow-step dim" data-step="4">
+      <div class="fs-num num-orange">4</div>
+      <div class="fs-content" style="background:#2a1a00">
+        <div class="fs-title" style="color:#ffa657">优化器 — 选择执行计划</div>
+        <div class="fs-desc">决定走 id 主键索引还是全表扫描。此处 id=1 有主键索引，选择 <code>index_read</code> 精确匹配。生成执行计划。</div>
+        <div class="fs-tag"><span class="tag tb">Server 层</span><span class="tag ty">CBO 优化</span></div>
+      </div>
+    </div>
+    <!-- Step 5 -->
+    <div class="flow-step dim" data-step="5">
+      <div class="fs-num num-purple">5</div>
+      <div class="fs-content" style="background:#1a0d2a">
+        <div class="fs-title" style="color:#d2a8ff">执行器 — 调用引擎读取数据页</div>
+        <div class="fs-desc">执行器调用 InnoDB handler 的 index_read() 接口。InnoDB 先查 Buffer Pool，命中直接返回；未命中则从磁盘 .ibd 文件加载 16KB 数据页到 Buffer Pool。</div>
+        <div class="fs-tag"><span class="tag tb">Server→引擎</span><span class="tag tg">Buffer Pool</span></div>
+      </div>
+    </div>
+    <!-- Step 6 -->
+    <div class="flow-step dim" data-step="6">
+      <div class="fs-num num-green">6</div>
+      <div class="fs-content" style="background:#0d2818">
+        <div class="fs-title" style="color:#3fb950">InnoDB — 记录 Undo Log (旧值)</div>
+        <div class="fs-desc">将 id=1 的旧行 (balance=500) 写入 Undo Log。用于回滚和 MVCC 版本链。Undo Log 写入 Buffer Pool 中的 undo 页，同时产生 redo。</div>
+        <div class="fs-tag"><span class="tag tg">引擎层</span><span class="tag tr">Undo Log</span></div>
+      </div>
+    </div>
+    <!-- Step 7 -->
+    <div class="flow-step dim" data-step="7">
+      <div class="fs-num num-green">7</div>
+      <div class="fs-content" style="background:#0d2818">
+        <div class="fs-title" style="color:#3fb950">InnoDB — 更新 Buffer Pool 中的数据页</div>
+        <div class="fs-desc">在内存中修改 balance = 400。此时数据页变为<b>脏页</b>（内存与磁盘不一致）。数据页标记为 dirty，加入 Flush List。</div>
+        <div class="fs-tag"><span class="tag tg">引擎层</span><span class="tag ty">脏页</span><span class="tag tg">内存操作</span></div>
+      </div>
+    </div>
+    <!-- Step 8 -->
+    <div class="flow-step dim" data-step="8">
+      <div class="fs-num num-green">8</div>
+      <div class="fs-content" style="background:#0d2818">
+        <div class="fs-title" style="color:#3fb950">InnoDB — 写 Redo Log (WAL)</div>
+        <div class="fs-desc">将修改记录写入 Log Buffer，再根据 <code>innodb_flush_log_at_trx_commit</code> 策略刷盘：<br>• <b>=1</b>(默认)：每次提交 fsync 到 redo file → 不丢数据<br>• =2：每次提交 write 到 OS cache → OS 崩溃丢 1s<br>• =0：每秒刷 → 丢 1s 数据</div>
+        <div class="fs-tag"><span class="tag tg">引擎层</span><span class="tag tb">Redo Log</span><span class="tag ty">WAL</span></div>
+      </div>
+    </div>
+    <!-- Step 9 -->
+    <div class="flow-step dim" data-step="9">
+      <div class="fs-num num-blue">9</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">Server 层 — 写 Binlog</div>
+        <div class="fs-desc">执行器写入 binlog。记录逻辑变更(行变更或语句)。用于主从复制和 PITR 点恢复。binlog 写入 OS cache 后 fsync（sync_binlog 控制）。<br>两阶段提交：先 prepare(redo)，再写 binlog，最后 commit(redo)。</div>
+        <div class="fs-tag"><span class="tag tb">Server 层</span><span class="tag tp">Binlog</span><span class="tag ty">2PC</span></div>
+      </div>
+    </div>
+    <!-- Step 10 -->
+    <div class="flow-step dim" data-step="10">
+      <div class="fs-num num-green">10</div>
+      <div class="fs-content" style="background:#0d2818">
+        <div class="fs-title" style="color:#3fb950">InnoDB — Commit (Redo 记录 commit 状态)</div>
+        <div class="fs-desc">Redo log 写入 commit 标记，事务正式提交。两阶段提交完成。客户端收到 "OK" 响应。此时数据仍在 Buffer Pool 脏页中，尚未落盘。</div>
+        <div class="fs-tag"><span class="tag tg">引擎层</span><span class="tag tb">Redo Log</span><span class="tag tp">2PC完成</span></div>
+      </div>
+    </div>
+    <!-- Step 11 -->
+    <div class="flow-step dim" data-step="11">
+      <div class="fs-num num-orange">11</div>
+      <div class="fs-content" style="background:#2a1a00">
+        <div class="fs-title" style="color:#ffa657">后台线程 — 脏页刷盘 (随机写)</div>
+        <div class="fs-desc">Page Cleaner Thread 或 LRU 淘汰时，将 Buffer Pool 中的脏页 <code>pwrite()</code> 写回磁盘 .ibd 文件。<b>脏页落盘是随机写</b>，因为不同脏页属于不同的表空间位置，无法顺序。<br>刷盘前先写 Doublewrite Buffer 防页撕裂。</div>
+        <div class="fs-tag"><span class="tag tg">后台线程</span><span class="tag ty">随机写</span><span class="tag tr">磁盘</span></div>
+      </div>
+    </div>
+    <!-- Step 12 -->
+    <div class="flow-step dim" data-step="12">
+      <div class="fs-num num-gray">12</div>
+      <div class="fs-content" style="background:#161b22">
+        <div class="fs-title" style="color:#8b949e">Checkpoint — 推进 Redo Log</div>
+        <div class="fs-desc">脏页落盘后，InnoDB 推进 checkpoint，标记这部分 redo log 可以被覆盖。write pos 和 checkpoint 之间的距离就是可用的 redo 空间。</div>
+        <div class="fs-tag"><span class="tag tg">后台</span><span class="tag tb">Redo Log</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log Panel -->
+  <div class="flow-log" id="update-log">点击 <b>下一步</b> 开始逐步演示 UPDATE 流程...</div>
+</div>
+
+<!-- ============ ③ SELECT 流程 ============ -->
+<div id="s-select" class="section">
+  <h1>③ SELECT 执行流程 — 数据读取路径</h1>
+  <p class="sub">以 <code>SELECT * FROM accounts WHERE id = 1</code> 为例</p>
+
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+      <button class="btn btn-blue" onclick="selectStep(-1)">上一步</button>
+      <button class="btn btn-green" onclick="selectStep(1)">下一步</button>
+      <button class="btn btn-gray" onclick="selectReset()">重置</button>
+      <span id="select-counter" style="margin-left:12px;font-size:13px;color:#8b949e">步骤 0/7</span>
+    </div>
+  </div>
+
+  <div class="flow-container" id="select-flow">
+    <div class="flow-step dim" data-step="1">
+      <div class="fs-num num-blue">1</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">连接器 — 认证 (同 UPDATE)</div>
+        <div class="fs-desc">从连接池取连接，验证权限。SELECT 权限在此阶段检查。</div>
+      </div>
+    </div>
+    <div class="flow-step dim" data-step="2">
+      <div class="fs-num num-blue">2</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">查询缓存 (仅 5.7 及以前)</div>
+        <div class="fs-desc">以 SQL 语句为 key 查缓存。命中直接返回。但表有更新就失效，8.0 已删除此功能。<br>面试提一嘴就行，别展开。</div>
+      </div>
+    </div>
+    <div class="flow-step dim" data-step="3">
+      <div class="fs-num num-blue">3</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">解析器 + 预处理器</div>
+        <div class="fs-desc">语法分析 → AST → 语义检查(表/列/权限)。</div>
+      </div>
+    </div>
+    <div class="flow-step dim" data-step="4">
+      <div class="fs-num num-orange">4</div>
+      <div class="fs-content" style="background:#2a1a00">
+        <div class="fs-title" style="color:#ffa657">优化器 — 选择访问路径</div>
+        <div class="fs-desc">id=1 走主键索引(cost 最小)。如果是 <code>SELECT * FROM accounts WHERE name = 'Alice'</code> 则要看 name 列有没有索引、回表代价等。</div>
+      </div>
+    </div>
+    <div class="flow-step dim" data-step="5">
+      <div class="fs-num num-purple">5</div>
+      <div class="fs-content" style="background:#1a0d2a">
+        <div class="fs-title" style="color:#d2a8ff">执行器 — 调引擎 index_read()</div>
+        <div class="fs-desc">InnoDB 先查 Buffer Pool → 命中直接返回行数据(内存读取，微秒级)；未命中 → 从磁盘 .ibd 加载 16KB 页到 Buffer Pool → 再从页中提取行。</div>
+        <div class="fs-tag"><span class="tag tg">Buffer Pool</span></div>
+      </div>
+    </div>
+    <div class="flow-step dim" data-step="6">
+      <div class="fs-num num-green">6</div>
+      <div class="fs-content" style="background:#0d2818">
+        <div class="fs-title" style="color:#3fb950">MVCC 可见性判断</div>
+        <div class="fs-desc">RR/RC 隔离级别下，根据事务的 ReadView 判断当前版本是否可见。不可见则沿 Undo Log 版本链找旧版本。<br>SELECT 不加锁(快照读)，当前读(LOCK IN SHARE MODE)加行锁。</div>
+        <div class="fs-tag"><span class="tag tg">MVCC</span><span class="tag tr">Undo Log</span></div>
+      </div>
+    </div>
+    <div class="flow-step dim" data-step="7">
+      <div class="fs-num num-blue">7</div>
+      <div class="fs-content" style="background:#0d1f3a">
+        <div class="fs-title" style="color:#58a6ff">返回结果集</div>
+        <div class="fs-desc">执行器将行数据加入结果集，最终返回给客户端。SELECT 不写 redo/undo/binlog（纯读操作）。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-log" id="select-log">点击 <b>下一步</b> 开始逐步演示 SELECT 流程...</div>
+
+  <div class="tip" style="margin-top:16px">
+    <div class="tip-t g">SELECT vs UPDATE 关键区别</div>
+    <p>SELECT 不涉及 Undo/Redo/Binlog 写入。SELECT 最大的性能变量是<b>是否命中 Buffer Pool</b>。未命中则产生磁盘随机读(IO 瓶颈)。</p>
+  </div>
+</div>
+
+<!-- ============ ④ Buffer Pool ============ -->
+<div id="s-bufpool" class="section">
+  <h1>④ Buffer Pool — InnoDB 的内存核心</h1>
+  <p class="sub">Buffer Pool 是 InnoDB 最重要的内存结构，缓存数据页/索引页/undo页/自适应哈希等</p>
+
+  <div class="bp-visual">
+    <div class="bp-header">
+      <div class="bp-title">Buffer Pool 模拟 (16KB × 32 页)</div>
+      <div class="bp-stats">
+        <div class="bp-stat-item"><div class="bp-stat-dot" style="background:#1f6feb"></div>干净页</div>
+        <div class="bp-stat-item"><div class="bp-stat-dot" style="background:#d29922"></div>脏页</div>
+        <div class="bp-stat-item"><div class="bp-stat-dot" style="background:#8957e5"></div>被锁定</div>
+        <div class="bp-stat-item"><div class="bp-stat-dot" style="background:#21262d"></div>空闲</div>
+      </div>
+    </div>
+    <div class="bp-grid" id="bp-grid"></div>
+
+    <!-- LRU -->
+    <div class="lru-container">
+      <div class="lru-title">改良 LRU 链 (冷热分离，防全表扫描污染)</div>
+      <div class="lru-bar">
+        <div class="lru-seg lru-old" style="width:37.5%">Old 区 (5/8 分割点左侧)</div>
+        <div class="lru-seg lru-young" style="width:62.5%">Young 区 (热数据)</div>
+      </div>
+      <p style="font-size:11px;color:#8b949e;margin-top:4px">新读入的页先放 Old 区头部，存活超过 <code>innodb_old_blocks_time</code>(默认1s) 才移入 Young 区。防止一次扫描就把热数据挤走。</p>
+    </div>
+
+    <!-- Flush List -->
+    <div class="flush-list">
+      <div class="flush-title">Flush List (脏页链表)</div>
+      <div class="flush-bar">
+        <div class="flush-fill" id="flush-fill" style="width:0%">0 脏页</div>
+      </div>
+      <p style="font-size:11px;color:#8b949e;margin-top:4px">修改后变脏页，加入 Flush List。后台 Page Cleaner 线程按策略刷盘。脏页比例超 <code>innodb_max_dirty_pages_pct</code>(默认90%) 触发激进刷盘。</p>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
+    <button class="btn btn-green" onclick="bpSimRead()">模拟读页</button>
+    <button class="btn btn-orange" onclick="bpSimWrite()" style="background:#d29922;color:#000">模拟写页(产生脏页)</button>
+    <button class="btn btn-red" onclick="bpSimFlush()">模拟刷盘(脏页→磁盘)</button>
+    <button class="btn btn-gray" onclick="bpSimReset()">重置</button>
+  </div>
+
+  <div class="flow-log" id="bp-log">Buffer Pool 模拟日志...</div>
+
+  <h2>Buffer Pool 中的数据结构</h2>
+  <table>
+    <tr><th>数据结构</th><th>作用</th><th>说明</th></tr>
+    <tr><td><code>LRU List</code></td><td>页面淘汰</td><td>改良版 LRU，冷热分区 (37.5% old / 62.5% young)，防止预读和全表扫描污染</td></tr>
+    <tr><td><code>Flush List</code></td><td>脏页管理</td><td>按修改时间排序的脏页链表，Page Cleaner 线程遍历此链表刷盘</td></tr>
+    <tr><td><code>Free List</code></td><td>空闲页管理</td><td>初始化时所有页都在 Free List，分配后移到 LRU List</td></tr>
+    <tr><td><code>page_hash</code></td><td>快速定位页</td><td>按 (space_id, page_no) 哈希，O(1) 判断页是否在 Buffer Pool 中</td></tr>
+  </table>
+
+  <div class="tip">
+    <div class="tip-t g">面试必答</div>
+    <p>Buffer Pool 的大小直接决定数据库性能。<b>缓存命中率</b>是关键指标 (SHOW STATUS LIKE 'Innodb_buffer_pool_read%')。命中率 < 99% 说明内存不够，需要扩容或优化 SQL。</p>
+  </div>
+</div>
+
+<!-- ============ ⑤ 日志结构 ============ -->
+<div id="s-logstruct" class="section">
+  <h1>⑤ 日志结构详解 — Redo / Undo / Binlog</h1>
+  <p class="sub">三种日志各司其职，理解结构才能理解写入模式</p>
+
+  <!-- Redo Log Structure -->
+  <h2>Redo Log 结构</h2>
+  <div class="card">
+    <p>Redo Log 由一组固定大小的文件组成（默认 ib_logfile0 + ib_logfile1），<b>循环写入</b>，顺序追加。</p>
+
+    <h3>物理层面：Redo Log File 布局</h3>
+    <div style="margin:14px 0">
+      <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap">
+        <div class="log-block lb-blue" style="min-width:100px"><div class="lb-label">Log Header</div><div class="lb-value">512B</div></div>
+        <div class="log-block lb-green" style="min-width:120px"><div class="lb-label">Block 0</div><div class="lb-value">512B</div></div>
+        <div class="log-block lb-green" style="min-width:120px"><div class="lb-label">Block 1</div><div class="lb-value">512B</div></div>
+        <div class="log-block lb-green" style="min-width:120px"><div class="lb-label">Block 2</div><div class="lb-value">512B</div></div>
+        <div class="log-block" style="min-width:40px;background:#21262d;border-color:#30363d;color:#484f58"><div class="lb-value">...</div></div>
+        <div class="log-block lb-green" style="min-width:120px"><div class="lb-label">Block N</div><div class="lb-value">512B</div></div>
+      </div>
+      <p style="font-size:11px;color:#8b949e;margin-top:6px">整个 redo log file 由 512B 的 block 组成（和磁盘扇区大小对齐，保证原子写入）</p>
+    </div>
+
+    <h3>每个 Redo Block (512B) 内部结构</h3>
+    <div style="margin:14px 0">
+      <div style="display:flex;align-items:stretch;gap:0">
+        <div class="log-block lb-blue" style="min-width:80px"><div class="lb-label">Block Header</div><div class="lb-value">12B</div></div>
+        <div class="log-block lb-green" style="min-width:200px"><div class="lb-label">Redo Records</div><div class="lb-value">~496B 有效载荷</div></div>
+        <div class="log-block lb-orange" style="min-width:60px"><div class="lb-label">Block Trailer</div><div class="lb-value">4B</div></div>
+      </div>
+    </div>
+
+    <h3>Block Header (12B)</h3>
+    <table>
+      <tr><th>字段</th><th>大小</th><th>说明</th></tr>
+      <tr><td><code>LOG_BLOCK_HDR_NO</code></td><td>4B</td><td>Block 编号，递增</td></tr>
+      <tr><td><code>LOG_BLOCK_HDR_DATA_LEN</code></td><td>2B</td><td>Block 中已写入的字节数</td></tr>
+      <tr><td><code>LOG_BLOCK_FIRST_REC_GROUP</code></td><td>2B</td><td>本 block 中第一个 redo record group 的偏移量</td></tr>
+      <tr><td><code>LOG_BLOCK_CHECKPOINT_NO</code></td><td>4B</td><td>最近一次 checkpoint 的编号</td></tr>
+    </table>
+
+    <h3>每条 Redo Record (MLOG_REC_UPDATE 等)</h3>
+    <div style="margin:14px 0">
+      <div style="display:flex;align-items:stretch;gap:0;flex-wrap:wrap">
+        <div class="log-block lb-purple" style="min-width:60px"><div class="lb-label">Type</div><div class="lb-value">1B</div></div>
+        <div class="log-block lb-purple" style="min-width:80px"><div class="lb-label">Space ID</div><div class="lb-value">4B</div></div>
+        <div class="log-block lb-purple" style="min-width:80px"><div class="lb-label">Page No</div><div class="lb-value">4B</div></div>
+        <div class="log-block lb-green" style="min-width:140px"><div class="lb-label">Offset + Length</div><div class="lb-value">变长</div></div>
+        <div class="log-block lb-orange" style="min-width:120px"><div class="lb-label">修改后数据</div><div class="lb-value">变长</div></div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:#8b949e">Type 标识操作类型（如 MLOG_REC_UPDATE=24 修改行, MLOG_WRITE_STRING=30 写字符串）；Space ID + Page No 定位<b>哪个表的哪个页</b>；后面是具体的修改内容。</p>
+
+    <h3>循环写示意图</h3>
+    <div style="background:#0d1117;border-radius:10px;padding:20px;margin:14px 0;border:1px solid #21262d">
+      <div style="position:relative;height:40px;background:#161b22;border-radius:20px;overflow:hidden;border:1px solid #30363d">
+        <div id="redo-written1" style="position:absolute;left:0;top:0;height:100%;background:#1f6feb44;border-right:2px solid #3fb950;transition:width .5s" title="已写入"></div>
+        <div id="redo-free1" style="position:absolute;right:0;top:0;height:100%;background:#21262d33;transition:width .5s" title="空闲"></div>
+        <div style="position:absolute;top:50%;transform:translateY(-50%);left:10px;font-size:10px;color:#79c0ff;font-weight:700">write pos ↓</div>
+        <div id="redo-ckpt-label" style="position:absolute;top:50%;transform:translateY(-50%);right:10px;font-size:10px;color:#ff7b72;font-weight:700">checkpoint ↓</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#484f58">
+        <span>ib_logfile0</span><span>ib_logfile1</span>
+      </div>
+      <p style="font-size:11px;color:#8b949e;margin-top:8px">write pos 顺序追加 → 到文件尾跳到另一个文件开头 → 追上 checkpoint 则需等待刷脏推进</p>
+    </div>
+  </div>
+
+  <!-- Undo Log -->
+  <h2>Undo Log 结构</h2>
+  <div class="card">
+    <p>Undo Log 记录数据的<b>旧值</b>，用于事务回滚和 MVCC 版本链。</p>
+    <h3>Undo Record 结构</h3>
+    <div style="margin:14px 0">
+      <div style="display:flex;align-items:stretch;gap:0;flex-wrap:wrap">
+        <div class="log-block lb-red" style="min-width:80px"><div class="lb-label">Type</div><div class="lb-value">TRX_UNDO_UPD</div></div>
+        <div class="log-block lb-red" style="min-width:60px"><div class="lb-label">Undo No</div><div class="lb-value">递增</div></div>
+        <div class="log-block lb-red" style="min-width:80px"><div class="lb-label">Table ID</div><div class="lb-value">8B</div></div>
+        <div class="log-block lb-red" style="min-width:100px"><div class="lb-label">Key (主键)</div><div class="lb-value">变长</div></div>
+        <div class="log-block lb-orange" style="min-width:140px"><div class="lb-label">旧值 (修改前列)</div><div class="lb-value">变长</div></div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:#8b949e">DELETE 操作记录整行旧值；UPDATE 只记录修改列的旧值 + 主键；INSERT 记录主键(回滚时 DELETE)。</p>
+
+    <h3>存储位置</h3>
+    <table>
+      <tr><th>MySQL 版本</th><th>Undo Log 存储位置</th><th>说明</th></tr>
+      <tr><td>5.6 以前</td><td>ibdata1 (系统表空间)</td><td>Undo 和数据混在一起，无法独立扩展</td></tr>
+      <tr><td>5.6+</td><td>独立 Undo 表空间</td><td><code>innodb_undo_tablespaces</code>，可独立回收</td></tr>
+      <tr><td>8.0+</td><td>独立 Undo 表空间(默认)</td><td>自动创建，支持在线回收 purge</td></tr>
+    </table>
+  </div>
+
+  <!-- Binlog -->
+  <h2>Binlog 结构</h2>
+  <div class="card">
+    <p>Binlog 是 Server 层的逻辑日志，按<b>事件(Event)</b>组织。</p>
+    <h3>Binlog 文件结构</h3>
+    <div style="margin:14px 0">
+      <div style="display:flex;align-items:stretch;gap:0;flex-wrap:wrap">
+        <div class="log-block lb-purple" style="min-width:100px"><div class="lb-label">Magic</div><div class="lb-value">4B: 0xfe62696e</div></div>
+        <div class="log-block lb-purple" style="min-width:120px"><div class="lb-label">Format Desc Event</div><div class="lb-value">文件头</div></div>
+        <div class="log-block lb-blue" style="min-width:120px"><div class="lb-label">Event 1 (DML)</div><div class="lb-value">变长</div></div>
+        <div class="log-block lb-blue" style="min-width:120px"><div class="lb-label">Event 2 (DML)</div><div class="lb-value">变长</div></div>
+        <div class="log-block" style="min-width:40px;background:#21262d;border-color:#30363d;color:#484f58"><div class="lb-value">...</div></div>
+        <div class="log-block lb-purple" style="min-width:120px"><div class="lb-label">Rotate Event</div><div class="lb-value">指向下一个文件</div></div>
+      </div>
+    </div>
+
+    <h3>每个 Binlog Event 内部结构</h3>
+    <div style="margin:14px 0">
+      <div style="display:flex;align-items:stretch;gap:0;flex-wrap:wrap">
+        <div class="log-block lb-purple" style="min-width:80px"><div class="lb-label">Event Header</div><div class="lb-value">19B</div></div>
+        <div class="log-block lb-blue" style="min-width:140px"><div class="lb-label">Event Data (事件体)</div><div class="lb-value">变长</div></div>
+        <div class="log-block lb-orange" style="min-width:60px"><div class="lb-label">CRC32</div><div class="lb-value">4B</div></div>
+      </div>
+    </div>
+
+    <h3>三种 Binlog 格式</h3>
+    <table>
+      <tr><th>格式</th><th>内容</th><th>优点</th><th>缺点</th></tr>
+      <tr><td><span class="tag tb">STATEMENT</span></td><td>记录 SQL 原文</td><td>日志量小</td><td>UUID/NOW() 等不确定函数主从不一致</td></tr>
+      <tr><td><span class="tag tg">ROW</span></td><td>记录行变更(前后镜像)</td><td>数据一致性最强</td><td>日志量可能很大(批量 UPDATE)</td></tr>
+      <tr><td><span class="tag ty">MIXED</span></td><td>普通 SQL 用 STATEMENT，不确定函数用 ROW</td><td>折中</td><td>仍可能有边缘问题</td></tr>
+    </table>
+  </div>
+
+  <div class="tip-warn">
+    <div class="tip-t y">三种日志对比</div>
+    <p><b>Redo Log</b>：引擎层·物理日志·循环写·保证持久性(D)<br>
+    <b>Undo Log</b>：引擎层·逻辑日志·随数据页存储·保证原子性(A)+MVCC<br>
+    <b>Binlog</b>：Server层·逻辑日志·追加写·保证主从一致性+PITR</p>
+  </div>
+</div>
+
+<!-- ============ ⑥ 顺序写 vs 随机写 ============ -->
+<div id="s-seqvsrand" class="section">
+  <h1>⑥ 顺序写 vs 随机写 — 核心问题解答</h1>
+  <p class="sub">为什么 Redo Log 是顺序写？脏页落盘是随机写？这到底是怎么回事？</p>
+
+  <div class="compare-grid">
+    <!-- Sequential Write -->
+    <div class="compare-card cc-seq">
+      <div class="cc-title">Redo Log — 顺序写</div>
+      <div class="write-pattern">
+        <div class="wp-row">
+          <div class="wp-label" style="color:#58a6ff">写入模式</div>
+          <div class="wp-visual">
+            <div class="wp-block-row">
+              <div class="wp-sector written"><span class="sector-num">1</span></div>
+              <div class="wp-sector written"><span class="sector-num">2</span></div>
+              <div class="wp-sector written"><span class="sector-num">3</span></div>
+              <div class="wp-sector written" style="animation:pulse 1s infinite"><span class="sector-num">4</span></div>
+              <div class="wp-sector"><span class="sector-num">5</span></div>
+              <div class="wp-sector"><span class="sector-num">6</span></div>
+              <div class="wp-sector"><span class="sector-num">7</span></div>
+              <div class="wp-sector"><span class="sector-num">8</span></div>
+              <div class="wp-sector"><span class="sector-num">9</span></div>
+              <div class="wp-sector"><span class="sector-num">10</span></div>
+            </div>
+            <div class="wp-head" style="left:35%"></div>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:13px;line-height:1.8"><b>写入位置永远在文件末尾追加</b>，不需要寻址。磁盘磁头(或 SSD 控制器)不用来回移动。1→2→3→4... 连续写入。</p>
+      <div style="background:#0d1117;border-radius:8px;padding:12px;margin-top:10px;font-size:12px;line-height:1.8">
+        <div style="color:#58a6ff;font-weight:700;margin-bottom:6px">为什么是顺序写？</div>
+        <p style="color:#c9d1d9;margin:0">Redo Log 是<b>固定大小的两个文件循环使用</b>。写入指针(write pos)永远往后走，写满了就跳到另一个文件开头。不需要找特定位置，只在 write pos 处追加。这就是"顺序写"。</p>
+      </div>
+    </div>
+
+    <!-- Random Write -->
+    <div class="compare-card cc-rand">
+      <div class="cc-title">脏页落盘 — 随机写</div>
+      <div class="write-pattern">
+        <div class="wp-row">
+          <div class="wp-label" style="color:#ffa657">写入模式</div>
+          <div class="wp-visual">
+            <div class="wp-block-row">
+              <div class="wp-sector"><span class="sector-num">1</span></div>
+              <div class="wp-sector dirty-flush"><span class="sector-num">2</span></div>
+              <div class="wp-sector"><span class="sector-num">3</span></div>
+              <div class="wp-sector"><span class="sector-num">4</span></div>
+              <div class="wp-sector dirty-flush"><span class="sector-num">5</span></div>
+              <div class="wp-sector"><span class="sector-num">6</span></div>
+              <div class="wp-sector dirty-flush"><span class="sector-num">7</span></div>
+              <div class="wp-sector"><span class="sector-num">8</span></div>
+              <div class="wp-sector"><span class="sector-num">9</span></div>
+              <div class="wp-sector dirty-flush"><span class="sector-num">10</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:13px;line-height:1.8"><b>脏页分布在不同表空间的不同位置</b>，写入时需要 seek 到指定位置。2→5→7→10... 跳跃式写入。</p>
+      <div style="background:#0d1117;border-radius:8px;padding:12px;margin-top:10px;font-size:12px;line-height:1.8">
+        <div style="color:#ffa657;font-weight:700;margin-bottom:6px">为什么是随机写？</div>
+        <p style="color:#c9d1d9;margin:0">每个脏页属于不同的表(.ibd 文件)的不同 B+ 树位置。页A在偏移量 0x1000，页B在 0xF0000，页C在另一个文件。Flush List 中的脏页<b>物理位置毫无规律</b>，必须 seek 到各自位置写入。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deep explanation -->
+  <h2>到底怎么回事？深入理解</h2>
+
+  <div class="card hl">
+    <h3 style="color:#58a6ff;margin-bottom:12px">核心问题：WAL (Write-Ahead Logging) 的精髓</h3>
+    <p>MySQL 的设计目标是：<b>尽量减少事务提交时的磁盘 IO 开销</b>。</p>
+
+    <p>如果没有 Redo Log，事务提交时必须把修改过的所有数据页刷盘才能保证持久性。由于数据页散落在磁盘各处，这就是<b>多次随机写</b>，非常慢。</p>
+
+    <p>有了 Redo Log，事务提交只需：<b>追加写 redo log = 1次顺序写</b>。数据页留在 Buffer Pool 中，之后慢慢刷盘（后台线程异步随机写）。</p>
+
+    <div style="background:#0d1117;border-radius:10px;padding:16px;margin:14px 0;border:1px solid #30363d">
+      <div style="text-align:center;margin-bottom:10px;font-size:13px;font-weight:700;color:#ffa657">性能对比</div>
+      <table>
+        <tr><th>操作</th><th>写入方式</th><th>机械硬盘</th><th>SSD</th><th>原因</th></tr>
+        <tr><td>Redo Log 写入</td><td><span class="tag tg">顺序写</span></td><td>~100 MB/s</td><td>~500 MB/s</td><td>追加，无需寻址</td></tr>
+        <tr><td>数据页落盘</td><td><span class="tag ty">随机写</span></td><td>~200 IOPS</td><td>~50k IOPS</td><td>每个页位置不同，需 seek</td></tr>
+        <tr><td>事务提交(无redo)</td><td><span class="tag tr">多次随机写</span></td><td>极慢</td><td>较慢</td><td>每个修改页都要 fsync</td></tr>
+        <tr><td>事务提交(有redo)</td><td><span class="tag tg">1次顺序写</span></td><td>快</td><td>很快</td><td>只需 fsync redo block</td></tr>
+      </table>
+    </div>
+
+    <div class="tip">
+      <div class="tip-t g">一句话总结</div>
+      <p>WAL 的本质：<b>用一次顺序写替代多次随机写</b>。事务提交只写 redo log (顺序)，数据页延迟异步落盘 (随机)。crash 后用 redo 重放恢复。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="color:#ffa657">图解：一次 UPDATE 的 IO 路径</h3>
+    <div style="background:#0d1117;border-radius:10px;padding:20px;margin:14px 0;border:1px solid #21262d">
+      <!-- Memory side -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <div style="text-align:center">
+          <div style="background:#0d2818;border:1px solid #238636;border-radius:10px;padding:14px 20px;min-width:160px">
+            <div style="font-size:13px;font-weight:700;color:#3fb950">Buffer Pool (内存)</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:4px">读页·改页·写log buffer</div>
+            <div style="font-size:11px;color:#3fb950;margin-top:2px">微秒级 ✅</div>
+          </div>
+        </div>
+        <div style="text-align:center;color:#8b949e;font-size:20px;flex:1">
+          <div class="flow-line"><div class="fl-anim fl-anim-blue"></div></div>
+          <div style="font-size:10px;margin-top:2px">fsync (顺序写)</div>
+        </div>
+        <div style="text-align:center">
+          <div style="background:#0d1f3a;border:1px solid #1f6feb;border-radius:10px;padding:14px 20px;min-width:160px">
+            <div style="font-size:13px;font-weight:700;color:#58a6ff">Redo Log File (磁盘)</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:4px">追加写·顺序IO</div>
+            <div style="font-size:11px;color:#58a6ff;margin-top:2px">事务提交时 ✅</div>
+          </div>
+        </div>
+      </div>
+      <!-- Disk side -->
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="text-align:center">
+          <div style="background:#2a1a00;border:1px solid #d29922;border-radius:10px;padding:14px 20px;min-width:160px">
+            <div style="font-size:13px;font-weight:700;color:#ffa657">Buffer Pool 脏页</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:4px">异步刷盘·随机IO</div>
+            <div style="font-size:11px;color:#ffa657;margin-top:2px">后台线程 ⏳</div>
+          </div>
+        </div>
+        <div style="text-align:center;color:#8b949e;font-size:20px;flex:1">
+          <div class="flow-line"><div class="fl-anim fl-anim-orange"></div></div>
+          <div style="font-size:10px;margin-top:2px">pwrite (随机写)</div>
+        </div>
+        <div style="text-align:center">
+          <div style="background:#2a0d0d;border:1px solid #da3633;border-radius:10px;padding:14px 20px;min-width:160px">
+            <div style="font-size:13px;font-weight:700;color:#ff7b72">数据文件 .ibd (磁盘)</div>
+            <div style="font-size:11px;color:#8b949e;margin-top:4px">B+ 树页·离散位置</div>
+            <div style="font-size:11px;color:#ff7b72;margin-top:2px">延迟落盘 🔄</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Why sequential is faster -->
+  <div class="card">
+    <h3 style="color:#3fb950">为什么顺序写比随机写快？</h3>
+    <p><b>机械硬盘 (HDD)</b>：</p>
+    <p style="padding-left:16px">顺序写只需磁头移动一次，后续数据连续写入。随机写每次都要寻道(seek ~5-10ms) + 旋转延迟(~4ms @7200RPM)。一次 seek 就够顺序写好几 MB 了。</p>
+    <p><b>固态硬盘 (SSD)</b>：</p>
+    <p style="padding-left:16px">SSD 没有机械部件，但顺序写仍然更快：① SSD 以页(4KB)为单位写，必须先擦除块(256KB)；② 顺序写减少写放大(FTL 映射更高效)；③ 随机写触发更多的垃圾回收(GC)。顺序写可利用更大的内部并行度。</p>
+
+    <div class="tip-warn">
+      <div class="tip-t y">面试高频追问</div>
+      <p><b>Q: 如果 redo log 写满了怎么办？</b><br>A: write pos 追上 checkpoint 时，必须停下来将部分脏页刷盘，推进 checkpoint 腾出空间。这时用户线程会被阻塞，性能下降。所以 <code>innodb_log_file_size</code> 要设合理(通常 1-4GB)。</p>
+    </div>
+  </div>
+
+  <!-- Doublewrite -->
+  <div class="card">
+    <h3 style="color:#d2a8ff">补充：Doublewrite Buffer — 为什么脏页刷盘还需要双写？</h3>
+    <p>InnoDB 的页大小是 16KB，而操作系统/fs 的原子写入单位通常是 4KB(或更小)。如果写 16KB 到一半断电，就会出现<b>页撕裂(partial write)</b>——数据页损坏，无法通过 redo log 恢复（因为 redo 记录的是"对某个页的修改"，页本身坏了就无法重放）。</p>
+
+    <div style="background:#0d1117;border-radius:10px;padding:16px;margin:14px 0;border:1px solid #21262d">
+      <div style="text-align:center;font-size:13px;font-weight:700;color:#d2a8ff;margin-bottom:10px">Doublewrite 流程</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;font-size:12px">
+        <div style="background:#2a1a00;border:1px solid #d29922;padding:10px;border-radius:8px;text-align:center">
+          <div style="color:#ffa657;font-weight:700">脏页</div>
+          <div style="color:#8b949e;font-size:10px;margin-top:2px">Buffer Pool</div>
+        </div>
+        <div style="color:#8b949e">→ ①顺序写→</div>
+        <div style="background:#1a0d2a;border:1px solid #8957e5;padding:10px;border-radius:8px;text-align:center">
+          <div style="color:#d2a8ff;font-weight:700">Doublewrite Buffer</div>
+          <div style="color:#8b949e;font-size:10px;margin-top:2px">共享表空间 2MB 连续区域</div>
+        </div>
+        <div style="color:#8b949e">→ ②随机写→</div>
+        <div style="background:#2a0d0d;border:1px solid #da3633;padding:10px;border-radius:8px;text-align:center">
+          <div style="color:#ff7b72;font-weight:700">.ibd 数据文件</div>
+          <div style="color:#8b949e;font-size:10px;margin-top:2px">最终落盘位置</div>
+        </div>
+      </div>
+      <p style="font-size:11px;color:#8b949e;margin-top:10px;text-align:center">先顺序写一份到 Doublewrite Buffer(连续 2MB，顺序写快)，再随机写到各自的 .ibd 位置。如果第②步写到一半断电，crash 后从 Doublewrite 恢复完整页。</p>
+    </div>
+
+    <div class="tip-red">
+      <div class="tip-t r">注意</div>
+      <p>Doublewrite 增加了约 5-10% 的写开销，但对数据安全至关重要。某些场景(如 ZFS 文件系统保证原子写)可以关闭 <code>innodb_doublewrite=0</code>。</p>
+    </div>
+  </div>
+
+  <!-- Complete flow summary -->
+  <div class="card hl">
+    <h3 style="color:#58a6ff">完整 IO 流程总结</h3>
+    <div style="background:#0d1117;border-radius:10px;padding:16px;margin:14px 0;border:1px solid #21262d;font-size:12px;line-height:2.2">
+      <div style="color:#3fb950">① 事务修改数据 → 写入 Buffer Pool (内存，微秒级)</div>
+      <div style="color:#3fb950">② 记录 Undo Log → 写入 Buffer Pool 中的 undo 页 (内存)</div>
+      <div style="color:#58a6ff">③ 写 Redo Log → Log Buffer → fsync 到 redo log file (顺序写，毫秒级) ← <b>事务提交的关键路径</b></div>
+      <div style="color:#d2a8ff">④ 写 Binlog → fsync 到 binlog file (追加写，Server 层)</div>
+      <div style="color:#ffa657">⑤ 后台线程异步刷脏页 → Doublewrite Buffer → .ibd 文件 (随机写，后台异步)</div>
+      <div style="color:#ff7b72">⑥ Checkpoint 推进 → 释放 redo log 空间</div>
+    </div>
+
+    <div class="tip">
+      <div class="tip-t g">面试一句话</div>
+      <p>事务提交只做<b>一次顺序写 redo log</b>，数据页留在内存延迟刷盘。这把事务延迟从"多次随机写"降到"一次顺序写"。这就是 WAL 的价值。脏页落盘是随机写，但不影响事务响应时间——它是后台异步做的。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ NAV ============
+function show(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('s-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ============ UPDATE FLOW ============
+let updateCurrent = 0;
+const updateTotal = 12;
+const updateLogs = {
+  1: '<span class="fl-info">[连接器]</span> 客户端连接 127.0.0.1:3306 → 认证通过 → 加载权限 → 连接ID=42',
+  2: '<span class="fl-info">[解析器]</span> 词法分析: UPDATE→accounts→SET→balance→=→balance→-→100→WHERE→id→=→1\n<span class="fl-info">[解析器]</span> 语法分析 → AST 构建成功',
+  3: '<span class="fl-info">[预处理器]</span> 检查: 表 accounts ✓ | 列 balance ✓ | UPDATE权限 ✓',
+  4: '<span class="fl-warn">[优化器]</span> 可选路径: ①主键索引 id=1 (cost=1.0) ②全表扫描 (cost=10532)\n<span class="fl-warn">[优化器]</span> → 选择路径①: index_read on PRIMARY',
+  5: '<span class="fl-ok">[执行器→InnoDB]</span> index_read(PRIMARY, id=1)\n<span class="fl-ok">[InnoDB]</span> Buffer Pool 查找 page(space=57, pageNo=3) → <span class="fl-ok">命中!</span> 返回行数据',
+  6: '<span class="fl-red">[Undo Log]</span> 记录旧行: id=1, balance=500 → undo_no=1024\n<span class="fl-red">[Undo Log]</span> 写入 Buffer Pool 的 undo 页 (同时产生 redo)',
+  7: '<span class="fl-warn">[Buffer Pool]</span> 修改 page(57,3): balance 500→400\n<span class="fl-warn">[Buffer Pool]</span> 页标记为 DIRTY → 加入 Flush List\n<span class="fl-dim">  此时: 内存 balance=400, 磁盘 balance=500 (脏页)</span>',
+  8: '<span class="fl-info">[Redo Log]</span> 写入 Log Buffer: MLOG_REC_UPDATE space=57 page=3 offset=...\n<span class="fl-info">[Redo Log]</span> innodb_flush_log_at_trx_commit=1 → fsync 到 ib_logfile0\n<span class="fl-ok">  → 顺序追加到 write pos 位置 ✓</span>',
+  9: '<span class="fl-info">[Binlog]</span> 写入 binlog.000123 | Format=ROW\n<span class="fl-info">[Binlog]</span> Event: UPDATE accounts SET balance=400 WHERE id=1 (行变更)\n<span class="fl-info">[Binlog]</span> sync_binlog=1 → fsync ✓\n<span class="fl-warn">  两阶段提交: prepare → binlog → commit</span>',
+  10: '<span class="fl-ok">[Commit]</span> Redo log 写入 XA commit 标记\n<span class="fl-ok">[Commit]</span> 事务 trx_id=12345 提交成功! → 返回客户端 OK\n<span class="fl-dim">  注意: 此时磁盘数据文件仍然是 balance=500 (脏页未落盘)</span>',
+  11: '<span class="fl-warn">[Page Cleaner]</span> 后台线程检测到脏页比例 > 75%\n<span class="fl-warn">[Page Cleaner]</span> 刷脏: page(57,3) → Doublewrite Buffer → .ibd 文件\n<span class="fl-red">  pwrite() 随机写: seek 到表空间偏移量 0x3000 → 写入 16KB</span>\n<span class="fl-dim">  脏页落盘完成后: 内存=磁盘=400 ✓</span>',
+  12: '<span class="fl-info">[Checkpoint]</span> 脏页已落盘 → 推进 checkpoint\n<span class="fl-info">[Checkpoint]</span> checkpoint 从 LSN=102400 → LSN=102800\n<span class="fl-dim">  释放的 redo log 空间可被后续事务覆盖</span>'
+};
+
+function updateStep(dir) {
+  const next = updateCurrent + dir;
+  if (next < 0 || next > updateTotal) return;
+  updateCurrent = next;
+  renderUpdateFlow();
+}
+
+function updateReset() {
+  updateCurrent = 0;
+  renderUpdateFlow();
+}
+
+function renderUpdateFlow() {
+  document.getElementById('update-counter').textContent = `步骤 ${updateCurrent}/${updateTotal}`;
+  document.querySelectorAll('#update-flow .flow-step').forEach(el => {
+    const s = parseInt(el.dataset.step);
+    el.classList.remove('highlight', 'dim');
+    if (s === updateCurrent) el.classList.add('highlight');
+    else if (s > updateCurrent) el.classList.add('dim');
+  });
+  const log = document.getElementById('update-log');
+  if (updateCurrent === 0) {
+    log.innerHTML = '点击 <b>下一步</b> 开始逐步演示 UPDATE 流程...';
+  } else {
+    let html = '';
+    for (let i = 1; i <= updateCurrent; i++) {
+      html += updateLogs[i] + '\n';
+    }
+    log.innerHTML = html;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+// ============ SELECT FLOW ============
+let selectCurrent = 0;
+const selectTotal = 7;
+const selectLogs = {
+  1: '<span class="fl-info">[连接器]</span> 从连接池获取连接 ID=42 → 验证 SELECT 权限 ✓',
+  2: '<span class="fl-dim">[查询缓存]</span> MySQL 8.0 已移除此功能，跳过\n<span class="fl-dim">  5.7及以前: 以SQL为key查缓存，表有更新则失效</span>',
+  3: '<span class="fl-info">[解析器+预处理器]</span> 词法→语法→AST→语义检查 全部通过',
+  4: '<span class="fl-warn">[优化器]</span> id=1 有 PRIMARY KEY → 走 index_read (cost=1.0)\n<span class="fl-warn">[优化器]</span> 执行计划: type=const, key=PRIMARY',
+  5: '<span class="fl-ok">[执行器→InnoDB]</span> index_read(PRIMARY, id=1)\n<span class="fl-ok">[InnoDB]</span> Buffer Pool 命中 page(57,3) → 返回行: {id:1, balance:400}\n<span class="fl-dim">  若未命中: 磁盘随机读 16KB → 加载到 Buffer Pool → 再返回行</span>',
+  6: '<span class="fl-info">[MVCC]</span> 当前事务 ReadView: m_ids=[], min_trx_id=12346\n<span class="fl-info">[MVCC]</span> 行的 trx_id=12345 < min_trx_id 且不在 m_ids 中 → <span class="fl-ok">可见!</span>\n<span class="fl-dim">  快照读不加锁，当前读(SELECT ... LOCK IN SHARE MODE)加行锁</span>',
+  7: '<span class="fl-ok">[返回]</span> 结果集: 1 row in set (0.00 sec)\n<span class="fl-dim">  SELECT 不写 redo/undo/binlog，纯读操作</span>'
+};
+
+function selectStep(dir) {
+  const next = selectCurrent + dir;
+  if (next < 0 || next > selectTotal) return;
+  selectCurrent = next;
+  renderSelectFlow();
+}
+
+function selectReset() {
+  selectCurrent = 0;
+  renderSelectFlow();
+}
+
+function renderSelectFlow() {
+  document.getElementById('select-counter').textContent = `步骤 ${selectCurrent}/${selectTotal}`;
+  document.querySelectorAll('#select-flow .flow-step').forEach(el => {
+    const s = parseInt(el.dataset.step);
+    el.classList.remove('highlight', 'dim');
+    if (s === selectCurrent) el.classList.add('highlight');
+    else if (s > selectCurrent) el.classList.add('dim');
+  });
+  const log = document.getElementById('select-log');
+  if (selectCurrent === 0) {
+    log.innerHTML = '点击 <b>下一步</b> 开始逐步演示 SELECT 流程...';
+  } else {
+    let html = '';
+    for (let i = 1; i <= selectCurrent; i++) {
+      html += selectLogs[i] + '\n';
+    }
+    log.innerHTML = html;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+// ============ BUFFER POOL SIM ============
+const BP_SIZE = 32;
+let bpPages = [];
+
+function initBP() {
+  bpPages = [];
+  for (let i = 0; i < BP_SIZE; i++) {
+    bpPages.push({ state: 'free', page: null, table: null });
+  }
+  renderBP();
+}
+
+function renderBP() {
+  const grid = document.getElementById('bp-grid');
+  grid.innerHTML = '';
+  let dirtyCount = 0;
+  bpPages.forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'bp-block bp-' + p.state;
+    el.innerHTML = `<div class="bp-page">${p.state === 'free' ? '--' : p.page}</div><div class="bp-state">${p.state === 'free' ? '空闲' : p.state === 'clean' ? '干净' : p.state === 'dirty' ? '脏' : '锁定'}</div>`;
+    grid.appendChild(el);
+    if (p.state === 'dirty') dirtyCount++;
+  });
+  const fill = document.getElementById('flush-fill');
+  const pct = Math.round(dirtyCount / BP_SIZE * 100);
+  fill.style.width = pct + '%';
+  fill.textContent = dirtyCount + ' 脏页';
+}
+
+function bpSimRead() {
+  const freeIdx = bpPages.findIndex(p => p.state === 'free');
+  const tables = ['accounts', 'orders', 'users', 'products', 'payments'];
+  const t = tables[Math.floor(Math.random() * tables.length)];
+  const pageNo = Math.floor(Math.random() * 100);
+  const pageName = `${t.substring(0,3)}:p${pageNo}`;
+
+  if (freeIdx >= 0) {
+    bpPages[freeIdx] = { state: 'clean', page: pageName, table: t };
+    bpLog(`<span class="fl-info">[读页]</span> 从磁盘加载 ${pageName} → 页槽 ${freeIdx} (干净页)`);
+  } else {
+    // evict a clean page
+    const cleanIdx = bpPages.findIndex(p => p.state === 'clean');
+    if (cleanIdx >= 0) {
+      bpPages[cleanIdx] = { state: 'clean', page: pageName, table: t };
+      bpLog(`<span class="fl-warn">[读页]</span> Buffer Pool 满，淘汰干净页 ${cleanIdx} → 加载 ${pageName}`);
+    } else {
+      bpLog(`<span class="fl-red">[读页]</span> Buffer Pool 满且无干净页可淘汰! 需先刷脏页`);
+    }
+  }
+  renderBP();
+}
+
+function bpSimWrite() {
+  const cleanIdx = bpPages.findIndex(p => p.state === 'clean');
+  if (cleanIdx < 0) {
+    bpLog(`<span class="fl-red">[写页]</span> 没有干净页可修改，先读入数据再试`);
+    return;
+  }
+  const p = bpPages[cleanIdx];
+  p.state = 'dirty';
+  bpLog(`<span class="fl-warn">[写页]</span> 修改 ${p.page} → 标记脏页 → 加入 Flush List (页槽 ${cleanIdx})`);
+  renderBP();
+}
+
+function bpSimFlush() {
+  const dirtyIdx = bpPages.findIndex(p => p.state === 'dirty');
+  if (dirtyIdx < 0) {
+    bpLog(`<span class="fl-info">[刷盘]</span> 没有脏页需要刷盘`);
+    return;
+  }
+  const p = bpPages[dirtyIdx];
+  const oldPage = p.page;
+  p.state = 'clean';
+  bpLog(`<span class="fl-ok">[刷盘]</span> ${oldPage} 脏页→磁盘 (随机写 pwrite) → 页槽 ${dirtyIdx} 变干净`);
+  renderBP();
+}
+
+function bpSimReset() {
+  initBP();
+  document.getElementById('bp-log').innerHTML = 'Buffer Pool 已重置 (全部空闲页)';
+}
+
+function bpLog(msg) {
+  const log = document.getElementById('bp-log');
+  log.innerHTML += '\n' + msg;
+  log.scrollTop = log.scrollHeight;
+}
+
+// Init
+initBP();
+
+// ============ REDO LOG ANIMATION ============
+let redoWritePos = 15;
+let redoCheckpoint = 0;
+
+function animateRedo() {
+  redoWritePos = (redoWritePos + 2) % 100;
+  if (redoWritePos < 5) redoCheckpoint = Math.min(redoCheckpoint + 10, redoWritePos - 5);
+  const w1 = document.getElementById('redo-written1');
+  if (w1) w1.style.width = redoWritePos + '%';
+}
+
+setInterval(animateRedo, 2000);
+</script>
+
+</body>
+</html>

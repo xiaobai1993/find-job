@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gossip 协议 - 动态可视化</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+h1 { text-align: center; padding: 20px; font-size: 22px; color: #f85149; border-bottom: 1px solid #21262d; }
+.tabs { display: flex; gap: 4px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #21262d; flex-wrap: wrap; }
+.tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; background: #21262d; color: #8b949e; transition: all .2s; font-size: 13px; }
+.tab.active { background: #f85149; color: #fff; }
+.tab:hover:not(.active) { background: #30363d; color: #e6edf3; }
+.section { display: none; padding: 20px; }
+.section.active { display: block; }
+.card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.card h3 { color: #f85149; margin-bottom: 12px; font-size: 15px; }
+.btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; margin: 4px; transition: all .2s; }
+.btn-red { background: #b91c1c; color: #fff; } .btn-red:hover { background: #dc2626; }
+.btn-blue { background: #1f6feb; color: #fff; } .btn-blue:hover { background: #388bfd; }
+.btn-green { background: #238636; color: #fff; } .btn-green:hover { background: #2ea043; }
+.btn-orange { background: #9e6a03; color: #fff; } .btn-orange:hover { background: #bb8009; }
+.btn-gray { background: #30363d; color: #e6edf3; } .btn-gray:hover { background: #3d444d; }
+.btn-purple { background: #6e40c9; color: #fff; } .btn-purple:hover { background: #8957e5; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-red { background: #3a1a1a; color: #f85149; }
+.badge-blue { background: #1f3a5f; color: #58a6ff; }
+.badge-green { background: #1a3a2a; color: #3fb950; }
+.badge-orange { background: #3a2a00; color: #e3b341; }
+.badge-purple { background: #2a1a4a; color: #bc8cff; }
+.log-box { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; min-height: 80px; max-height: 200px; overflow-y: auto; }
+.log-line { margin: 2px 0; color: #3fb950; }
+.log-line.warn { color: #e3b341; }
+.log-line.err { color: #f85149; }
+.log-line.info { color: #58a6ff; }
+.log-line.gray { color: #8b949e; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flex { display: flex; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
+.flex-wrap { flex-wrap: wrap; } .mt-8 { margin-top: 8px; } .mb-8 { margin-bottom: 8px; }
+.text-sm { font-size: 12px; } .text-muted { color: #8b949e; }
+.text-red { color: #f85149; } .text-green { color: #3fb950; }
+.text-blue { color: #58a6ff; } .text-orange { color: #e3b341; } .text-purple { color: #bc8cff; }
+.interview-tip { background: #1a2a1a; border-left: 3px solid #3fb950; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 12px; }
+.interview-tip .label { font-size: 11px; color: #3fb950; font-weight: 600; margin-bottom: 4px; }
+.interview-tip p { font-size: 13px; color: #c9d1d9; line-height: 1.6; }
+
+/* ===== CANVAS AREA ===== */
+.canvas-wrap { position: relative; background: #010409; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+canvas { display: block; width: 100%; }
+
+/* ===== GOSSIP NODE STYLES ===== */
+.gossip-ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.gossip-ctrl label { font-size: 13px; color: #8b949e; }
+.gossip-ctrl select, .gossip-ctrl input { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+.stat-bar { display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap; }
+.stat-item { font-size: 13px; }
+.stat-item span { font-weight: 600; }
+
+/* ===== MESSAGE TYPE TABLE ===== */
+.msg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.msg-table th { background: #21262d; padding: 10px 12px; text-align: left; color: #e3b341; border: 1px solid #30363d; }
+.msg-table td { padding: 9px 12px; border: 1px solid #21262d; color: #c9d1d9; }
+.msg-table tr:hover td { background: #1a1f27; }
+
+/* ===== FAIL DETECTION ===== */
+.fail-step { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; margin: 8px 0; display: flex; align-items: center; gap: 12px; transition: all .3s; }
+.fail-step.active { border-color: #f85149; background: #1a0d0d; }
+.fail-step.done { border-color: #3fb950; background: #0d1a0d; }
+.fail-arrow { font-size: 20px; color: #8b949e; text-align: center; padding: 4px 0; }
+
+/* ===== COMPARISON ===== */
+.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-table th { background: #21262d; padding: 10px 12px; text-align: left; color: #e3b341; border: 1px solid #30363d; }
+.compare-table td { padding: 9px 12px; border: 1px solid #21262d; color: #c9d1d9; }
+.compare-table tr:hover td { background: #1a1f27; }
+
+/* ===== CONVERGENCE CHART ===== */
+.chart-wrap { background: #010409; border: 1px solid #21262d; border-radius: 8px; padding: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Gossip 协议 - 动态可视化</h1>
+
+<div class="tabs">
+  <div class="tab active" data-tab="spread">消息传播模拟</div>
+  <div class="tab" data-tab="redis">Redis Cluster Gossip</div>
+  <div class="tab" data-tab="fail">故障检测流程</div>
+  <div class="tab" data-tab="msg">消息类型详解</div>
+  <div class="tab" data-tab="compare">协议对比</div>
+  <div class="tab" data-tab="converge">收敛曲线</div>
+</div>
+
+<!-- ==================== TAB 1: 消息传播模拟 ==================== -->
+<div class="section active" id="sec-spread">
+  <div class="card">
+    <h3>流行病传播模型 — Gossip 核心原理</h3>
+    <div class="gossip-ctrl">
+      <label>节点数:</label>
+      <select id="nodeCount"><option value="8">8</option><option value="12">12</option><option value="16" selected>16</option><option value="24">24</option><option value="32">32</option></select>
+      <label>扇出(Fanout):</label>
+      <select id="fanout"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option></select>
+      <label>模式:</label>
+      <select id="spreadMode"><option value="push">Push</option><option value="pull">Pull</option><option value="pushpull">Push-Pull</option></select>
+      <button class="btn btn-red" onclick="startSpread()">开始传播</button>
+      <button class="btn btn-gray" onclick="resetSpread()">重置</button>
+      <button class="btn btn-blue" onclick="stepSpread()">单步</button>
+    </div>
+    <div class="stat-bar">
+      <div class="stat-item">轮次: <span class="text-orange" id="roundNum">0</span></div>
+      <div class="stat-item">已感染: <span class="text-green" id="infectedCount">0</span></div>
+      <div class="stat-item">未感染: <span class="text-muted" id="healthyCount">0</span></div>
+      <div class="stat-item">理论轮次 log₂(N): <span class="text-purple" id="theoRound">0</span></div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="spreadCanvas" width="900" height="420"></canvas>
+    </div>
+    <div class="interview-tip mt-8">
+      <div class="label">面试要点</div>
+      <p>Push 模式每轮每个感染节点随机选择 Fanout 个未感染节点传播，收敛速度 O(log N)。Fanout 越大收敛越快但网络开销越大。Push-Pull 模式收敛最快，因为双向交换信息减少了冗余传播。</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>传播日志</h3>
+    <div class="log-box" id="spreadLog"></div>
+  </div>
+</div>
+
+<!-- ==================== TAB 2: Redis Cluster Gossip ==================== -->
+<div class="section" id="sec-redis">
+  <div class="card">
+    <h3>Redis Cluster Gossip 通信模拟</h3>
+    <div class="gossip-ctrl">
+      <button class="btn btn-green" onclick="startRedisGossip()">启动集群</button>
+      <button class="btn btn-blue" onclick="redisGossipStep()">单步 PING</button>
+      <button class="btn btn-purple" onclick="addRedisNode()">加入新节点</button>
+      <button class="btn btn-red" onclick="killRedisNode()">模拟节点宕机</button>
+      <button class="btn btn-gray" onclick="resetRedisGossip()">重置</button>
+      <label>速度:</label>
+      <select id="redisSpeed"><option value="2000">慢</option><option value="1000" selected>正常</option><option value="500">快</option></select>
+    </div>
+    <div class="stat-bar">
+      <div class="stat-item">集群节点: <span class="text-blue" id="redisNodeCount">6</span></div>
+      <div class="stat-item">已交换轮次: <span class="text-orange" id="redisRound">0</span></div>
+      <div class="stat-item">在线: <span class="text-green" id="redisOnline">6</span></div>
+      <div class="stat-item">PFAIL: <span class="text-orange" id="redisPfail">0</span></div>
+      <div class="stat-item">FAIL: <span class="text-red" id="redisFail">0</span></div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="redisCanvas" width="900" height="500"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Redis Cluster Gossip 日志</h3>
+    <div class="log-box" id="redisLog"></div>
+  </div>
+  <div class="interview-tip">
+    <div class="label">面试要点</div>
+    <p>Redis Cluster 每秒从节点列表随机选 1 个节点发 PING，PING 消息体中附带 1/3 其他节点的状态信息（Gossip 段）。收到 PING 回复 PONG。新节点通过 CLUSTER MEET 发送 MEET 消息加入。节点超时 15s 未回复被标记 PFAIL，超过半数 master 确认后升级为 FAIL。</p>
+  </div>
+</div>
+
+<!-- ==================== TAB 3: 故障检测流程 ==================== -->
+<div class="section" id="sec-fail">
+  <div class="card">
+    <h3>PFAIL → FAIL 故障检测流程</h3>
+    <div class="gossip-ctrl">
+      <button class="btn btn-red" onclick="startFailDetection()">模拟节点宕机</button>
+      <button class="btn btn-blue" onclick="stepFailDetection()">下一步</button>
+      <button class="btn btn-gray" onclick="resetFailDetection()">重置</button>
+    </div>
+    <div id="failSteps" style="max-width: 700px; margin: 0 auto;">
+    </div>
+    <div class="canvas-wrap mt-8">
+      <canvas id="failCanvas" width="900" height="400"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <h3>故障检测日志</h3>
+    <div class="log-box" id="failLog"></div>
+  </div>
+</div>
+
+<!-- ==================== TAB 4: 消息类型详解 ==================== -->
+<div class="section" id="sec-msg">
+  <div class="card">
+    <h3>Redis Cluster Gossip 消息类型</h3>
+    <table class="msg-table">
+      <tr><th>消息类型</th><th>发送场景</th><th>携带信息</th><th>面试重点</th></tr>
+      <tr><td><span class="badge badge-blue">PING</span></td><td>周期性发送（每秒1次）</td><td>自身状态 + 随机1/3其他节点状态</td><td>心跳检测 + 元数据传播，"一拖多"</td></tr>
+      <tr><td><span class="badge badge-green">PONG</span></td><td>收到 PING/MEET 后回复</td><td>自身状态 + 随机1/3其他节点状态</td><td>确认存活 + 更新信息</td></tr>
+      <tr><td><span class="badge badge-purple">MEET</span></td><td>新节点加入集群（CLUSTER MEET）</td><td>同 PING</td><td>只在加入时用，握手消息</td></tr>
+      <tr><td><span class="badge badge-red">FAIL</span></td><td>确认某节点客观下线后广播</td><td>下线节点 ID + config_epoch</td><td>PFAIL→FAIL 关键转换，触发故障转移</td></tr>
+      <tr><td><span class="badge badge-orange">UPDATE</span></td><td>发现对方信息过时</td><td>更新的节点信息</td><td>信息版本同步，config_epoch 冲突解决</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>PING 消息体结构</h3>
+    <div style="background:#010409; border:1px solid #21262d; border-radius:8px; padding:16px; font-family:monospace; font-size:13px; line-height:1.8;">
+      <div style="border:2px solid #f85149; border-radius:6px; padding:12px; margin-bottom:12px;">
+        <div class="text-red" style="font-weight:600;">Header（发送者自身信息）</div>
+        <div class="text-muted">node_id: a1b2c3d4...</div>
+        <div class="text-muted">ip:port: 10.0.0.1:6379</div>
+        <div class="text-muted">flags: master | &lt;none&gt;</div>
+        <div class="text-muted">slots: [0-5460]</div>
+        <div class="text-muted">config_epoch: 12</div>
+      </div>
+      <div style="border:2px solid #58a6ff; border-radius:6px; padding:12px;">
+        <div class="text-blue" style="font-weight:600;">Gossip Section（随机 1/3 节点信息）</div>
+        <div class="text-muted">node_id: e5f6..., ip:port: 10.0.0.2:6379, flags: master, last_in: 1234ms</div>
+        <div class="text-muted">node_id: g7h8..., ip:port: 10.0.0.3:6379, flags: slave, last_in: 567ms</div>
+        <div class="text-muted">... (约 N/3 条)</div>
+      </div>
+    </div>
+    <div class="interview-tip mt-8">
+      <div class="label">面试要点</div>
+      <p>PING 消息不只是心跳！还顺带传播了其他节点的状态信息，这是 Gossip 的精髓。每次通信都是"一拖多"——发送者和 1/3 集群节点的状态在一次 PING 中全部传递。这使得信息传播速度远超单纯的 1 对 1 通信。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TAB 5: 协议对比 ==================== -->
+<div class="section" id="sec-compare">
+  <div class="card">
+    <h3>Gossip vs 其他分布式协议</h3>
+    <table class="compare-table">
+      <tr><th>维度</th><th class="text-red">Gossip</th><th class="text-blue">Raft</th><th class="text-purple">Paxos</th><th class="text-orange">ZAB</th></tr>
+      <tr><td>一致性</td><td>最终一致</td><td>强一致</td><td>强一致</td><td>强一致</td></tr>
+      <tr><td>中心化</td><td class="text-green">去中心化</td><td>Leader-Follower</td><td>无 Leader (Multi-Paxos)</td><td>Leader-Follower</td></tr>
+      <tr><td>收敛速度</td><td>O(log N)</td><td>多数派即确认</td><td>多数派即确认</td><td>多数派即确认</td></tr>
+      <tr><td>单点故障</td><td class="text-green">无</td><td>Leader 挂需选举</td><td>无 (Multi-Paxos)</td><td>Leader 挂需选举</td></tr>
+      <tr><td>网络开销</td><td>N×Fanout/轮</td><td>心跳 + 日志复制</td><td>提议 + 承诺</td><td>心跳 + 日志复制</td></tr>
+      <tr><td>扩展性</td><td class="text-green">优秀</td><td>中等 (3-7 节点)</td><td>中等</td><td>中等</td></tr>
+      <tr><td>适用场景</td><td>成员管理/元数据</td><td>配置/选举</td><td>分布式共识</td><td>主从同步</td></tr>
+      <tr><td>代表系统</td><td>Redis, Cassandra, Consul</td><td>etcd, TiKV</td><td>Spanner</td><td>ZooKeeper</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Gossip 在不同系统中的实现差异</h3>
+    <table class="compare-table">
+      <tr><th>维度</th><th class="text-red">Redis Cluster</th><th class="text-blue">Cassandra</th><th class="text-purple">Consul</th><th class="text-orange">Dynamo</th></tr>
+      <tr><td>传播模式</td><td>Push</td><td>Push-Pull</td><td>Push-Pull (SWIM)</td><td>Push-Pull</td></tr>
+      <tr><td>扇出因子</td><td>1</td><td>3</td><td>1 (间接探测)</td><td>1</td></tr>
+      <tr><td>故障检测</td><td>固定超时 15s</td><td>Phi Accrual (自适应)</td><td>SWIM 间接探测</td><td>Phi Accrual</td></tr>
+      <tr><td>反熵修复</td><td>无</td><td>Merkle Tree</td><td>无</td><td>Merkle Tree</td></tr>
+      <tr><td>周期</td><td>1s</td><td>1s</td><td>1s (可配置)</td><td>1s</td></tr>
+    </table>
+    <div class="interview-tip mt-8">
+      <div class="label">面试要点</div>
+      <p>Redis 用最简单的 Push + Fanout=1，够用就好。Cassandra 更"重"——Fanout=3 + Push-Pull + Merkle Tree 反熵，因为要保证数据副本的一致性。Consul 基于 SWIM 协议改进，间接探测减少了网络分区导致的误判。选协议要看场景——不需要强一致就用 Gossip，需要就用 Raft。</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>使用场景总结</h3>
+    <div class="grid-2">
+      <div style="background:#1a0d0d; border:1px solid #f8514930; border-radius:8px; padding:12px;">
+        <div class="text-red" style="font-weight:600; margin-bottom:8px;">适合 Gossip 的场景</div>
+        <div class="text-sm" style="line-height:1.8; color:#c9d1d9;">
+          1. 节点成员管理与故障检测<br>
+          2. 元数据/配置信息传播<br>
+          3. 服务发现与注册<br>
+          4. 缓存失效通知<br>
+          5. 区块链交易传播<br>
+          <span class="text-muted">→ 特点：允许短时间不一致</span>
+        </div>
+      </div>
+      <div style="background:#0d0d1a; border:1px solid #58a6ff30; border-radius:8px; padding:12px;">
+        <div class="text-blue" style="font-weight:600; margin-bottom:8px;">不适合 Gossip 的场景</div>
+        <div class="text-sm" style="line-height:1.8; color:#c9d1d9;">
+          1. 分布式锁的互斥判断<br>
+          2. 银行转账的余额一致性<br>
+          3. 配置的强一致读取<br>
+          4. 需要线性一致性的场景<br>
+          5. 领导者选举<br>
+          <span class="text-muted">→ 特点：需要强一致/线性一致</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== TAB 6: 收敛曲线 ==================== -->
+<div class="section" id="sec-converge">
+  <div class="card">
+    <h3>Gossip 收敛曲线 — 不同 Fanout 和模式对比</h3>
+    <div class="gossip-ctrl">
+      <label>节点数:</label>
+      <select id="chartNodeCount"><option value="16">16</option><option value="32" selected>32</option><option value="64">64</option><option value="128">128</option></select>
+      <button class="btn btn-blue" onclick="runConvergenceSim()">运行模拟</button>
+      <button class="btn btn-gray" onclick="clearConvergence()">清空</button>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="convergeCanvas" width="860" height="400"></canvas>
+    </div>
+    <div class="interview-tip mt-8">
+      <div class="label">面试要点</div>
+      <p>Fanout=1 时 Push 模式需要约 log₂(N) 轮感染所有节点。Fanout=2 收敛速度提升约 40%。Push-Pull 模式比纯 Push 快约 30%，因为它双向交换信息减少了"盲区"。但 Fanout 越大网络开销越大，Redis 选择 Fanout=1 是在收敛速度和网络开销间的平衡。</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>理论收敛速度</h3>
+    <table class="msg-table">
+      <tr><th>节点数 N</th><th>log₂(N)</th><th>Fanout=1 Push</th><th>Fanout=2 Push</th><th>Fanout=1 Push-Pull</th></tr>
+      <tr><td>8</td><td>3</td><td>~4 轮</td><td>~2 轮</td><td>~3 轮</td></tr>
+      <tr><td>16</td><td>4</td><td>~5 轮</td><td>~3 轮</td><td>~4 轮</td></tr>
+      <tr><td>32</td><td>5</td><td>~6 轮</td><td>~4 轮</td><td>~5 轮</td></tr>
+      <tr><td>64</td><td>6</td><td>~8 轮</td><td>~5 轮</td><td>~6 轮</td></tr>
+      <tr><td>128</td><td>7</td><td>~9 轮</td><td>~6 轮</td><td>~7 轮</td></tr>
+      <tr><td>1000</td><td>10</td><td>~13 轮</td><td>~8 轮</td><td>~10 轮</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+// ========== TAB SWITCHING ==========
+document.querySelectorAll('.tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('sec-' + t.dataset.tab).classList.add('active');
+  };
+});
+
+// ========== TAB 1: 消息传播模拟 ==========
+let spreadNodes = [];
+let spreadRound = 0;
+let spreadRunning = false;
+let spreadTimer = null;
+
+function initSpreadNodes() {
+  const n = parseInt(document.getElementById('nodeCount').value);
+  const canvas = document.getElementById('spreadCanvas');
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const r = Math.min(cx, cy) - 50;
+  spreadNodes = [];
+  spreadRound = 0;
+  for (let i = 0; i < n; i++) {
+    const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+    spreadNodes.push({
+      id: i,
+      x: cx + r * Math.cos(angle),
+      y: cy + r * Math.sin(angle),
+      infected: i === 0,
+      infectedRound: i === 0 ? 0 : -1,
+      justInfected: i === 0,
+      pulse: i === 0 ? 1 : 0
+    });
+  }
+  document.getElementById('theoRound').textContent = Math.ceil(Math.log2(n));
+  updateSpreadStats();
+  drawSpread();
+}
+
+function updateSpreadStats() {
+  const infected = spreadNodes.filter(n => n.infected).length;
+  document.getElementById('roundNum').textContent = spreadRound;
+  document.getElementById('infectedCount').textContent = infected;
+  document.getElementById('healthyCount').textContent = spreadNodes.length - infected;
+}
+
+function drawSpread() {
+  const canvas = document.getElementById('spreadCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw connections
+  spreadNodes.forEach(n => {
+    if (n.infected && n.justInfected) {
+      // draw infection lines to this node
+    }
+  });
+
+  // Draw nodes
+  spreadNodes.forEach(n => {
+    const radius = 18;
+    // Pulse effect
+    if (n.pulse > 0) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, radius + n.pulse * 15, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(248,81,73,${0.3 * n.pulse})`;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+    if (n.infected) {
+      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, radius);
+      grad.addColorStop(0, '#f85149');
+      grad.addColorStop(1, '#b91c1c');
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = '#21262d';
+    }
+    ctx.fill();
+    ctx.strokeStyle = n.infected ? '#f85149' : '#30363d';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Node label
+    ctx.fillStyle = n.infected ? '#fff' : '#8b949e';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`N${n.id}`, n.x, n.y);
+
+    // Infected round
+    if (n.infected) {
+      ctx.fillStyle = '#e3b341';
+      ctx.font = '9px monospace';
+      ctx.fillText(`R${n.infectedRound}`, n.x, n.y + radius + 12);
+    }
+
+    // Decay pulse
+    if (n.pulse > 0) {
+      n.pulse = Math.max(0, n.pulse - 0.03);
+    }
+  });
+}
+
+function stepSpread() {
+  const fanout = parseInt(document.getElementById('fanout').value);
+  const mode = document.getElementById('spreadMode').value;
+  const log = document.getElementById('spreadLog');
+
+  spreadRound++;
+  spreadNodes.forEach(n => n.justInfected = false);
+
+  if (mode === 'push') {
+    // Each infected node picks fanout random nodes to infect
+    spreadNodes.filter(n => n.infected).forEach(node => {
+      const targets = spreadNodes.filter(n => !n.infected);
+      const shuffled = targets.sort(() => Math.random() - 0.5);
+      for (let i = 0; i < Math.min(fanout, shuffled.length); i++) {
+        shuffled[i].infected = true;
+        shuffled[i].infectedRound = spreadRound;
+        shuffled[i].justInfected = true;
+        shuffled[i].pulse = 1;
+        addLog(log, `R${spreadRound} N${node.id} → N${shuffled[i].id} (Push)`, 'info');
+      }
+    });
+  } else if (mode === 'pull') {
+    // Each healthy node picks fanout random nodes, if any is infected, pull info
+    spreadNodes.filter(n => !n.infected).forEach(node => {
+      const others = spreadNodes.filter(n => n.id !== node.id);
+      const shuffled = others.sort(() => Math.random() - 0.5);
+      for (let i = 0; i < Math.min(fanout, shuffled.length); i++) {
+        if (shuffled[i].infected) {
+          node.infected = true;
+          node.infectedRound = spreadRound;
+          node.justInfected = true;
+          node.pulse = 1;
+          addLog(log, `R${spreadRound} N${node.id} ← N${shuffled[i].id} (Pull)`, 'info');
+          break;
+        }
+      }
+    });
+  } else { // pushpull
+    // Push phase
+    spreadNodes.filter(n => n.infected).forEach(node => {
+      const targets = spreadNodes.filter(n => !n.infected);
+      const shuffled = targets.sort(() => Math.random() - 0.5);
+      for (let i = 0; i < Math.min(fanout, shuffled.length); i++) {
+        shuffled[i].infected = true;
+        shuffled[i].infectedRound = spreadRound;
+        shuffled[i].justInfected = true;
+        shuffled[i].pulse = 1;
+        addLog(log, `R${spreadRound} N${node.id} ↔ N${shuffled[i].id} (Push-Pull)`, 'info');
+      }
+    });
+    // Pull phase - remaining healthy nodes try to pull
+    spreadNodes.filter(n => !n.infected).forEach(node => {
+      const others = spreadNodes.filter(n => n.id !== node.id);
+      const target = others[Math.floor(Math.random() * others.length)];
+      if (target && target.infected) {
+        node.infected = true;
+        node.infectedRound = spreadRound;
+        node.justInfected = true;
+        node.pulse = 1;
+        addLog(log, `R${spreadRound} N${node.id} ↔ N${target.id} (Pull phase)`, 'info');
+      }
+    });
+  }
+
+  updateSpreadStats();
+  drawSpread();
+
+  const infected = spreadNodes.filter(n => n.infected).length;
+  if (infected === spreadNodes.length) {
+    addLog(log, `✓ 全部 ${spreadNodes.length} 个节点已感染，共 ${spreadRound} 轮`, 'warn');
+    spreadRunning = false;
+    if (spreadTimer) { clearInterval(spreadTimer); spreadTimer = null; }
+  }
+}
+
+function startSpread() {
+  if (spreadRunning) return;
+  resetSpread();
+  spreadRunning = true;
+  spreadTimer = setInterval(() => {
+    if (!spreadRunning || spreadNodes.filter(n => n.infected).length === spreadNodes.length) {
+      spreadRunning = false;
+      if (spreadTimer) clearInterval(spreadTimer);
+      return;
+    }
+    stepSpread();
+  }, 800);
+}
+
+function resetSpread() {
+  spreadRunning = false;
+  if (spreadTimer) { clearInterval(spreadTimer); spreadTimer = null; }
+  initSpreadNodes();
+  document.getElementById('spreadLog').innerHTML = '';
+}
+
+// Animation loop for pulses
+function animateSpread() {
+  let needsRedraw = false;
+  spreadNodes.forEach(n => {
+    if (n.pulse > 0) { n.pulse = Math.max(0, n.pulse - 0.02); needsRedraw = true; }
+  });
+  if (needsRedraw) drawSpread();
+  requestAnimationFrame(animateSpread);
+}
+
+// ========== TAB 2: Redis Cluster Gossip ==========
+let redisNodes = [];
+let redisRound = 0;
+let redisRunning = false;
+let redisTimer = null;
+let redisAnimFrame = null;
+let redisMessages = []; // animated messages
+let redisSelectedSource = -1;
+let redisSelectedTarget = -1;
+
+function initRedisNodes() {
+  const names = ['M1', 'M2', 'M3', 'S1', 'S2', 'S3'];
+  const roles = ['master', 'master', 'master', 'slave', 'slave', 'slave'];
+  const ports = [7001, 7002, 7003, 7004, 7005, 7006];
+  const canvas = document.getElementById('redisCanvas');
+  const positions = [
+    { x: 200, y: 120 }, { x: 450, y: 120 }, { x: 700, y: 120 },
+    { x: 200, y: 340 }, { x: 450, y: 340 }, { x: 700, y: 340 }
+  ];
+  redisNodes = names.map((name, i) => ({
+    id: i,
+    name: name,
+    role: roles[i],
+    port: ports[i],
+    x: positions[i].x,
+    y: positions[i].y,
+    status: 'online',
+    pfailBy: new Set(),
+    failBy: new Set(),
+    lastPing: 0,
+    knownNodes: new Map(), // node_id -> {flags, epoch, last_seen}
+    pulse: 0
+  }));
+  // Initialize known nodes
+  redisNodes.forEach(n => {
+    redisNodes.forEach(other => {
+      if (other.id !== n.id) {
+        n.knownNodes.set(other.id, { flags: other.role, epoch: 0, last_seen: Date.now() });
+      }
+    });
+  });
+  redisRound = 0;
+  redisMessages = [];
+  updateRedisStats();
+  drawRedis();
+}
+
+function updateRedisStats() {
+  document.getElementById('redisNodeCount').textContent = redisNodes.length;
+  document.getElementById('redisRound').textContent = redisRound;
+  document.getElementById('redisOnline').textContent = redisNodes.filter(n => n.status === 'online').length;
+  const pfails = redisNodes.filter(n => n.pfailBy.size > 0 && n.status !== 'fail').length;
+  document.getElementById('redisPfail').textContent = pfails;
+  document.getElementById('redisFail').textContent = redisNodes.filter(n => n.status === 'fail').length;
+}
+
+function drawRedis() {
+  const canvas = document.getElementById('redisCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw messages
+  redisMessages.forEach(msg => {
+    if (msg.progress < 1) {
+      const sx = msg.sx, sy = msg.sy;
+      const tx = msg.tx, ty = msg.ty;
+      const px = sx + (tx - sx) * msg.progress;
+      const py = sy + (ty - sy) * msg.progress;
+
+      // Trail
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(px, py);
+      ctx.strokeStyle = msg.color || '#58a6ff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.6;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // Dot
+      ctx.beginPath();
+      ctx.arc(px, py, 5, 0, Math.PI * 2);
+      ctx.fillStyle = msg.color || '#58a6ff';
+      ctx.fill();
+
+      // Label
+      ctx.fillStyle = msg.color || '#58a6ff';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(msg.label, px, py - 10);
+    }
+  });
+
+  // Draw connections (master-slave lines)
+  for (let i = 0; i < 3; i++) {
+    if (i + 3 < redisNodes.length) {
+      const m = redisNodes[i], s = redisNodes[i + 3];
+      if (m.status !== 'dead' && s.status !== 'dead') {
+        ctx.beginPath();
+        ctx.moveTo(m.x, m.y);
+        ctx.lineTo(s.x, s.y);
+        ctx.strokeStyle = '#21262d';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  // Draw nodes
+  redisNodes.forEach(n => {
+    if (n.status === 'dead') {
+      // Draw ghost
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = '#0d1117';
+      ctx.fill();
+      ctx.strokeStyle = '#3a1a1a';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#3a1a1a';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✕', n.x, n.y);
+      ctx.font = '10px monospace';
+      ctx.fillText(n.name, n.x, n.y + 42);
+      return;
+    }
+
+    // Pulse
+    if (n.pulse > 0) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, 30 + n.pulse * 20, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(88,166,255,${0.15 * n.pulse})`;
+      ctx.fill();
+      n.pulse = Math.max(0, n.pulse - 0.02);
+    }
+
+    // Node body
+    const r = 30;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    let bgColor, borderColor;
+    if (n.status === 'fail') {
+      bgColor = '#1a0a0a'; borderColor = '#f85149';
+    } else if (n.pfailBy.size > 0) {
+      bgColor = '#1a1a0a'; borderColor = '#e3b341';
+    } else if (n.role === 'master') {
+      bgColor = '#1a0d0d'; borderColor = '#f85149';
+    } else {
+      bgColor = '#0d1a0d'; borderColor = '#3fb950';
+    }
+    const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r);
+    grad.addColorStop(0, bgColor);
+    grad.addColorStop(1, '#0d1117');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Role badge
+    ctx.fillStyle = n.role === 'master' ? '#f85149' : '#3fb950';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(n.role === 'master' ? 'M' : 'S', n.x, n.y - 4);
+
+    // Name
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = '10px monospace';
+    ctx.fillText(n.name, n.x, n.y + 10);
+
+    // Port
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '9px monospace';
+    ctx.fillText(`:${n.port}`, n.x, n.y + r + 14);
+
+    // Status badge
+    if (n.pfailBy.size > 0 && n.status !== 'fail') {
+      ctx.fillStyle = '#e3b341';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillText('PFAIL', n.x, n.y - r - 10);
+    }
+    if (n.status === 'fail') {
+      ctx.fillStyle = '#f85149';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillText('FAIL', n.x, n.y - r - 10);
+    }
+  });
+
+  // Info box
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Cluster Gossip Round: ${redisRound}`, 20, 480);
+  const online = redisNodes.filter(n => n.status === 'online').length;
+  ctx.fillText(`Online: ${online}/${redisNodes.length}`, 20, 496);
+}
+
+function redisGossipStep() {
+  const log = document.getElementById('redisLog');
+  const onlineNodes = redisNodes.filter(n => n.status === 'online');
+  if (onlineNodes.length < 2) {
+    addLog(log, '在线节点不足，无法 Gossip', 'err');
+    return;
+  }
+
+  redisRound++;
+
+  // Pick random source
+  const src = onlineNodes[Math.floor(Math.random() * onlineNodes.length)];
+  // Pick random target (different from source)
+  const candidates = onlineNodes.filter(n => n.id !== src.id);
+  const tgt = candidates[Math.floor(Math.random() * candidates.length)];
+
+  // Create animated message
+  redisMessages.push({
+    sx: src.x, sy: src.y,
+    tx: tgt.x, ty: tgt.y,
+    progress: 0,
+    label: 'PING',
+    color: '#58a6ff',
+    srcId: src.id, tgtId: tgt.id
+  });
+
+  addLog(log, `R${redisRound}: ${src.name}(:${src.port}) → ${tgt.name}(:${tgt.port}) PING (附带 ${Math.ceil(redisNodes.length / 3)} 节点信息)`, 'info');
+  src.pulse = 1;
+
+  // After PING arrives, send PONG back
+  setTimeout(() => {
+    if (tgt.status === 'online') {
+      redisMessages.push({
+        sx: tgt.x, sy: tgt.y,
+        tx: src.x, ty: src.y,
+        progress: 0,
+        label: 'PONG',
+        color: '#3fb950',
+        srcId: tgt.id, tgtId: src.id
+      });
+      tgt.pulse = 1;
+      addLog(log, `R${redisRound}: ${tgt.name}(:${tgt.port}) → ${src.name}(:${src.port}) PONG`, '');
+
+      // Check for PFAIL
+      checkPfail();
+      updateRedisStats();
+    }
+  }, 400);
+
+  updateRedisStats();
+}
+
+function checkPfail() {
+  const log = document.getElementById('redisLog');
+  const now = Date.now();
+  redisNodes.forEach(n => {
+    if (n.status === 'online') {
+      n.pfailBy.clear();
+    }
+  });
+
+  // Check dead nodes - online nodes should mark them as PFAIL
+  redisNodes.filter(n => n.status === 'dead').forEach(dead => {
+    const onlineMasters = redisNodes.filter(n => n.status === 'online' && n.role === 'master');
+    // Randomly have some masters detect the failure
+    onlineMasters.forEach(m => {
+      if (Math.random() > 0.3) { // 70% chance of detecting
+        dead.pfailBy.add(m.id);
+      }
+    });
+
+    // Check if majority of masters agree → FAIL
+    const totalMasters = redisNodes.filter(n => n.role === 'master').length;
+    if (dead.pfailBy.size > Math.floor(totalMasters / 2)) {
+      if (dead.status !== 'fail') {
+        dead.status = 'fail';
+        addLog(log, `🔴 ${dead.name} 被标记为 FAIL (客观下线，${dead.pfailBy.size}/${totalMasters} master 确认)`, 'err');
+        // Check if failover needed
+        if (dead.role === 'master') {
+          const slaveId = dead.id + 3;
+          if (slaveId < redisNodes.length && redisNodes[slaveId].status === 'online') {
+            addLog(log, `⚡ ${redisNodes[slaveId].name} 发起故障转移，提升为新 Master`, 'warn');
+            redisNodes[slaveId].role = 'master';
+          }
+        }
+        // Broadcast FAIL message
+        redisNodes.filter(n => n.status === 'online' && n.id !== dead.id).forEach(n => {
+          redisMessages.push({
+            sx: dead.x, sy: dead.y,
+            tx: n.x, ty: n.y,
+            progress: 0,
+            label: 'FAIL',
+            color: '#f85149',
+            srcId: dead.id, tgtId: n.id
+          });
+        });
+      }
+    } else if (dead.pfailBy.size > 0 && dead.status !== 'fail') {
+      addLog(log, `🟡 ${dead.name} PFAIL (主观下线，${dead.pfailBy.size}/${totalMasters} master 标记)`, 'warn');
+    }
+  });
+}
+
+function startRedisGossip() {
+  if (redisRunning) return;
+  initRedisNodes();
+  redisRunning = true;
+  const speed = parseInt(document.getElementById('redisSpeed').value);
+  redisTimer = setInterval(() => {
+    if (!redisRunning) return;
+    redisGossipStep();
+  }, speed);
+  document.getElementById('redisLog').innerHTML = '';
+  addLog(document.getElementById('redisLog'), '集群启动，6 节点（3M+3S）', 'info');
+}
+
+function addRedisNode() {
+  const log = document.getElementById('redisLog');
+  const id = redisNodes.length;
+  const canvas = document.getElementById('redisCanvas');
+  const x = 100 + Math.random() * (canvas.width - 200);
+  const y = 200 + Math.random() * 100;
+  const newNode = {
+    id: id,
+    name: `N${id}`,
+    role: 'slave',
+    port: 7000 + id + 1,
+    x: x, y: y,
+    status: 'online',
+    pfailBy: new Set(),
+    failBy: new Set(),
+    lastPing: 0,
+    knownNodes: new Map(),
+    pulse: 1
+  };
+  redisNodes.push(newNode);
+
+  // Send MEET message from random existing node
+  const onlineNodes = redisNodes.filter(n => n.status === 'online' && n.id !== id);
+  if (onlineNodes.length > 0) {
+    const src = onlineNodes[Math.floor(Math.random() * onlineNodes.length)];
+    redisMessages.push({
+      sx: src.x, sy: src.y,
+      tx: x, ty: y,
+      progress: 0,
+      label: 'MEET',
+      color: '#bc8cff',
+      srcId: src.id, tgtId: id
+    });
+    addLog(log, `新节点 N${id} 加入集群，${src.name} 发送 MEET 消息`, 'info');
+  }
+
+  updateRedisStats();
+}
+
+function killRedisNode() {
+  const log = document.getElementById('redisLog');
+  const onlineNodes = redisNodes.filter(n => n.status === 'online');
+  if (onlineNodes.length <= 2) {
+    addLog(log, '在线节点太少，无法继续宕机', 'err');
+    return;
+  }
+  const victim = onlineNodes[Math.floor(Math.random() * onlineNodes.length)];
+  victim.status = 'dead';
+  addLog(log, `💀 ${victim.name}(:${victim.port}) 宕机！`, 'err');
+  updateRedisStats();
+}
+
+function resetRedisGossip() {
+  redisRunning = false;
+  if (redisTimer) { clearInterval(redisTimer); redisTimer = null; }
+  initRedisNodes();
+  document.getElementById('redisLog').innerHTML = '';
+}
+
+// Redis animation loop
+function animateRedis() {
+  let needsRedraw = false;
+  redisMessages = redisMessages.filter(msg => {
+    msg.progress += 0.04;
+    if (msg.progress >= 1) {
+      return false;
+    }
+    needsRedraw = true;
+    return true;
+  });
+  if (needsRedraw || redisNodes.some(n => n.pulse > 0)) {
+    drawRedis();
+  }
+  requestAnimationFrame(animateRedis);
+}
+
+// ========== TAB 3: 故障检测流程 ==========
+let failStep = 0;
+let failNodes = [];
+let failMessages = [];
+let failAnimating = false;
+
+const failStepDefs = [
+  { title: '正常运行', desc: '3 个 Master 节点正常 Gossip 通信', action: 'normal' },
+  { title: '节点 M2 宕机', desc: 'M2 进程崩溃，停止响应 PING', action: 'kill' },
+  { title: 'M1 探测超时', desc: 'M1 向 M2 发 PING，超时 15s 无响应，标记 M2 为 PFAIL', action: 'pfail_m1' },
+  { title: 'M3 探测超时', desc: 'M3 也向 M2 发 PING，超时无响应，标记 M2 为 PFAIL', action: 'pfail_m3' },
+  { title: '多数确认 → FAIL', desc: '2/3 Master 标记 PFAIL，超过半数，M2 升级为 FAIL（客观下线）', action: 'fail' },
+  { title: '广播 FAIL 消息', desc: 'M1 向所有可达节点广播 M2 的 FAIL 状态', action: 'broadcast' },
+  { title: '触发故障转移', desc: 'S2（M2 的从节点）被提升为新 Master，接管 slot', action: 'failover' }
+];
+
+function initFailDetection() {
+  const canvas = document.getElementById('failCanvas');
+  failNodes = [
+    { id: 0, name: 'M1', role: 'master', x: 200, y: 160, status: 'online', pfail: false },
+    { id: 1, name: 'M2', role: 'master', x: 450, y: 160, status: 'online', pfail: false },
+    { id: 2, name: 'M3', role: 'master', x: 700, y: 160, status: 'online', pfail: false },
+    { id: 3, name: 'S2', role: 'slave', x: 450, y: 320, status: 'online', pfail: false, master: 1 }
+  ];
+  failStep = 0;
+  failMessages = [];
+  renderFailSteps();
+  drawFail();
+}
+
+function renderFailSteps() {
+  const container = document.getElementById('failSteps');
+  container.innerHTML = failStepDefs.map((s, i) => {
+    let cls = 'fail-step';
+    if (i < failStep) cls += ' done';
+    else if (i === failStep) cls += ' active';
+    return `<div class="${cls}"><span class="badge ${i < failStep ? 'badge-green' : i === failStep ? 'badge-red' : 'badge-gray'}">${i + 1}</span><span style="font-size:13px; margin-left:8px;"><strong>${s.title}</strong> <span class="text-muted">— ${s.desc}</span></span></div>`;
+  }).join('');
+}
+
+function drawFail() {
+  const canvas = document.getElementById('failCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // M2-S2 connection
+  if (failNodes[1].status !== 'dead' || failStep >= 6) {
+    ctx.beginPath();
+    ctx.moveTo(failNodes[1].x, failNodes[1].y + 30);
+    ctx.lineTo(failNodes[3].x, failNodes[3].y - 30);
+    ctx.strokeStyle = failStep >= 6 ? '#3fb950' : '#21262d';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Draw messages
+  failMessages = failMessages.filter(msg => {
+    msg.progress += 0.05;
+    if (msg.progress >= 1) return false;
+    const px = msg.sx + (msg.tx - msg.sx) * msg.progress;
+    const py = msg.sy + (msg.ty - msg.sy) * msg.progress;
+    ctx.beginPath();
+    ctx.moveTo(msg.sx, msg.sy);
+    ctx.lineTo(px, py);
+    ctx.strokeStyle = msg.color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.6;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.fillStyle = msg.color;
+    ctx.fill();
+    ctx.fillStyle = msg.color;
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(msg.label, px, py - 8);
+    return true;
+  });
+
+  // Draw nodes
+  failNodes.forEach(n => {
+    const r = 30;
+    let bgColor = '#161b22', borderColor = '#30363d';
+
+    if (n.status === 'dead') { bgColor = '#0d1117'; borderColor = '#3a1a1a'; }
+    else if (n.status === 'fail') { bgColor = '#1a0a0a'; borderColor = '#f85149'; }
+    else if (n.pfail) { bgColor = '#1a1a0a'; borderColor = '#e3b341'; }
+    else if (n.role === 'master') { bgColor = '#1a0d0d'; borderColor = '#f85149'; }
+    else if (n.role === 'promoted') { bgColor = '#0d1a0d'; borderColor = '#3fb950'; }
+    else { bgColor = '#0d1a0d'; borderColor = '#3fb950'; }
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = bgColor;
+    ctx.fill();
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    if (n.status === 'dead') { ctx.setLineDash([4, 4]); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = borderColor;
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(n.name, n.x, n.y);
+
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '9px monospace';
+    ctx.fillText(n.role === 'promoted' ? 'Master (promoted)' : n.role, n.x, n.y + r + 12);
+
+    if (n.pfail && n.status !== 'fail') {
+      ctx.fillStyle = '#e3b341';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('PFAIL', n.x, n.y - r - 10);
+    }
+    if (n.status === 'fail') {
+      ctx.fillStyle = '#f85149';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('FAIL', n.x, n.y - r - 10);
+    }
+  });
+}
+
+function stepFailDetection() {
+  const log = document.getElementById('failLog');
+  if (failStep >= failStepDefs.length) {
+    addLog(log, '故障检测流程已完成', 'info');
+    return;
+  }
+
+  const step = failStepDefs[failStep];
+
+  switch (step.action) {
+    case 'normal':
+      // Normal PING
+      failMessages.push({ sx: failNodes[0].x, sy: failNodes[0].y, tx: failNodes[1].x, ty: failNodes[1].y, progress: 0, label: 'PING', color: '#58a6ff' });
+      failMessages.push({ sx: failNodes[2].x, sy: failNodes[2].y, tx: failNodes[1].x, ty: failNodes[1].y, progress: 0, label: 'PING', color: '#58a6ff' });
+      addLog(log, '正常状态: M1, M2, M3 互发 PING', '');
+      break;
+    case 'kill':
+      failNodes[1].status = 'dead';
+      addLog(log, '⚠ M2 宕机，停止响应所有 PING', 'err');
+      break;
+    case 'pfail_m1':
+      failMessages.push({ sx: failNodes[0].x, sy: failNodes[0].y, tx: failNodes[1].x, ty: failNodes[1].y, progress: 0, label: 'PING', color: '#e3b341' });
+      failNodes[1].pfail = true;
+      addLog(log, 'M1 → M2: PING 超时 15s，标记 M2 为 PFAIL (主观下线)', 'warn');
+      break;
+    case 'pfail_m3':
+      failMessages.push({ sx: failNodes[2].x, sy: failNodes[2].y, tx: failNodes[1].x, ty: failNodes[1].y, progress: 0, label: 'PING', color: '#e3b341' });
+      addLog(log, 'M3 → M2: PING 超时，标记 M2 为 PFAIL (主观下线)', 'warn');
+      break;
+    case 'fail':
+      failNodes[1].status = 'fail';
+      addLog(log, '2/3 Master 确认 PFAIL → M2 升级为 FAIL (客观下线)', 'err');
+      break;
+    case 'broadcast':
+      failMessages.push({ sx: failNodes[0].x, sy: failNodes[0].y, tx: failNodes[2].x, ty: failNodes[2].y, progress: 0, label: 'FAIL', color: '#f85149' });
+      failMessages.push({ sx: failNodes[0].x, sy: failNodes[0].y, tx: failNodes[3].x, ty: failNodes[3].y, progress: 0, label: 'FAIL', color: '#f85149' });
+      addLog(log, 'M1 广播 FAIL 消息: M2 已客观下线', 'err');
+      break;
+    case 'failover':
+      failNodes[3].role = 'promoted';
+      addLog(log, 'S2 提升为新 Master，接管 M2 的 slot', 'info');
+      break;
+  }
+
+  failStep++;
+  renderFailSteps();
+  drawFail();
+}
+
+function startFailDetection() {
+  initFailDetection();
+  document.getElementById('failLog').innerHTML = '';
+  failAnimating = true;
+  let step = 0;
+  const timer = setInterval(() => {
+    if (step >= failStepDefs.length || !failAnimating) {
+      clearInterval(timer);
+      return;
+    }
+    stepFailDetection();
+    step++;
+  }, 2000);
+}
+
+function resetFailDetection() {
+  failAnimating = false;
+  initFailDetection();
+  document.getElementById('failLog').innerHTML = '';
+}
+
+// Fail animation loop
+function animateFail() {
+  if (failMessages.length > 0) drawFail();
+  requestAnimationFrame(animateFail);
+}
+
+// ========== TAB 6: 收敛曲线 ==========
+let convergeData = [];
+
+function runConvergenceSim() {
+  const N = parseInt(document.getElementById('chartNodeCount').value);
+  const configs = [
+    { label: 'Push Fanout=1', fanout: 1, mode: 'push', color: '#f85149' },
+    { label: 'Push Fanout=2', fanout: 2, mode: 'push', color: '#e3b341' },
+    { label: 'Push Fanout=3', fanout: 3, mode: 'push', color: '#bc8cff' },
+    { label: 'Push-Pull Fanout=1', fanout: 1, mode: 'pushpull', color: '#3fb950' }
+  ];
+
+  convergeData = configs.map(cfg => {
+    const rounds = [];
+    let infected = new Set([0]);
+    let round = 0;
+    rounds.push(infected.size / N);
+
+    while (infected.size < N && round < 50) {
+      round++;
+      const newInfected = new Set(infected);
+      if (cfg.mode === 'push' || cfg.mode === 'pushpull') {
+        infected.forEach(node => {
+          const candidates = [];
+          for (let i = 0; i < N; i++) {
+            if (!infected.has(i)) candidates.push(i);
+          }
+          const shuffled = candidates.sort(() => Math.random() - 0.5);
+          for (let i = 0; i < Math.min(cfg.fanout, shuffled.length); i++) {
+            newInfected.add(shuffled[i]);
+          }
+        });
+      }
+      if (cfg.mode === 'pushpull') {
+        // Pull phase
+        for (let i = 0; i < N; i++) {
+          if (!newInfected.has(i)) {
+            for (let f = 0; f < cfg.fanout; f++) {
+              const target = Math.floor(Math.random() * N);
+              if (infected.has(target)) {
+                newInfected.add(i);
+                break;
+              }
+            }
+          }
+        }
+      }
+      infected = newInfected;
+      rounds.push(infected.size / N);
+    }
+
+    return { label: cfg.label, color: cfg.color, data: rounds };
+  });
+
+  drawConvergence();
+}
+
+function drawConvergence() {
+  const canvas = document.getElementById('convergeCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const w = canvas.width, h = canvas.height;
+  const pad = { top: 30, right: 20, bottom: 40, left: 50 };
+  const pw = w - pad.left - pad.right;
+  const ph = h - pad.top - pad.bottom;
+
+  // Find max rounds
+  const maxRounds = Math.max(...convergeData.map(d => d.data.length - 1), 5);
+
+  // Grid
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    const y = pad.top + ph * (1 - i / 10);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(pad.left + pw, y);
+    ctx.stroke();
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${i * 10}%`, pad.left - 6, y + 3);
+  }
+  for (let i = 0; i <= maxRounds; i++) {
+    const x = pad.left + (pw * i) / maxRounds;
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, pad.top + ph);
+    ctx.stroke();
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${i}`, x, pad.top + ph + 16);
+  }
+
+  // Axis labels
+  ctx.fillStyle = '#e3b341';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('传播轮次', pad.left + pw / 2, h - 4);
+  ctx.save();
+  ctx.translate(12, pad.top + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('感染比例', 0, 0);
+  ctx.restore();
+
+  // Draw curves
+  convergeData.forEach(cfg => {
+    ctx.beginPath();
+    cfg.data.forEach((val, i) => {
+      const x = pad.left + (pw * i) / maxRounds;
+      const y = pad.top + ph * (1 - val);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // End dot
+    const lastI = cfg.data.length - 1;
+    const lx = pad.left + (pw * lastI) / maxRounds;
+    const ly = pad.top + ph * (1 - cfg.data[lastI]);
+    ctx.beginPath();
+    ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+    ctx.fillStyle = cfg.color;
+    ctx.fill();
+  });
+
+  // Legend
+  const legendX = pad.left + 10;
+  let legendY = pad.top + 10;
+  convergeData.forEach(cfg => {
+    ctx.fillStyle = cfg.color;
+    ctx.fillRect(legendX, legendY, 12, 12);
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(cfg.label, legendX + 18, legendY + 10);
+    legendY += 18;
+  });
+}
+
+function clearConvergence() {
+  convergeData = [];
+  const canvas = document.getElementById('convergeCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+// ========== UTILITY ==========
+function addLog(el, text, cls) {
+  const line = document.createElement('div');
+  line.className = 'log-line' + (cls ? ' ' + cls : '');
+  line.textContent = text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ========== INIT ==========
+initSpreadNodes();
+initRedisNodes();
+initFailDetection();
+requestAnimationFrame(animateSpread);
+requestAnimationFrame(animateRedis);
+requestAnimationFrame(animateFail);
+</script>
+</body>
+</html>
