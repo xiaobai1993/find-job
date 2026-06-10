@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch10 — 批处理</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+:root{--bg:#0b0f15;--bg-card:#111820;--bg-el:#171f2b;--fg:#e4eaf1;--fg-m:#7a8da3;--fg-d:#3e5168;--accent:#00d4ff;--accent2:#a78bfa;--ag:rgba(0,212,255,.12);--a2g:rgba(167,139,250,.12);--danger:#ff5272;--dg:rgba(255,82,114,.12);--warn:#f5a623;--wg:rgba(245,166,35,.12);--success:#2ee6a8;--sg:rgba(46,230,168,.12);--border:#1c2736;--ba:rgba(0,212,255,.3);--radius:8px;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans SC',system-ui,sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;}html{scroll-behavior:smooth;}body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;overflow-x:hidden;}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.01) 2px,rgba(0,212,255,.01) 4px);pointer-events:none;z-index:9999;}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,15,21,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}.logo span{color:var(--fg-m);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap;}.nav-links a{font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;}.nav-links a:hover{color:var(--accent);background:var(--ag);}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,var(--ag) 0%,var(--a2g) 40%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation:hp 5s ease-in-out infinite;}
+@keyframes hp{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;}.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-m);max-width:640px;position:relative;}
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}.section-tag.t2{color:var(--accent2);}.section-tag.t3{color:var(--warn);}.section-tag.t4{color:var(--danger);}.section-tag.t5{color:var(--success);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;}.section h2 em{font-style:normal;color:var(--accent);}.section .desc{color:var(--fg-m);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+.btn{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg);cursor:pointer;transition:.2s;}.btn:hover{border-color:var(--accent);background:var(--ag);}.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}.btn.primary:hover{opacity:.85;}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;transition:border-color .3s;}.card:hover{border-color:var(--ba);}
+.mr-flow{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.mr-stages{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0;}
+.mr-stage{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;min-width:150px;text-align:center;flex:1;max-width:200px;transition:all .4s;}
+.mr-stage.active{border-color:var(--accent);box-shadow:0 0 16px var(--ag);}
+.mr-stage .stage-label{font-family:var(--mono);font-size:.75rem;font-weight:700;color:var(--accent);margin-bottom:.5rem;}
+.mr-stage .stage-data{font-family:var(--mono);font-size:.65rem;color:var(--fg-m);min-height:40px;}
+.mr-arrow{display:flex;align-items:center;color:var(--fg-d);font-size:1.2rem;}
+.mr-log{font-family:var(--mono);font-size:.72rem;color:var(--fg-m);padding:.8rem;background:var(--bg-card);border-radius:4px;margin-top:1rem;min-height:50px;}
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;}@media(max-width:768px){.compare-grid{grid-template-columns:1fr;}}
+.compare-box{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;}.compare-box h4{font-family:var(--mono);font-size:.8rem;margin-bottom:.8rem;}
+.compare-box .trait{display:flex;gap:.5rem;margin:.3rem 0;font-size:.82rem;color:var(--fg-m);}.compare-box .trait.good{color:var(--success);}.compare-box .trait.bad{color:var(--danger);}
+.join-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem;}
+.join-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;transition:border-color .3s;}.join-card:hover{border-color:var(--ba);}
+.join-card h4{font-family:var(--mono);font-size:.75rem;margin-bottom:.5rem;}.join-card .desc{font-size:.78rem;color:var(--fg-m);}.join-card .ex{font-size:.7rem;color:var(--fg-d);margin-top:.4rem;font-family:var(--mono);}
+.payment-card{background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(167,139,250,.08));border:1px solid var(--ba);border-radius:var(--radius);padding:2rem;margin-top:1rem;}.payment-card h3{color:var(--accent);font-size:1.1rem;margin-bottom:1rem;}.payment-card .point{display:flex;gap:.8rem;margin:.6rem 0;align-items:flex-start;}.payment-card .point .num{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem;flex-shrink:0;}.payment-card .point .text{font-size:.88rem;color:var(--fg-m);}
+footer{padding:3rem 2rem;text-align:center;color:var(--fg-d);font-family:var(--mono);font-size:.7rem;border-top:1px solid var(--border);margin-top:4rem;}
+</style>
+</head>
+<body>
+<nav><div class="logo">DDIA<span> · Ch10</span></div><div class="nav-links"><a href="#mr">MapReduce</a><a href="#spark">Spark</a><a href="#join">Join策略</a><a href="#payment">支付场景</a></div></nav>
+<div class="hero"><div class="hero-tag">Chapter 10</div><h1>批处理</h1><p class="hero-sub">批处理是"正确性比延迟重要"的数据处理模式。有限的输入 → 确定性的处理 → 输出。与在线服务的"请求-响应"模式截然不同。</p></div>
+
+<div class="section" id="mr">
+  <div class="section-tag t1">01 — MapReduce</div>
+  <h2>MapReduce <em>流程演示</em></h2>
+  <p class="desc">Map 提取/过滤 → Shuffle 按 key 分组 → Reduce 聚合。以支付渠道交易量统计为例。</p>
+  <div class="mr-flow">
+    <div class="mr-stages">
+      <div class="mr-stage active" id="mrInput"><div class="stage-label">输入</div><div class="stage-data" id="mrInputData">alipay order1 ¥100<br>wechat order2 ¥200<br>alipay order3 ¥150<br>unionpay order4 ¥300<br>wechat order5 ¥100</div></div>
+      <div class="mr-arrow">→</div>
+      <div class="mr-stage" id="mrMap"><div class="stage-label">Map</div><div class="stage-data" id="mrMapData"></div></div>
+      <div class="mr-arrow">→</div>
+      <div class="mr-stage" id="mrShuffle"><div class="stage-label">Shuffle</div><div class="stage-data" id="mrShuffleData"></div></div>
+      <div class="mr-arrow">→</div>
+      <div class="mr-stage" id="mrReduce"><div class="stage-label">Reduce</div><div class="stage-data" id="mrReduceData"></div></div>
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;">
+      <button class="btn primary" onclick="mrStep()">下一步</button>
+      <button class="btn" onclick="mrAll()">全部执行</button>
+      <button class="btn" onclick="mrReset()">重置</button>
+    </div>
+    <div class="mr-log" id="mrLog">点击「下一步」逐步执行 MapReduce</div>
+  </div>
+</div>
+
+<div class="section" id="spark">
+  <div class="section-tag t5">02 — Spark vs MR</div>
+  <h2>Spark <em>内存迭代</em></h2>
+  <p class="desc">Spark 用内存迭代替代 MapReduce 的磁盘 I/O，速度快 10~100 倍。RDD 通过血缘关系实现容错。</p>
+  <div class="compare-grid">
+    <div class="compare-box" style="border-top:3px solid var(--danger);">
+      <h4 style="color:var(--danger)">MapReduce</h4>
+      <div class="trait bad">每轮写磁盘 → 极慢</div>
+      <div class="trait bad">不支持迭代</div>
+      <div class="trait bad">编程模型受限（Map/Reduce）</div>
+      <div class="trait good">简单可靠</div>
+      <div style="font-family:var(--mono);font-size:.65rem;color:var(--fg-d);margin-top:.5rem;">磁盘 → Map → 磁盘 → Shuffle → 磁盘 → Reduce → 磁盘</div>
+    </div>
+    <div class="compare-box" style="border-top:3px solid var(--success);">
+      <h4 style="color:var(--success)">Spark</h4>
+      <div class="trait good">内存迭代 → 快 10~100x</div>
+      <div class="trait good">天然支持迭代</div>
+      <div class="trait good">丰富算子（filter/map/groupBy/join）</div>
+      <div class="trait">RDD 血缘容错</div>
+      <div style="font-family:var(--mono);font-size:.65rem;color:var(--fg-d);margin-top:.5rem;">内存 → Map → 内存 → Shuffle → 内存 → Reduce</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="join">
+  <div class="section-tag t2">03 — Join Strategies</div>
+  <h2>批处理中的 <em>Join 策略</em></h2>
+  <p class="desc">Join 是批处理最复杂的操作。三种策略适合不同数据规模组合。</p>
+  <div class="join-grid">
+    <div class="join-card"><h4 style="color:var(--accent)">排序合并 Join</h4><div class="desc">两个输入按 join key 排序，线性扫描合并。</div><div class="ex">交易表(JOIN)订单表 → 两大表</div></div>
+    <div class="join-card"><h4 style="color:var(--accent2)">广播哈希 Join</h4><div class="desc">小表广播到所有节点放入内存哈希表，大表流式扫描。</div><div class="ex">交易表(JOIN)商户表 → 一大一小</div></div>
+    <div class="join-card"><h4 style="color:var(--warn)">分区哈希 Join</h4><div class="desc">两表按相同方式分区，同一分区数据在同一节点本地 join。</div><div class="ex">两表预分区 → 两大表</div></div>
+  </div>
+</div>
+
+<div class="section" id="payment">
+  <div class="section-tag t3">04 — Payment Domain</div>
+  <h2>支付场景<em>批处理</em></h2>
+  <div class="payment-card">
+    <h3>支付系统的批处理应用</h3>
+    <div class="point"><div class="num">01</div><div class="text">T+1 对账：每天凌晨批处理对账 → 交易流水 vs 银行清算文件 → 发现差异自动报警。</div></div>
+    <div class="point"><div class="num">02</div><div class="text">统计报表：渠道交易量、成功率、平均金额 → Spark 聚合 → 写入 MySQL 报表库。</div></div>
+    <div class="point"><div class="num">03</div><div class="text">风控特征：历史交易批处理计算用户画像 → 写入特征库 → 实时风控读取。</div></div>
+    <div style="margin-top:1.2rem;padding:1rem;background:var(--bg-el);border-radius:6px;border-left:3px solid var(--accent);">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.3rem;">面试关键</div>
+      <div style="font-size:.88rem;color:var(--fg);">"批处理的核心原则：输入不可变、确定性、可重跑。支付对账用 Spark 批处理保证正确性，交易表 JOIN 商户表用广播哈希 Join（商户表小）。"</div>
+    </div>
+  </div>
+</div>
+<footer>DDIA · Chapter 10 · 批处理 · Visualization</footer>
+<script>
+let mrStepIdx=0;
+const mrSteps=[
+  {id:'mrMap',log:'Map 阶段：提取 (channel, 1)',data:'("alipay",1)<br>("wechat",1)<br>("alipay",1)<br>("unionpay",1)<br>("wechat",1)'},
+  {id:'mrShuffle',log:'Shuffle 阶段：按 channel 分组',data:'alipay → [1,1]<br>wechat → [1,1]<br>unionpay → [1]'},
+  {id:'mrReduce',log:'Reduce 阶段：聚合求和',data:'alipay → <b style="color:var(--success)">¥250 (2笔)</b><br>wechat → <b style="color:var(--success)">¥300 (2笔)</b><br>unionpay → <b style="color:var(--success)">¥300 (1笔)</b>'}
+];
+function mrStep(){
+  if(mrStepIdx>=mrSteps.length)return;
+  const s=mrSteps[mrStepIdx];
+  document.getElementById(s.id).classList.add('active');
+  document.getElementById(s.id.replace('mr','mr').replace('Map','MapData').replace('Shuffle','ShuffleData').replace('Reduce','ReduceData')).innerHTML=s.data;
+  document.getElementById('mrLog').innerHTML+='<div style="color:var(--accent)">'+s.log+'</div>';
+  mrStepIdx++;
+}
+function mrAll(){while(mrStepIdx<mrSteps.length)mrStep();}
+function mrReset(){
+  mrStepIdx=0;
+  ['mrMap','mrShuffle','mrReduce'].forEach(id=>{document.getElementById(id).classList.remove('active');});
+  document.getElementById('mrMapData').innerHTML='';
+  document.getElementById('mrShuffleData').innerHTML='';
+  document.getElementById('mrReduceData').innerHTML='';
+  document.getElementById('mrLog').innerHTML='点击「下一步」逐步执行 MapReduce';
+}
+</script>
+</body>
+</html>

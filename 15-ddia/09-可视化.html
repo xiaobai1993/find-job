@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch9 — 一致性与共识</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+:root{
+  --bg:#0b0f15;--bg-card:#111820;--bg-el:#171f2b;--fg:#e4eaf1;--fg-m:#7a8da3;--fg-d:#3e5168;
+  --accent:#00d4ff;--accent2:#a78bfa;--ag:rgba(0,212,255,.12);--a2g:rgba(167,139,250,.12);
+  --danger:#ff5272;--dg:rgba(255,82,114,.12);--warn:#f5a623;--wg:rgba(245,166,35,.12);
+  --success:#2ee6a8;--sg:rgba(46,230,168,.12);--border:#1c2736;--ba:rgba(0,212,255,.3);
+  --radius:8px;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans SC',system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;overflow-x:hidden;}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.01) 2px,rgba(0,212,255,.01) 4px);pointer-events:none;z-index:9999;}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,15,21,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}
+.logo span{color:var(--fg-m);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap;}
+.nav-links a{font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;}
+.nav-links a:hover{color:var(--accent);background:var(--ag);}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,var(--ag) 0%,var(--a2g) 40%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation:hp 5s ease-in-out infinite;}
+@keyframes hp{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;}
+.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-m);max-width:640px;position:relative;}
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}
+.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}.section-tag.t2{color:var(--accent2);}.section-tag.t3{color:var(--warn);}.section-tag.t4{color:var(--danger);}.section-tag.t5{color:var(--success);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;}
+.section h2 em{font-style:normal;color:var(--accent);}
+.section .desc{color:var(--fg-m);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+.btn{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg);cursor:pointer;transition:.2s;}
+.btn:hover{border-color:var(--accent);background:var(--ag);}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}
+.btn.primary:hover{opacity:.85;}
+.btn.danger{border-color:var(--danger);color:var(--danger);}
+
+/* Consistency spectrum */
+.spectrum-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.spectrum-bar{position:relative;height:50px;background:linear-gradient(90deg,var(--danger),var(--warn),var(--accent2),var(--accent),var(--success));border-radius:25px;margin:1rem 0;overflow:hidden;}
+.spectrum-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.68rem;color:var(--fg-m);margin-top:.3rem;}
+.spectrum-marker{position:absolute;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:white;border:2px solid var(--bg);transition:left .5s;box-shadow:0 0 8px rgba(255,255,255,.5);}
+.spectrum-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-top:1rem;}
+.spectrum-item{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:1rem;transition:all .3s;cursor:pointer;}
+.spectrum-item:hover{border-color:var(--ba);}
+.spectrum-item.active{border-color:var(--accent);background:var(--ag);}
+.spectrum-item .name{font-family:var(--mono);font-size:.78rem;font-weight:700;margin-bottom:.3rem;}
+.spectrum-item .detail{font-size:.72rem;color:var(--fg-m);}
+
+/* CAP */
+.cap-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.cap-triangle{position:relative;width:300px;height:260px;margin:1rem auto;}
+.cap-vertex{position:absolute;font-family:var(--mono);font-size:.85rem;font-weight:700;}
+.cap-vertex.c{top:0;left:50%;transform:translateX(-50%);color:var(--accent);}
+.cap-vertex.a{bottom:0;left:10%;color:var(--success);}
+.cap-vertex.p{bottom:0;right:10%;color:var(--danger);}
+.cap-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-align:center;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:.6rem 1rem;}
+.cap-scenarios{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;}
+@media(max-width:600px){.cap-scenarios{grid-template-columns:1fr;}}
+.cap-scenario{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:1rem;}
+.cap-scenario h4{font-family:var(--mono);font-size:.75rem;margin-bottom:.5rem;}
+.cap-scenario.cp h4{color:var(--accent);}
+.cap-scenario.ap h4{color:var(--success);}
+.cap-scenario .ex{font-size:.75rem;color:var(--fg-m);}
+.cap-scenario .sys{font-family:var(--mono);font-size:.65rem;color:var(--fg-d);margin-top:.3rem;}
+
+/* Raft */
+.raft-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.raft-nodes{display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;margin:1rem 0;}
+.raft-node{background:var(--bg-card);border:2px solid var(--border);border-radius:10px;padding:1rem;width:130px;text-align:center;transition:all .5s;position:relative;}
+.raft-node.follower{border-color:var(--fg-d);}
+.raft-node.candidate{border-color:var(--warn);box-shadow:0 0 16px var(--wg);}
+.raft-node.leader{border-color:var(--accent);box-shadow:0 0 20px var(--ag);}
+.raft-node.dead{border-color:var(--danger);opacity:.5;}
+.raft-node .role{font-family:var(--mono);font-size:.7rem;font-weight:700;margin-bottom:.3rem;}
+.raft-node .role.f{color:var(--fg-m);}
+.raft-node .role.c{color:var(--warn);}
+.raft-node .role.l{color:var(--accent);}
+.raft-node .node-name{font-size:.72rem;color:var(--fg-m);}
+.raft-node .term{font-family:var(--mono);font-size:.65rem;color:var(--fg-d);margin-top:.3rem;}
+.raft-node .log{font-family:var(--mono);font-size:.6rem;color:var(--fg-d);margin-top:.3rem;min-height:1.5rem;}
+.raft-node .vote-arrow{position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:.8rem;color:var(--warn);opacity:0;transition:opacity .3s;}
+.raft-node .vote-arrow.show{opacity:1;}
+.raft-log{font-family:var(--mono);font-size:.72rem;color:var(--fg-m);padding:.8rem;background:var(--bg-card);border-radius:4px;margin-top:1rem;min-height:60px;max-height:180px;overflow-y:auto;}
+.raft-log .accent{color:var(--accent);}.raft-log .warn{color:var(--warn);}.raft-log .ok{color:var(--success);}.raft-log .err{color:var(--danger);}
+
+/* 2PC */
+.twopc-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.twopc-flow{display:flex;flex-direction:column;gap:.5rem;align-items:center;margin:1rem 0;}
+.twopc-row{display:flex;gap:.5rem;align-items:center;font-family:var(--mono);font-size:.7rem;}
+.twopc-row .label{width:80px;text-align:right;color:var(--fg-m);}
+.twopc-row .msg{padding:.3rem .6rem;border-radius:3px;font-size:.65rem;transition:all .3s;opacity:.4;}
+.twopc-row .msg.active{opacity:1;transform:scale(1.05);}
+.twopc-row .msg.prepare{background:var(--wg);color:var(--warn);}
+.twopc-row .msg.yes{background:var(--sg);color:var(--success);}
+.twopc-row .msg.commit{background:var(--ag);color:var(--accent);}
+.twopc-row .msg.abort{background:var(--dg);color:var(--danger);}
+
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;}
+.payment-card{background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(167,139,250,.08));border:1px solid var(--ba);border-radius:var(--radius);padding:2rem;margin-top:1rem;}
+.payment-card h3{color:var(--accent);font-size:1.1rem;margin-bottom:1rem;}
+.payment-card .point{display:flex;gap:.8rem;margin:.6rem 0;align-items:flex-start;}
+.payment-card .point .num{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem;flex-shrink:0;}
+.payment-card .point .text{font-size:.88rem;color:var(--fg-m);}
+footer{padding:3rem 2rem;text-align:center;color:var(--fg-d);font-family:var(--mono);font-size:.7rem;border-top:1px solid var(--border);margin-top:4rem;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--fg-d);border-radius:3px;}
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo">DDIA<span> · Ch9</span></div>
+  <div class="nav-links">
+    <a href="#spectrum">一致性谱系</a>
+    <a href="#cap">CAP</a>
+    <a href="#raft">Raft</a>
+    <a href="#twopc">2PC</a>
+    <a href="#payment">支付场景</a>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="hero-tag">Chapter 09</div>
+  <h1>一致性与<em>共识</em></h1>
+  <p class="hero-sub">一致性模型定义了"在并发和故障下，系统应该呈现什么样的行为"。共识是分布式系统最根本的问题——让多个节点对某个值达成一致。</p>
+</div>
+
+<!-- Consistency Spectrum -->
+<div class="section" id="spectrum">
+  <div class="section-tag t1">01 — Spectrum</div>
+  <h2>一致性模型<em>谱系</em></h2>
+  <p class="desc">从最强到最弱：线性一致 → 顺序一致 → 因果一致 → 最终一致。越强越贵，越弱越快。</p>
+  <div class="spectrum-container">
+    <div class="spectrum-bar"><div class="spectrum-marker" id="specMarker" style="left:75%"></div></div>
+    <div class="spectrum-labels"><span>最终一致</span><span>因果一致</span><span>顺序一致</span><span>线性一致</span></div>
+    <div class="spectrum-info">
+      <div class="spectrum-item" onclick="selectSpectrum(0)"><div class="name" style="color:var(--success)">线性一致</div><div class="detail">实时顺序 · 分区时不可用 · 延迟高<br>支付余额查询</div></div>
+      <div class="spectrum-item" onclick="selectSpectrum(1)"><div class="name" style="color:var(--accent)">顺序一致</div><div class="detail">程序顺序 · 不保证实时<br>较少使用</div></div>
+      <div class="spectrum-item" onclick="selectSpectrum(2)"><div class="name" style="color:var(--accent2)">因果一致</div><div class="detail">因果顺序 · 分区时可用 · 延迟中<br>社交评论</div></div>
+      <div class="spectrum-item" onclick="selectSpectrum(3)"><div class="name" style="color:var(--warn)">最终一致</div><div class="detail">收敛 · 最高可用 · 延迟低<br>DNS 缓存</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- CAP -->
+<div class="section" id="cap">
+  <div class="section-tag t3">02 — CAP Theorem</div>
+  <h2>CAP 定理的<em>真正含义</em></h2>
+  <p class="desc">在网络分区（P）发生时，系统必须在一致性（C）和可用性（A）之间二选一。不是"三选二"，而是"分区时选 C 或 A"。</p>
+  <div class="cap-container">
+    <div class="cap-triangle">
+      <div class="cap-vertex c">C 一致性</div>
+      <div class="cap-vertex a">A 可用性</div>
+      <div class="cap-vertex p">P 分区容忍</div>
+      <div class="cap-center">分区时<br>选 C 或 A</div>
+    </div>
+    <div class="cap-scenarios">
+      <div class="cap-scenario cp">
+        <h4>CP 系统</h4>
+        <div class="ex">保证线性一致，拒绝请求。宁可不可用也不返回错误数据。</div>
+        <div class="sys">ZooKeeper, etcd, HBase</div>
+        <div style="margin-top:.5rem;padding:.4rem;background:var(--ag);border-radius:4px;font-size:.72rem;color:var(--accent);">支付系统选 CP → 宁可拒绝也不能返回错误余额</div>
+      </div>
+      <div class="cap-scenario ap">
+        <h4>AP 系统</h4>
+        <div class="ex">保证可用，返回旧数据。最终所有副本收敛。</div>
+        <div class="sys">Cassandra, DynamoDB, DNS</div>
+        <div style="margin-top:.5rem;padding:.4rem;background:var(--sg);border-radius:4px;font-size:.72rem;color:var(--success);">适合读多写少、可容忍短暂不一致的场景</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Raft -->
+<div class="section" id="raft">
+  <div class="section-tag t2">03 — Raft</div>
+  <h2>Raft <em>选举动画</em></h2>
+  <p class="desc">Raft 是易于理解的共识算法。核心机制：领导者选举、日志复制、安全性。点击按钮模拟选举过程。</p>
+  <div class="raft-container">
+    <div class="raft-nodes" id="raftNodes">
+      <div class="raft-node leader" id="rn0">
+        <div class="vote-arrow">🗳️</div>
+        <div class="role l">⭐ Leader</div>
+        <div class="node-name">Node A</div>
+        <div class="term">Term: 1</div>
+        <div class="log">[x=5][y=3]</div>
+      </div>
+      <div class="raft-node follower" id="rn1">
+        <div class="vote-arrow">🗳️</div>
+        <div class="role f">Follower</div>
+        <div class="node-name">Node B</div>
+        <div class="term">Term: 1</div>
+        <div class="log">[x=5][y=3]</div>
+      </div>
+      <div class="raft-node follower" id="rn2">
+        <div class="vote-arrow">🗳️</div>
+        <div class="role f">Follower</div>
+        <div class="node-name">Node C</div>
+        <div class="term">Term: 1</div>
+        <div class="log">[x=5][y=2]</div>
+      </div>
+      <div class="raft-node follower" id="rn3">
+        <div class="vote-arrow">🗳️</div>
+        <div class="role f">Follower</div>
+        <div class="node-name">Node D</div>
+        <div class="term">Term: 1</div>
+        <div class="log">[x=5][y=3]</div>
+      </div>
+      <div class="raft-node follower" id="rn4">
+        <div class="vote-arrow">🗳️</div>
+        <div class="role f">Follower</div>
+        <div class="node-name">Node E</div>
+        <div class="term">Term: 1</div>
+        <div class="log">[x=5]</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;">
+      <button class="btn primary" onclick="raftLeaderDown()">Leader 宕机</button>
+      <button class="btn" onclick="raftElection()">发起选举</button>
+      <button class="btn" onclick="raftLogRepl()">日志复制</button>
+      <button class="btn danger" onclick="raftReset()">重置</button>
+    </div>
+    <div class="raft-log" id="raftLog">5 个节点组成 Raft 集群，Node A 是 Leader (Term 1)</div>
+  </div>
+</div>
+
+<!-- 2PC -->
+<div class="section" id="twopc">
+  <div class="section-tag t4">04 — Two-Phase Commit</div>
+  <h2>两阶段提交 <em>2PC</em></h2>
+  <p class="desc">用于分布式事务。协调者先问所有参与者"准备好了吗"，全部 YES 才提交。问题：协调者崩溃时参与者必须等待 → 阻塞。</p>
+  <div class="twopc-container">
+    <div class="twopc-flow">
+      <div class="twopc-row"><div class="label">协调者</div><div class="msg prepare active" id="tpPrepare">PREPARE →</div><div class="msg commit" id="tpCommit">COMMIT →</div></div>
+      <div class="twopc-row"><div class="label">参与者1</div><div class="msg yes" id="tpYes1">← YES</div><div class="msg commit" id="tpCommit1">← COMMIT</div></div>
+      <div class="twopc-row"><div class="label">参与者2</div><div class="msg yes" id="tpYes2">← YES</div><div class="msg commit" id="tpCommit2">← COMMIT</div></div>
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;">
+      <button class="btn primary" onclick="twopcRun()">执行 2PC</button>
+      <button class="btn" onclick="twopcAbort()">参与者拒绝</button>
+      <button class="btn danger" onclick="twopcCrash()">协调者崩溃</button>
+      <button class="btn" onclick="twopcReset()">重置</button>
+    </div>
+    <div class="raft-log" id="twopcLog">点击按钮模拟 2PC 流程</div>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="section" id="payment">
+  <div class="section-tag t3">05 — Payment Domain</div>
+  <h2>支付场景<em>选 CP</em></h2>
+  <div class="payment-card">
+    <h3>支付系统的一致性选择</h3>
+    <div class="point"><div class="num">01</div><div class="text">支付系统选 CP → 宁可拒绝也不能返回错误余额。用户宁愿看到"系统繁忙"也不能看到错误的账户余额。</div></div>
+    <div class="point"><div class="num">02</div><div class="text">etcd 用于：分布式锁（防止重复支付）、领导者选举（对账系统多实例）、配置中心（支付路由规则）。</div></div>
+    <div class="point"><div class="num">03</div><div class="text">跨服务事务：不用 2PC（太重），用Saga模式 + 补偿操作。支付失败自动退款就是补偿。</div></div>
+    <div class="point"><div class="num">04</div><div class="text">Lamport 时间戳在支付中的应用：跨服务调用链追踪，保证因果顺序。</div></div>
+    <div style="margin-top:1.2rem;padding:1rem;background:var(--bg-el);border-radius:6px;border-left:3px solid var(--accent);">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.3rem;">面试关键</div>
+      <div style="font-size:.88rem;color:var(--fg);">"支付系统选 CP，宁可拒绝也不返回错误数据。用 etcd 做分布式锁和配置中心，不用 2PC 做跨服务事务——用 Saga + 补偿。Raft 保证了 etcd 的强一致。"</div>
+    </div>
+  </div>
+</div>
+
+<footer>DDIA · Chapter 09 · 一致性与共识 · Visualization</footer>
+
+<script>
+// Consistency spectrum
+function selectSpectrum(idx){
+  const positions=['87%','62%','38%','12%'];
+  document.getElementById('specMarker').style.left=positions[idx];
+  document.querySelectorAll('.spectrum-item').forEach((el,i)=>{el.classList.toggle('active',i===idx);});
+}
+
+// Raft election
+let raftState={leader:0,term:1,phase:'stable'};
+const raftNodes=document.querySelectorAll('.raft-node');
+
+function raftLeaderDown(){
+  if(raftState.phase!=='stable')return;
+  raftState.phase='election';
+  const log=document.getElementById('raftLog');
+  const n0=document.getElementById('rn0');
+  n0.classList.remove('leader');
+  n0.classList.add('dead');
+  n0.querySelector('.role').className='role err';
+  n0.querySelector('.role').textContent='💀 Dead';
+  log.innerHTML='<div class="err">❌ Node A (Leader) 宕机！心跳超时</div>';
+  log.innerHTML+='<div class="warn">其他节点等待心跳超时 → 准备选举</div>';
+}
+
+function raftElection(){
+  if(raftState.phase!=='election')return;
+  raftState.phase='voting';
+  raftState.term++;
+  const log=document.getElementById('raftLog');
+
+  // Node B becomes candidate
+  const n1=document.getElementById('rn1');
+  n1.classList.remove('follower');
+  n1.classList.add('candidate');
+  n1.querySelector('.role').className='role c';
+  n1.querySelector('.role').textContent='🎯 Candidate';
+  n1.querySelector('.term').textContent='Term: '+raftState.term;
+
+  log.innerHTML+='<div class="warn">🗳️ Node B 发起选举 (Term '+raftState.term+')</div>';
+  log.innerHTML+='<div>Node B 请求投票 → 发送给 C, D, E</div>';
+
+  // Show vote arrows
+  setTimeout(()=>{
+    document.querySelectorAll('.vote-arrow').forEach(a=>a.classList.add('show'));
+    log.innerHTML+='<div class="ok">Node C: ✓ (日志更完整，投票给 B)</div>';
+    log.innerHTML+='<div class="ok">Node D: ✓ (日志更完整，投票给 B)</div>';
+    log.innerHTML+='<div>Node B 获得 3 票（多数）→ 成为 Leader</div>';
+
+    setTimeout(()=>{
+      n1.classList.remove('candidate');
+      n1.classList.add('leader');
+      n1.querySelector('.role').className='role l';
+      n1.querySelector('.role').textContent='⭐ Leader';
+      document.querySelectorAll('.vote-arrow').forEach(a=>a.classList.remove('show'));
+      raftState.leader=1;
+      raftState.phase='stable';
+      log.innerHTML+='<div class="accent">✓ Node B 当选 Leader (Term '+raftState.term+')</div>';
+      log.innerHTML+='<div class="ok">选举限制：只有日志最完整的候选人才能被选为 Leader</div>';
+    },800);
+  },600);
+}
+
+function raftLogRepl(){
+  if(raftState.phase!=='stable'||raftState.leader!==1)return;
+  const log=document.getElementById('raftLog');
+  const leaderEl=document.getElementById('rn1');
+  leaderEl.querySelector('.log').textContent='[x=5][y=3][z=1]';
+
+  log.innerHTML+='<div class="accent">Leader (Node B) 追加日志: z=1</div>';
+  log.innerHTML+='<div>复制到 Node C, D, E ...</div>';
+
+  setTimeout(()=>{
+    document.getElementById('rn2').querySelector('.log').textContent='[x=5][y=2][z=1]';
+    document.getElementById('rn3').querySelector('.log').textContent='[x=5][y=3][z=1]';
+    log.innerHTML+='<div class="ok">多数节点确认 → Leader 提交 log[z=1]</div>';
+
+    setTimeout(()=>{
+      document.getElementById('rn4').querySelector('.log').textContent='[x=5][z=1]';
+      log.innerHTML+='<div>通知 Follower 提交</div>';
+    },400);
+  },600);
+}
+
+function raftReset(){
+  raftState={leader:0,term:1,phase:'stable'};
+  const configs=[
+    {id:'rn0',cls:'leader',role:'⭐ Leader',roleCls:'l',log:'[x=5][y=3]'},
+    {id:'rn1',cls:'follower',role:'Follower',roleCls:'f',log:'[x=5][y=3]'},
+    {id:'rn2',cls:'follower',role:'Follower',roleCls:'f',log:'[x=5][y=2]'},
+    {id:'rn3',cls:'follower',role:'Follower',roleCls:'f',log:'[x=5][y=3]'},
+    {id:'rn4',cls:'follower',role:'Follower',roleCls:'f',log:'[x=5]'}
+  ];
+  configs.forEach(c=>{
+    const el=document.getElementById(c.id);
+    el.className='raft-node '+c.cls;
+    el.querySelector('.role').className='role '+c.roleCls;
+    el.querySelector('.role').textContent=c.role;
+    el.querySelector('.term').textContent='Term: 1';
+    el.querySelector('.log').textContent=c.log;
+  });
+  document.getElementById('raftLog').innerHTML='5 个节点组成 Raft 集群，Node A 是 Leader (Term 1)';
+}
+
+// 2PC
+let twopcPhase=0;
+function twopcRun(){
+  twopcReset();
+  twopcPhase=1;
+  const log=document.getElementById('twopcLog');
+  log.innerHTML='<div class="warn">Phase 1: PREPARE</div>';
+  document.getElementById('tpPrepare').classList.add('active');
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="ok">参与者1: YES</div>';
+    document.getElementById('tpYes1').classList.add('active');
+  },500);
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="ok">参与者2: YES</div>';
+    document.getElementById('tpYes2').classList.add('active');
+  },1000);
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="accent">Phase 2: COMMIT</div>';
+    document.getElementById('tpCommit').classList.add('active');
+  },1500);
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="ok">参与者1: COMMITTED ✓</div>';
+    log.innerHTML+='<div class="ok">参与者2: COMMITTED ✓</div>';
+    document.getElementById('tpCommit1').classList.add('active');
+    document.getElementById('tpCommit2').classList.add('active');
+  },2000);
+}
+
+function twopcAbort(){
+  twopcReset();
+  const log=document.getElementById('twopcLog');
+  log.innerHTML='<div class="warn">Phase 1: PREPARE</div>';
+  document.getElementById('tpPrepare').classList.add('active');
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="ok">参与者1: YES</div>';
+    document.getElementById('tpYes1').classList.add('active');
+  },500);
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="err">参与者2: NO (约束检查失败)</div>';
+  },1000);
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="err">Phase 2: ABORT</div>';
+    log.innerHTML+='<div>所有参与者回滚</div>';
+  },1500);
+}
+
+function twopcCrash(){
+  twopcReset();
+  const log=document.getElementById('twopcLog');
+  log.innerHTML='<div class="warn">Phase 1: PREPARE</div>';
+  document.getElementById('tpPrepare').classList.add('active');
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="ok">参与者1: YES (持有锁)</div>';
+    log.innerHTML+='<div class="ok">参与者2: YES (持有锁)</div>';
+    document.getElementById('tpYes1').classList.add('active');
+    document.getElementById('tpYes2').classList.add('active');
+  },500);
+
+  setTimeout(()=>{
+    log.innerHTML+='<div class="err">💀 协调者崩溃！</div>';
+    log.innerHTML+='<div class="err">参与者持有锁等待 → 系统卡住（阻塞）</div>';
+    log.innerHTML+='<div style="color:var(--fg-d)">这是 2PC 的核心问题：协调者是单点，崩溃时参与者必须等待</div>';
+  },1000);
+}
+
+function twopcReset(){
+  twopcPhase=0;
+  document.querySelectorAll('.twopc-container .msg').forEach(m=>m.classList.remove('active'));
+  document.getElementById('twopcLog').innerHTML='点击按钮模拟 2PC 流程';
+}
+</script>
+</body>
+</html>

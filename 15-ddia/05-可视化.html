@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch5 — 复制</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+:root{
+  --bg:#0b0f15;--bg-card:#111820;--bg-el:#171f2b;--fg:#e4eaf1;--fg-m:#7a8da3;--fg-d:#3e5168;
+  --accent:#00d4ff;--accent2:#a78bfa;--ag:rgba(0,212,255,.12);--a2g:rgba(167,139,250,.12);
+  --danger:#ff5272;--dg:rgba(255,82,114,.12);--warn:#f5a623;--wg:rgba(245,166,35,.12);
+  --success:#2ee6a8;--sg:rgba(46,230,168,.12);--border:#1c2736;--ba:rgba(0,212,255,.3);
+  --radius:8px;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans SC',system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;overflow-x:hidden;}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.01) 2px,rgba(0,212,255,.01) 4px);pointer-events:none;z-index:9999;}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,15,21,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}
+.logo span{color:var(--fg-m);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap;}
+.nav-links a{font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;}
+.nav-links a:hover{color:var(--accent);background:var(--ag);}
+
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,var(--ag) 0%,var(--a2g) 40%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation:hp 5s ease-in-out infinite;}
+@keyframes hp{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;}
+.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-m);max-width:640px;position:relative;}
+
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}
+.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}.section-tag.t2{color:var(--accent2);}.section-tag.t3{color:var(--warn);}.section-tag.t4{color:var(--danger);}.section-tag.t5{color:var(--success);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;letter-spacing:-.01em;}
+.section h2 em{font-style:normal;color:var(--accent);}
+.section .desc{color:var(--fg-m);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;transition:border-color .3s;}
+.card:hover{border-color:var(--ba);}
+.card h3{font-size:1.15rem;font-weight:700;margin-bottom:1rem;}
+
+.btn{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg);cursor:pointer;transition:.2s;}
+.btn:hover{border-color:var(--accent);background:var(--ag);}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}
+.btn.primary:hover{opacity:.85;}
+.btn.danger{border-color:var(--danger);color:var(--danger);}
+
+/* Replication animation */
+.repl-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.repl-nodes{display:flex;gap:2rem;justify-content:center;align-items:flex-end;flex-wrap:wrap;margin-bottom:1rem;}
+.repl-node{display:flex;flex-direction:column;align-items:center;min-width:130px;}
+.repl-node .node-box{background:var(--bg-card);border:2px solid var(--border);border-radius:8px;padding:1rem;width:130px;text-align:center;transition:all .4s;}
+.repl-node .node-box.leader{border-color:var(--accent);}
+.repl-node .node-box.syncing{border-color:var(--warn);box-shadow:0 0 16px var(--wg);}
+.repl-node .node-box.synced{border-color:var(--success);box-shadow:0 0 16px var(--sg);}
+.repl-node .node-box.lagging{border-color:var(--danger);box-shadow:0 0 16px var(--dg);}
+.repl-node .node-label{font-family:var(--mono);font-size:.7rem;font-weight:700;margin-bottom:.4rem;}
+.repl-node .node-label.leader{color:var(--accent);}
+.repl-node .node-label.follower{color:var(--fg-m);}
+.repl-node .node-data{font-family:var(--mono);font-size:.72rem;color:var(--fg-m);margin-top:.4rem;min-height:3.5rem;}
+.repl-node .node-data .entry{padding:.15rem 0;animation:fadeIn .3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+.repl-node .repl-badge{font-family:var(--mono);font-size:.6rem;padding:.15rem .4rem;border-radius:3px;margin-top:.3rem;}
+.repl-node .repl-badge.sync{background:var(--sg);color:var(--success);}
+.repl-node .repl-badge.async{background:var(--wg);color:var(--warn);}
+.repl-node .repl-badge.lag{background:var(--dg);color:var(--danger);}
+
+.repl-client{display:flex;gap:.5rem;align-items:center;justify-content:center;margin-bottom:1rem;flex-wrap:wrap;}
+.repl-client .client-box{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:.6rem 1rem;font-family:var(--mono);font-size:.7rem;}
+
+/* Replication lag scenarios */
+.lag-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.lag-tabs{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap;}
+.lag-tab{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg-m);cursor:pointer;transition:.2s;}
+.lag-tab:hover,.lag-tab.active{border-color:var(--accent);color:var(--accent);background:var(--ag);}
+.lag-scenario{display:none;padding:1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;}
+.lag-scenario.active{display:block;}
+.lag-timeline{display:flex;align-items:center;gap:.3rem;margin:.5rem 0;flex-wrap:wrap;font-family:var(--mono);font-size:.7rem;}
+.lag-timeline .step{padding:.3rem .6rem;border-radius:3px;background:rgba(255,255,255,.03);}
+.lag-timeline .step.write{background:var(--ag);color:var(--accent);}
+.lag-timeline .step.read{background:var(--a2g);color:var(--accent2);}
+.lag-timeline .step.error{background:var(--dg);color:var(--danger);}
+.lag-timeline .step.fix{background:var(--sg);color:var(--success);}
+.lag-timeline .arrow{color:var(--fg-d);}
+
+/* Quorum */
+.quorum-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.quorum-controls{display:flex;gap:1.5rem;margin-bottom:1rem;flex-wrap:wrap;justify-content:center;}
+.quorum-slider{display:flex;flex-direction:column;align-items:center;gap:.3rem;}
+.quorum-slider label{font-family:var(--mono);font-size:.72rem;color:var(--fg-m);}
+.quorum-slider input[type="range"]{width:120px;accent-color:var(--accent);}
+.quorum-slider .val{font-family:var(--mono);font-size:.85rem;font-weight:700;color:var(--accent);}
+.quorum-nodes{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0;}
+.quorum-node{width:60px;height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:50%;border:2px solid var(--border);background:var(--bg-card);font-family:var(--mono);font-size:.65rem;transition:all .3s;}
+.quorum-node.written{border-color:var(--success);background:var(--sg);color:var(--success);}
+.quorum-node.read{border-color:var(--accent);background:var(--ag);color:var(--accent);}
+.quorum-node.both{border-color:var(--accent2);background:var(--a2g);color:var(--accent2);}
+.quorum-result{font-family:var(--mono);font-size:.8rem;text-align:center;padding:.8rem;background:var(--bg-card);border-radius:4px;margin-top:.5rem;}
+
+/* Multi-leader */
+.conflict-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.conflict-scenario{display:flex;gap:2rem;flex-wrap:wrap;justify-content:center;margin:1rem 0;}
+.conflict-dc{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:1rem;min-width:200px;flex:1;max-width:280px;}
+.conflict-dc .dc-label{font-family:var(--mono);font-size:.72rem;font-weight:700;color:var(--accent);margin-bottom:.5rem;}
+.conflict-dc .dc-val{font-family:var(--mono);font-size:.85rem;padding:.4rem .6rem;background:rgba(255,255,255,.03);border-radius:4px;margin:.3rem 0;transition:all .3s;}
+.conflict-dc .dc-val.conflict{background:var(--dg);color:var(--danger);border:1px solid var(--danger);}
+.conflict-dc .dc-val.resolved{background:var(--sg);color:var(--success);border:1px solid var(--success);}
+
+/* Payment */
+.payment-card{background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(167,139,250,.08));border:1px solid var(--ba);border-radius:var(--radius);padding:2rem;margin-top:1rem;}
+.payment-card h3{color:var(--accent);font-size:1.1rem;margin-bottom:1rem;}
+.payment-card .point{display:flex;gap:.8rem;margin:.6rem 0;align-items:flex-start;}
+.payment-card .point .num{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem;flex-shrink:0;}
+.payment-card .point .text{font-size:.88rem;color:var(--fg-m);}
+
+footer{padding:3rem 2rem;text-align:center;color:var(--fg-d);font-family:var(--mono);font-size:.7rem;border-top:1px solid var(--border);margin-top:4rem;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--fg-d);border-radius:3px;}
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo">DDIA<span> · Ch5</span></div>
+  <div class="nav-links">
+    <a href="#single">单主复制</a>
+    <a href="#lag">复制延迟</a>
+    <a href="#quorum">Quorum</a>
+    <a href="#multi">多主冲突</a>
+    <a href="#payment">支付场景</a>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="hero-tag">Chapter 05</div>
+  <h1>复制</h1>
+  <p class="hero-sub">在多台机器上保存同一数据的副本。目的：高可用、低延迟、读扩展。但异步复制的延迟带来了三种一致性问题。</p>
+</div>
+
+<!-- Single Leader Replication -->
+<div class="section" id="single">
+  <div class="section-tag t1">01 — Single Leader</div>
+  <h2>单主复制<em>流程演示</em></h2>
+  <p class="desc">所有写请求必须经过主节点，从节点只接受读请求。同步复制保证零丢失但影响可用性，异步复制高可用但可能丢数据，半同步是折中。</p>
+  <div class="repl-container">
+    <div class="repl-client">
+      <div class="client-box">👤 客户端写入</div>
+    </div>
+    <div class="repl-nodes" id="replNodes">
+      <div class="repl-node">
+        <div class="node-label leader">⭐ 主节点</div>
+        <div class="node-box leader" id="leaderBox"><div style="font-size:.7rem;color:var(--accent);">Primary</div><div class="node-data" id="leaderData"></div></div>
+        <div class="repl-badge" id="leaderBadge"></div>
+      </div>
+      <div class="repl-node">
+        <div class="node-label follower">从节点1</div>
+        <div class="node-box" id="follower1Box"><div style="font-size:.7rem;color:var(--fg-m);">Follower</div><div class="node-data" id="follower1Data"></div></div>
+        <div class="repl-badge" id="f1Badge"></div>
+      </div>
+      <div class="repl-node">
+        <div class="node-label follower">从节点2</div>
+        <div class="node-box" id="follower2Box"><div style="font-size:.7rem;color:var(--fg-m);">Follower</div><div class="node-data" id="follower2Data"></div></div>
+        <div class="repl-badge" id="f2Badge"></div>
+      </div>
+      <div class="repl-node">
+        <div class="node-label follower">从节点3</div>
+        <div class="node-box" id="follower3Box"><div style="font-size:.7rem;color:var(--fg-m);">Follower</div><div class="node-data" id="follower3Data"></div></div>
+        <div class="repl-badge" id="f3Badge"></div>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:.72rem;color:var(--fg-m);padding:.8rem;background:var(--bg-card);border-radius:4px;min-height:40px;" id="replLog">点击「写入」模拟复制流程</div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:center;flex-wrap:wrap;">
+      <button class="btn primary" onclick="replWrite('sync')">同步写入</button>
+      <button class="btn primary" onclick="replWrite('semi')">半同步写入</button>
+      <button class="btn primary" onclick="replWrite('async')">异步写入</button>
+      <button class="btn danger" onclick="replReset()">重置</button>
+    </div>
+  </div>
+</div>
+
+<!-- Replication Lag -->
+<div class="section" id="lag">
+  <div class="section-tag t4">02 — Replication Lag</div>
+  <h2>复制延迟的<em>三种问题</em></h2>
+  <p class="desc">异步复制导致从节点数据落后于主节点。三种表现形式：读己之写、单调读、一致前缀读。点击标签查看每种问题及解决方案。</p>
+  <div class="lag-container">
+    <div class="lag-tabs">
+      <div class="lag-tab active" onclick="showLag(0)">读己之写</div>
+      <div class="lag-tab" onclick="showLag(1)">单调读</div>
+      <div class="lag-tab" onclick="showLag(2)">一致前缀读</div>
+    </div>
+    <div class="lag-scenario active" id="lag0">
+      <h3 style="font-size:1rem;margin-bottom:.8rem;">读己之写 <span style="color:var(--danger)">(Read-after-Write)</span></h3>
+      <div style="font-size:.85rem;color:var(--fg-m);margin-bottom:1rem;">用户写入后立即读取，如果读到了还没同步的从节点 → 看不到自己的写入。</div>
+      <div class="lag-timeline">
+        <div class="step write">用户支付 ¥100</div><div class="arrow">→</div>
+        <div class="step write">写入主节点 ✓</div><div class="arrow">→</div>
+        <div class="step read">读从节点2</div><div class="arrow">→</div>
+        <div class="step error">余额未变！</div>
+      </div>
+      <div style="margin-top:.8rem;padding:.8rem;background:var(--sg);border-radius:4px;border-left:3px solid var(--success);">
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--success);margin-bottom:.3rem;">解决方案</div>
+        <div style="font-size:.82rem;color:var(--fg-m);">
+          1. 读取可能被自己修改的数据时，<b style="color:var(--fg)">从主节点读</b><br>
+          2. 写入后 T 秒内从主读<br>
+          3. 客户端记住最近写入的时间戳，从节点至少达到该时间戳才读
+        </div>
+      </div>
+      <div style="margin-top:.6rem;padding:.6rem;background:var(--ag);border-radius:4px;">
+        <div style="font-size:.8rem;color:var(--accent);">支付场景：用户支付后查订单状态，必须走主库 → 否则看不到"已支付"</div>
+      </div>
+    </div>
+    <div class="lag-scenario" id="lag1">
+      <h3 style="font-size:1rem;margin-bottom:.8rem;">单调读 <span style="color:var(--danger)">(Monotonic Reads)</span></h3>
+      <div style="font-size:.85rem;color:var(--fg-m);margin-bottom:1rem;">用户先后读不同从节点，后读的节点延迟更严重 → 看到数据"回退"（时光倒流）。</div>
+      <div class="lag-timeline">
+        <div class="step read">读从节点1(延迟小)</div><div class="arrow">→</div>
+        <div class="step">看到余额 ¥0</div><div class="arrow">→</div>
+        <div class="step read">读从节点2(延迟大)</div><div class="arrow">→</div>
+        <div class="step error">余额 ¥100！时光倒流</div>
+      </div>
+      <div style="margin-top:.8rem;padding:.8rem;background:var(--sg);border-radius:4px;border-left:3px solid var(--success);">
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--success);margin-bottom:.3rem;">解决方案</div>
+        <div style="font-size:.82rem;color:var(--fg-m);">同一用户的读请求始终路由到同一从节点（一致性哈希）</div>
+      </div>
+    </div>
+    <div class="lag-scenario" id="lag2">
+      <h3 style="font-size:1rem;margin-bottom:.8rem;">一致前缀读 <span style="color:var(--danger)">(Consistent Prefix Reads)</span></h3>
+      <div style="font-size:.85rem;color:var(--fg-m);margin-bottom:1rem;">因果关系的写入被分散到不同从节点，顺序错乱。</div>
+      <div class="lag-timeline">
+        <div class="step write">写入: "支付成功 ¥100"</div><div class="arrow">→</div>
+        <div class="step write">写入: "已发货"</div>
+      </div>
+      <div class="lag-timeline" style="margin-top:.3rem;">
+        <div class="step read">读到: "已发货"</div><div class="arrow">→</div>
+        <div class="step error">还没看到"支付成功"！</div>
+      </div>
+      <div style="margin-top:.8rem;padding:.8rem;background:var(--sg);border-radius:4px;border-left:3px solid var(--success);">
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--success);margin-bottom:.3rem;">解决方案</div>
+        <div style="font-size:.82rem;color:var(--fg-m);">确保因果关系的写入路由到同一分区（相同分区键）</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quorum -->
+<div class="section" id="quorum">
+  <div class="section-tag t2">03 — Quorum</div>
+  <h2>Quorum <em>读写</em></h2>
+  <p class="desc">无主复制中，W+R>N 保证读和写有重叠 → 强一致性。调整 W/R 可以在一致性和性能间权衡。</p>
+  <div class="quorum-container">
+    <div class="quorum-controls">
+      <div class="quorum-slider"><label>N (副本数)</label><input type="range" min="3" max="7" value="5" id="qN" oninput="updateQuorum()"><div class="val" id="qNVal">5</div></div>
+      <div class="quorum-slider"><label>W (写入确认)</label><input type="range" min="1" max="5" value="3" id="qW" oninput="updateQuorum()"><div class="val" id="qWVal">3</div></div>
+      <div class="quorum-slider"><label>R (读取确认)</label><input type="range" min="1" max="5" value="3" id="qR" oninput="updateQuorum()"><div class="val" id="qRVal">3</div></div>
+    </div>
+    <div class="quorum-nodes" id="quorumNodes"></div>
+    <div class="quorum-result" id="quorumResult"></div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:center;flex-wrap:wrap;">
+      <button class="btn" onclick="setQuorum('writeHeavy')">写慢读快</button>
+      <button class="btn" onclick="setQuorum('balanced')">读写平衡</button>
+      <button class="btn" onclick="setQuorum('readHeavy')">写快读慢</button>
+      <button class="btn" onclick="setQuorum('fast')">最快(弱一致)</button>
+    </div>
+  </div>
+</div>
+
+<!-- Multi-leader conflict -->
+<div class="section" id="multi">
+  <div class="section-tag t3">04 — Multi-Leader</div>
+  <h2>多主复制<em>写冲突</em></h2>
+  <p class="desc">多主复制允许在不同数据中心同时写入，但会产生写冲突。点击按钮模拟冲突场景。</p>
+  <div class="conflict-container">
+    <div class="conflict-scenario">
+      <div class="conflict-dc">
+        <div class="dc-label">🏢 数据中心1 (北京)</div>
+        <div class="dc-val">余额: ¥1000</div>
+        <div class="dc-val" id="dc1Write">→ 扣款 ¥300</div>
+        <div class="dc-val" id="dc1Result">余额: ¥700</div>
+      </div>
+      <div class="conflict-dc">
+        <div class="dc-label">🏢 数据中心2 (上海)</div>
+        <div class="dc-val">余额: ¥1000</div>
+        <div class="dc-val" id="dc2Write">→ 扣款 ¥500</div>
+        <div class="dc-val" id="dc2Result">余额: ¥500</div>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:.8rem;text-align:center;margin:1rem 0;color:var(--danger);" id="conflictStatus">两个数据中心同时写入 → 冲突！</div>
+    <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;">
+      <button class="btn primary" onclick="resolveConflict('lww')">LWW 解决</button>
+      <button class="btn primary" onclick="resolveConflict('custom')">自定义合并</button>
+      <button class="btn danger" onclick="resetConflict()">重置</button>
+    </div>
+    <div style="font-family:var(--mono);font-size:.72rem;color:var(--fg-m);padding:.8rem;background:var(--bg-card);border-radius:4px;margin-top:1rem;" id="conflictLog">点击按钮查看冲突解决策略</div>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="section" id="payment">
+  <div class="section-tag t3">05 — Payment Domain</div>
+  <h2>支付场景<em>复制策略</em></h2>
+  <div class="payment-card">
+    <h3>支付系统的复制设计</h3>
+    <div class="point"><div class="num">01</div><div class="text">支付系统不能容忍复制延迟 → 写后读必须走主库。用户支付后查订单状态，如果走了从库可能看到"未支付"。</div></div>
+    <div class="point"><div class="num">02</div><div class="text">对账系统需要确保读到最新数据 → 从主库读或等同步复制完成。账务数据不允许读到旧值。</div></div>
+    <div class="point"><div class="num">03</div><div class="text">跨数据中心：支付只能在主数据中心处理，灾备中心做热备。不允许双活写入 → 避免冲突。</div></div>
+    <div class="point"><div class="num">04</div><div class="text">MySQL 半同步复制：主等至少一个从确认后返回成功。同步从挂了降级为异步 → 需要监控复制延迟。</div></div>
+    <div style="margin-top:1.2rem;padding:1rem;background:var(--bg-el);border-radius:6px;border-left:3px solid var(--accent);">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.3rem;">面试关键</div>
+      <div style="font-size:.88rem;color:var(--fg);">"支付系统用半同步复制 + 写后读走主库。核心路径不允许读到旧数据。跨数据中心只允许单主写入，灾备中心热备不承接流量。"</div>
+    </div>
+  </div>
+</div>
+
+<footer>DDIA · Chapter 05 · 复制 · Visualization</footer>
+
+<script>
+// ===== Single Leader Replication =====
+let leaderEntries=[];
+let follower1Entries=[], follower2Entries=[], follower3Entries=[];
+let replCount=0;
+
+const payEntries=['支付 ¥100','支付 ¥200','退款 ¥50','支付 ¥500','支付 ¥150','退款 ¥80','支付 ¥300'];
+
+function renderRepl(){
+  document.getElementById('leaderData').innerHTML=leaderEntries.map(e=>'<div class="entry">'+e+'</div>').join('');
+  document.getElementById('follower1Data').innerHTML=follower1Entries.map(e=>'<div class="entry">'+e+'</div>').join('');
+  document.getElementById('follower2Data').innerHTML=follower2Entries.map(e=>'<div class="entry">'+e+'</div>').join('');
+  document.getElementById('follower3Data').innerHTML=follower3Entries.map(e=>'<div class="entry">'+e+'</div>').join('');
+}
+
+function replWrite(mode){
+  const entry=payEntries[replCount%payEntries.length];
+  replCount++;
+  const log=document.getElementById('replLog');
+
+  // Write to leader
+  leaderEntries.push(entry);
+  renderRepl();
+  document.getElementById('leaderBox').classList.add('syncing');
+  log.innerHTML='<div style="color:var(--accent)">✍ 写入主节点: '+entry+'</div>';
+
+  if(mode==='sync'){
+    // Sync: wait for all followers
+    document.getElementById('f1Badge').className='repl-badge sync';document.getElementById('f1Badge').textContent='同步';
+    document.getElementById('f2Badge').className='repl-badge sync';document.getElementById('f2Badge').textContent='同步';
+    document.getElementById('f3Badge').className='repl-badge sync';document.getElementById('f3Badge').textContent='同步';
+    log.innerHTML+='<div style="color:var(--warn)">⏳ 等待所有从节点确认...</div>';
+
+    setTimeout(()=>{
+      follower1Entries.push(entry);follower2Entries.push(entry);follower3Entries.push(entry);
+      renderRepl();
+      document.getElementById('leaderBox').className='node-box leader synced';
+      document.getElementById('follower1Box').classList.add('synced');
+      document.getElementById('follower2Box').classList.add('synced');
+      document.getElementById('follower3Box').classList.add('synced');
+      log.innerHTML+='<div style="color:var(--success)">✓ 所有从节点已同步 → 零数据丢失</div>';
+      setTimeout(()=>{document.getElementById('leaderBox').className='node-box leader';document.getElementById('follower1Box').className='node-box';document.getElementById('follower2Box').className='node-box';document.getElementById('follower3Box').className='node-box';},1500);
+    },600);
+  }else if(mode==='semi'){
+    document.getElementById('f1Badge').className='repl-badge sync';document.getElementById('f1Badge').textContent='同步';
+    document.getElementById('f2Badge').className='repl-badge async';document.getElementById('f2Badge').textContent='异步';
+    document.getElementById('f3Badge').className='repl-badge async';document.getElementById('f3Badge').textContent='异步';
+    log.innerHTML+='<div style="color:var(--warn)">⏳ 等待从节点1确认（半同步）...</div>';
+
+    setTimeout(()=>{
+      follower1Entries.push(entry);renderRepl();
+      document.getElementById('leaderBox').className='node-box leader synced';
+      document.getElementById('follower1Box').classList.add('synced');
+      log.innerHTML+='<div style="color:var(--success)">✓ 从节点1已同步 → 返回成功</div>';
+
+      setTimeout(()=>{
+        follower2Entries.push(entry);follower3Entries.push(entry);renderRepl();
+        document.getElementById('follower2Box').classList.add('synced');
+        document.getElementById('follower3Box').classList.add('synced');
+        log.innerHTML+='<div style="color:var(--fg-m)">从节点2、3异步复制完成</div>';
+        setTimeout(()=>{document.getElementById('leaderBox').className='node-box leader';document.getElementById('follower1Box').className='node-box';document.getElementById('follower2Box').className='node-box';document.getElementById('follower3Box').className='node-box';},1500);
+      },400);
+    },600);
+  }else{
+    // Async: return immediately
+    document.getElementById('f1Badge').className='repl-badge async';document.getElementById('f1Badge').textContent='异步';
+    document.getElementById('f2Badge').className='repl-badge async';document.getElementById('f2Badge').textContent='异步';
+    document.getElementById('f3Badge').className='repl-badge async';document.getElementById('f3Badge').textContent='异步';
+    document.getElementById('leaderBox').className='node-box leader synced';
+    log.innerHTML+='<div style="color:var(--success)">✓ 主节点写入成功 → 立即返回</div>';
+    log.innerHTML+='<div style="color:var(--warn)">⚠ 从节点尚未同步 → 可能丢数据</div>';
+
+    setTimeout(()=>{
+      follower1Entries.push(entry);follower2Entries.push(entry);
+      renderRepl();
+      document.getElementById('follower1Box').classList.add('syncing');
+      document.getElementById('follower2Box').classList.add('syncing');
+      log.innerHTML+='<div style="color:var(--fg-m)">从节点1、2异步复制中...</div>';
+
+      setTimeout(()=>{
+        follower3Entries.push(entry);renderRepl();
+        document.getElementById('follower3Box').classList.add('syncing');
+        log.innerHTML+='<div style="color:var(--fg-m)">从节点3异步复制中...</div>';
+        setTimeout(()=>{document.getElementById('leaderBox').className='node-box leader';document.getElementById('follower1Box').className='node-box';document.getElementById('follower2Box').className='node-box';document.getElementById('follower3Box').className='node-box';},1500);
+      },300);
+    },500);
+  }
+}
+
+function replReset(){
+  leaderEntries=[];follower1Entries=[];follower2Entries=[];follower3Entries=[];replCount=0;
+  renderRepl();
+  document.getElementById('replLog').innerHTML='点击「写入」模拟复制流程';
+  document.getElementById('leaderBox').className='node-box leader';
+  document.getElementById('follower1Box').className='node-box';
+  document.getElementById('follower2Box').className='node-box';
+  document.getElementById('follower3Box').className='node-box';
+  ['f1Badge','f2Badge','f3Badge','leaderBadge'].forEach(id=>{document.getElementById(id).className='repl-badge';document.getElementById(id).textContent='';});
+}
+
+// ===== Lag tabs =====
+function showLag(idx){
+  document.querySelectorAll('.lag-tab').forEach((t,i)=>{t.classList.toggle('active',i===idx);});
+  document.querySelectorAll('.lag-scenario').forEach((s,i)=>{s.classList.toggle('active',i===idx);});
+}
+
+// ===== Quorum =====
+function updateQuorum(){
+  const N=parseInt(document.getElementById('qN').value);
+  document.getElementById('qNVal').textContent=N;
+
+  const wSlider=document.getElementById('qW');
+  const rSlider=document.getElementById('qR');
+  wSlider.max=N;rSlider.max=N;
+
+  let W=parseInt(wSlider.value);
+  let R=parseInt(rSlider.value);
+  if(W>N){W=N;wSlider.value=N;}
+  if(R>N){R=N;rSlider.value=N;}
+
+  document.getElementById('qWVal').textContent=W;
+  document.getElementById('qRVal').textContent=R;
+
+  // Render nodes
+  const nc=document.getElementById('quorumNodes');
+  let html='';
+  for(let i=0;i<N;i++){
+    let cls='quorum-node';
+    if(i<W&&i<R)cls+=' both';
+    else if(i<W)cls+=' written';
+    else if(i<R)cls+=' read';
+    html+='<div class="'+cls+'"><div>N'+(i+1)+'</div></div>';
+  }
+  nc.innerHTML=html;
+
+  // Result
+  const rc=document.getElementById('quorumResult');
+  if(W+R>N){
+    rc.innerHTML='<span style="color:var(--success)">✓ W+R > N ('+W+'+'+R+'='+((W+R))+' > '+N+') → 读写有重叠 → <b>强一致性</b></span>';
+  }else if(W+R===N){
+    rc.innerHTML='<span style="color:var(--warn)">⚠ W+R = N ('+W+'+'+R+'='+((W+R))+' = '+N+') → 边界情况 → <b>可能读到旧数据</b></span>';
+  }else{
+    rc.innerHTML='<span style="color:var(--danger)">✗ W+R < N ('+W+'+'+R+'='+((W+R))+' < '+N+') → 读写无重叠 → <b>最终一致性</b></span>';
+  }
+}
+
+function setQuorum(preset){
+  const N=5;
+  document.getElementById('qN').value=N;
+  if(preset==='writeHeavy'){document.getElementById('qW').value=N;document.getElementById('qR').value=1;}
+  else if(preset==='balanced'){document.getElementById('qW').value=3;document.getElementById('qR').value=3;}
+  else if(preset==='readHeavy'){document.getElementById('qW').value=1;document.getElementById('qR').value=N;}
+  else if(preset==='fast'){document.getElementById('qW').value=1;document.getElementById('qR').value=1;}
+  updateQuorum();
+}
+
+updateQuorum();
+
+// ===== Multi-leader conflict =====
+function resolveConflict(strategy){
+  const log=document.getElementById('conflictLog');
+  if(strategy==='lww'){
+    document.getElementById('dc1Result').textContent='余额: ¥700';
+    document.getElementById('dc2Result').textContent='余额: ¥700';
+    document.getElementById('dc1Result').className='dc-val resolved';
+    document.getElementById('dc2Result').className='dc-val resolved';
+    document.getElementById('conflictStatus').innerHTML='<span style="color:var(--success)">LWW 解决：上海时间戳更晚 → 采用 ¥700</span>';
+    log.innerHTML='<div style="color:var(--warn)">LWW（最后写入获胜）：</div>'+
+      '<div>• 用时间戳决定 → 北京 10:01:00, 上海 10:01:02</div>'+
+      '<div>• 上海更新 → 采用上海的值 ¥700</div>'+
+      '<div style="color:var(--danger)">• 问题：时钟不可靠 → 可能丢数据（北京的 ¥300 扣款被丢弃）</div>';
+  }else{
+    document.getElementById('dc1Result').textContent='余额: ¥200';
+    document.getElementById('dc2Result').textContent='余额: ¥200';
+    document.getElementById('dc1Result').className='dc-val resolved';
+    document.getElementById('dc2Result').className='dc-val resolved';
+    document.getElementById('conflictStatus').innerHTML='<span style="color:var(--success)">自定义合并：两笔扣款都保留 → 1000-300-500=¥200</span>';
+    log.innerHTML='<div style="color:var(--success)">自定义冲突解决：</div>'+
+      '<div>• 应用层合并：两笔扣款都是合法操作</div>'+
+      '<div>• 合并结果：1000 - 300 - 500 = ¥200</div>'+
+      '<div style="color:var(--success)">• 最灵活，但开发成本高 → 支付系统适合这种方式</div>';
+  }
+}
+
+function resetConflict(){
+  document.getElementById('dc1Result').textContent='余额: ¥700';
+  document.getElementById('dc2Result').textContent='余额: ¥500';
+  document.getElementById('dc1Result').className='dc-val conflict';
+  document.getElementById('dc2Result').className='dc-val conflict';
+  document.getElementById('conflictStatus').innerHTML='两个数据中心同时写入 → 冲突！';
+  document.getElementById('conflictLog').innerHTML='点击按钮查看冲突解决策略';
+}
+
+renderRepl();
+</script>
+</body>
+</html>

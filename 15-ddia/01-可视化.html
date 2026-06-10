@@ -1,0 +1,1802 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch1 — 可靠·可扩展·可维护</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+
+:root {
+  --bg: #0a0e14;
+  --bg-card: #111820;
+  --bg-elevated: #161e28;
+  --fg: #e0e6ed;
+  --fg-muted: #6b7d93;
+  --fg-dim: #3d4f63;
+  --accent: #00e5a0;
+  --accent-glow: rgba(0,229,160,0.15);
+  --danger: #ff4d6a;
+  --danger-glow: rgba(255,77,106,0.15);
+  --warn: #ffb347;
+  --warn-glow: rgba(255,179,71,0.15);
+  --info: #47b3ff;
+  --info-glow: rgba(71,179,255,0.15);
+  --border: #1e2a38;
+  --border-accent: rgba(0,229,160,0.3);
+  --radius: 8px;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Noto Sans SC', system-ui, sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* scanline overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,229,160,0.015) 2px,
+    rgba(0,229,160,0.015) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ---- NAV ---- */
+nav {
+  position: fixed; top:0; left:0; right:0;
+  z-index: 100;
+  background: rgba(10,14,20,0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  height: 56px;
+  display: flex; align-items: center; gap: 2rem;
+}
+nav .logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+nav .logo span { color: var(--fg-muted); font-weight: 400; }
+nav .nav-links { display:flex; gap:0.25rem; margin-left: auto; }
+nav .nav-links a {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+nav .nav-links a:hover, nav .nav-links a.active {
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* ---- HERO ---- */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 6rem 2rem 4rem;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  width: 600px; height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  animation: pulse-glow 4s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%,100% { opacity: 0.4; transform: translate(-50%,-50%) scale(1); }
+  50% { opacity: 0.8; transform: translate(-50%,-50%) scale(1.15); }
+}
+.hero-chapter {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--accent);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+.hero h1 {
+  font-size: clamp(2.2rem, 5vw, 3.8rem);
+  font-weight: 900;
+  line-height: 1.15;
+  margin-bottom: 1.5rem;
+  position: relative;
+  letter-spacing: -0.02em;
+}
+.hero h1 em {
+  font-style: normal;
+  background: linear-gradient(135deg, var(--accent), var(--info));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-sub {
+  font-size: 1.05rem;
+  color: var(--fg-muted);
+  max-width: 600px;
+  position: relative;
+}
+.hero-metrics {
+  display: flex; gap: 3rem; margin-top: 3rem; position: relative;
+}
+.hero-metric {
+  text-align: center;
+}
+.hero-metric .num {
+  font-family: var(--mono);
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.hero-metric .label {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ---- SECTION ---- */
+.section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.section-tag {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--accent);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+}
+.section-tag.danger { color: var(--danger); }
+.section-tag.warn { color: var(--warn); }
+.section-tag.info { color: var(--info); }
+.section h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  letter-spacing: -0.01em;
+}
+.section h2 em {
+  font-style: normal;
+  color: var(--accent);
+}
+.section .desc {
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  max-width: 700px;
+  margin-bottom: 2.5rem;
+}
+
+/* ---- CARD ---- */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  margin-bottom: 1.5rem;
+  transition: border-color 0.3s;
+}
+.card:hover { border-color: var(--border-accent); }
+.card-title {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-bottom: 1rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.card-title .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: blink 2s ease-in-out infinite;
+}
+@keyframes blink {
+  0%,100% { opacity:1; } 50% { opacity:0.3; }
+}
+
+/* ---- TABS ---- */
+.tabs {
+  display: flex; gap: 0.25rem;
+  background: var(--bg);
+  padding: 4px;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  width: fit-content;
+}
+.tab-btn {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--fg-muted);
+  transition: all 0.25s;
+  letter-spacing: 0.03em;
+}
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeIn 0.4s; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+/* ---- TWITTER SIMULATOR ---- */
+.tw-container {
+  position: relative;
+  min-height: 420px;
+}
+.tw-canvas {
+  width: 100%;
+  height: 420px;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.tw-node {
+  position: absolute;
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 2;
+}
+.tw-node.author {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 0 20px var(--accent-glow);
+  width: 64px; height: 64px;
+  font-size: 0.75rem;
+}
+.tw-node.follower {
+  background: var(--bg-elevated);
+  border: 2px solid var(--border);
+  color: var(--fg-muted);
+}
+.tw-node.follower.highlighted {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.tw-node.celeb {
+  background: var(--bg-elevated);
+  border: 2px solid var(--warn);
+  color: var(--warn);
+}
+.tw-node.celeb.highlighted {
+  border-color: var(--warn);
+  box-shadow: 0 0 12px var(--warn-glow);
+  color: var(--warn);
+}
+.tw-particle {
+  position: absolute;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+}
+.tw-db {
+  position: absolute;
+  height: 36px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  padding: 0 10px;
+  z-index: 2;
+  transition: all 0.4s;
+}
+.tw-db.timeline-db {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 200px;
+}
+.tw-db.timeline-db.writing {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 15px var(--accent-glow);
+}
+.tw-db.timeline-db.reading {
+  border-color: var(--info);
+  color: var(--info);
+  box-shadow: 0 0 15px var(--info-glow);
+}
+.tw-label {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  z-index: 3;
+}
+
+.tw-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+.tw-stat {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+}
+.tw-stat .val {
+  font-family: var(--mono);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.tw-stat .val.good { color: var(--accent); }
+.tw-stat .val.bad { color: var(--danger); }
+.tw-stat .val.mid { color: var(--warn); }
+.tw-stat .lbl {
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+  margin-top: 0.2rem;
+}
+
+/* ---- BUTTONS ---- */
+.btn {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 0.55rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.03em;
+}
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.btn.primary:hover {
+  box-shadow: 0 0 20px var(--accent-glow);
+  transform: translateY(-1px);
+}
+.btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn.danger:hover {
+  background: var(--danger-glow);
+  box-shadow: 0 0 10px var(--danger-glow);
+}
+.btn-group { display: flex; gap: 0.5rem; margin: 1rem 0; }
+
+/* ---- LATENCY HISTOGRAM ---- */
+.latency-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 200px;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.latency-bar {
+  flex: 1;
+  min-width: 8px;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  transition: height 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  opacity: 0.7;
+}
+.latency-bar.p99 {
+  background: var(--danger);
+  opacity: 1;
+}
+.latency-bar.p95 {
+  background: var(--warn);
+  opacity: 0.9;
+}
+.latency-bar.p50 {
+  background: var(--accent);
+  opacity: 1;
+}
+.latency-annotations {
+  position: relative;
+  height: 60px;
+  margin-top: 0.5rem;
+}
+.latency-ann {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center;
+}
+.latency-ann .line {
+  width: 1px;
+  height: 20px;
+  background: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.latency-ann .pct { color: var(--fg-muted); }
+.latency-ann .ms { font-weight: 700; margin-top: 2px; }
+.latency-ann .ms.green { color: var(--accent); }
+.latency-ann .ms.yellow { color: var(--warn); }
+.latency-ann .ms.red { color: var(--danger); }
+
+/* ---- CASCADING FAILURE ---- */
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin: 1.5rem 0;
+}
+.cf-node {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  background: var(--bg-elevated);
+  border: 2px solid var(--border);
+  color: var(--fg-muted);
+  transition: all 0.5s;
+  position: relative;
+  overflow: hidden;
+}
+.cf-node .icon { font-size: 1.5rem; margin-bottom: 4px; }
+.cf-node .load-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  background: var(--accent-glow);
+  transition: height 0.5s;
+}
+.cf-node.healthy { border-color: var(--accent); color: var(--accent); }
+.cf-node.healthy .load-bar { background: var(--accent-glow); height: 30%; }
+.cf-node.stressed { border-color: var(--warn); color: var(--warn); }
+.cf-node.stressed .load-bar { background: var(--warn-glow); height: 70%; }
+.cf-node.overloaded { border-color: var(--danger); color: var(--danger); }
+.cf-node.overloaded .load-bar { background: var(--danger-glow); height: 95%; }
+.cf-node.failed {
+  border-color: var(--danger);
+  background: var(--danger-glow);
+  color: var(--danger);
+}
+.cf-node.failed .icon { animation: shake 0.5s; }
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+.cf-node.recovering {
+  border-color: var(--info);
+  color: var(--info);
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+@keyframes pulse-border {
+  0%,100% { box-shadow: 0 0 0 0 var(--info-glow); }
+  50% { box-shadow: 0 0 15px 5px var(--info-glow); }
+}
+
+/* ---- SCALING VISUALIZER ---- */
+.scale-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+@media (max-width: 768px) {
+  .scale-panel { grid-template-columns: 1fr; }
+}
+.scale-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  min-height: 300px;
+}
+.scale-box-title {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 1rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.scale-box-title .badge {
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 400;
+}
+.badge-easy { background: var(--accent-glow); color: var(--accent); border: 1px solid rgba(0,229,160,0.3); }
+.badge-hard { background: var(--danger-glow); color: var(--danger); border: 1px solid rgba(255,77,106,0.3); }
+
+.scale-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  padding: 1rem 0;
+  min-height: 140px;
+  align-items: center;
+}
+.scale-node {
+  width: 48px; height: 48px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  transition: all 0.4s;
+  position: relative;
+}
+.scale-node.stateless {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+.scale-node.stateless.new {
+  animation: nodeAppear 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.scale-node.stateful {
+  background: var(--bg-elevated);
+  border: 2px solid var(--border);
+  color: var(--fg-muted);
+}
+.scale-node.stateful .data-bar {
+  position: absolute;
+  bottom: 3px;
+  left: 3px; right: 3px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fg-dim);
+}
+@keyframes nodeAppear {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.scale-req {
+  position: absolute;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.load-bar-container {
+  margin-top: 1rem;
+}
+.load-bar-track {
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.load-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s, background 0.5s;
+  background: var(--accent);
+}
+.load-bar-fill.high { background: var(--warn); }
+.load-bar-fill.critical { background: var(--danger); }
+.load-bar-label {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+
+/* ---- COMPARISON TABLE ---- */
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.compare-table th {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 2px solid var(--border);
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.compare-table td {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.compare-table tr:hover td {
+  background: rgba(0,229,160,0.03);
+}
+.compare-table .tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+.tag-green { background: var(--accent-glow); color: var(--accent); }
+.tag-red { background: var(--danger-glow); color: var(--danger); }
+.tag-yellow { background: var(--warn-glow); color: var(--warn); }
+
+/* ---- FLOW ARROWS ---- */
+.flow-arrow {
+  position: absolute;
+  z-index: 1;
+}
+.flow-arrow svg {
+  overflow: visible;
+}
+
+/* ---- RESPONSIVE ---- */
+@media (max-width: 640px) {
+  nav .nav-links { display: none; }
+  .hero-metrics { flex-direction: column; gap: 1.5rem; }
+  .tw-stats { grid-template-columns: 1fr; }
+  .cf-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ---- TOOLTIP ---- */
+.tip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--fg);
+  max-width: 280px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.tip.show { opacity: 1; }
+
+/* ---- CODE ---- */
+.code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem;
+  overflow-x: auto;
+  line-height: 1.8;
+}
+.code .kw { color: var(--info); }
+.code .str { color: var(--accent); }
+.code .cmt { color: var(--fg-dim); }
+.code .num { color: var(--warn); }
+
+/* ---- INSIGHT BOX ---- */
+.insight {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-glow);
+  padding: 1rem 1.25rem;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+}
+.insight.danger {
+  border-color: var(--danger);
+  background: var(--danger-glow);
+}
+.insight.warn {
+  border-color: var(--warn);
+  background: var(--warn-glow);
+}
+.insight strong { color: var(--accent); }
+.insight.danger strong { color: var(--danger); }
+.insight.warn strong { color: var(--warn); }
+
+/* scrolling reveal */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s, transform 0.6s;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">DDIA <span>· Ch1</span></div>
+  <div class="nav-links">
+    <a href="#reliability" data-section="reliability">可靠性</a>
+    <a href="#twitter" data-section="twitter">Twitter</a>
+    <a href="#latency" data-section="latency">延迟</a>
+    <a href="#scaling" data-section="scaling">扩展</a>
+    <a href="#cascade" data-section="cascade">级联</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-chapter">Chapter 01</div>
+  <h1>可靠、可扩展、<em>可维护</em></h1>
+  <p class="hero-sub">数据密集型应用的三大基石 —— 通过交互式可视化深入理解 DDIA 第一章的核心概念与真实案例</p>
+  <div class="hero-metrics">
+    <div class="hero-metric"><div class="num" id="counter-reliability">0</div><div class="label">故障类型</div></div>
+    <div class="hero-metric"><div class="num" id="counter-scalability">0</div><div class="label">扩展策略</div></div>
+    <div class="hero-metric"><div class="num" id="counter-principle">0</div><div class="label">设计原则</div></div>
+  </div>
+</section>
+
+<!-- ==================== RELIABILITY ==================== -->
+<section class="section" id="reliability">
+  <div class="section-tag danger">01 — Reliability</div>
+  <h2>可靠性：系统在<em>逆境</em>中仍正确工作</h2>
+  <p class="desc">故障不是"是否发生"的问题，而是"何时发生"的问题。三类故障各有不同的应对哲学。</p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>三类故障对比</div>
+    <table class="compare-table">
+      <thead>
+        <tr><th>故障类型</th><th>典型场景</th><th>发生频率</th><th>应对哲学</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-yellow">硬件</span></td>
+          <td>磁盘坏道、内存 ECC、网卡故障</td>
+          <td>大规模集群中 <strong>每天都有</strong></td>
+          <td>冗余 + 热切换 + 容错设计</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">软件</span></td>
+          <td>Leap second bug、级联故障、资源泄漏</td>
+          <td>系统性故障，<strong>影响面大</strong></td>
+          <td>隔离 + 快速恢复 + 混沌工程</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-green">人为</span></td>
+          <td>配置错误、误操作、部署异常</td>
+          <td><strong>第一大原因</strong>（Google SRE 数据）</td>
+          <td>防错设计 + 最小权限 + 灰度发布</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="insight danger">
+      <strong>关键洞察</strong>：硬件故障的平均无故障时间（MTTF）看似很高（硬盘约 10~50 年），但当集群有 10,000 块硬盘时，<strong>平均每天都有硬盘坏</strong>。所以我们需要的是<strong>容错系统</strong>，而非仅靠冗余。
+    </div>
+  </div>
+
+  <!-- Leap Second Example -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>案例：2012 闰秒 Bug</div>
+    <p style="color:var(--fg-muted); font-size:0.9rem; margin-bottom:1rem;">
+      2012 年 6 月 30 日，Linux 内核的一个 bug 导致闰秒发生时 CPU 利用率飙升至 100%，
+      影响 Reddit、FourSquare、LinkedIn 等大量互联网服务。这不是某个组件崩溃，而是<strong style="color:var(--danger)">一个隐蔽的软件缺陷在特定时间被触发</strong>。
+    </p>
+    <div class="code">
+<span class="cmt">// 闰秒导致的问题本质：</span>
+<span class="cmt">// Linux 内核的 hrtimer (高精度定时器) 在闰秒插入时</span>
+<span class="cmt">// 产生了 time > futex timeout 的条件</span>
+<span class="cmt">// → 所有 futex_wait 立即返回 → CPU 100% 旋转</span>
+
+<span class="kw">if</span> (now > timeout)       <span class="cmt">// 闰秒使 now "跳" 过了 timeout</span>
+    <span class="kw">return</span> ETIMEDOUT;    <span class="cmt">// 所有等待线程立即唤醒 → CPU 风暴</span>
+    </div>
+    <div class="insight warn" style="margin-top:1rem;">
+      <strong>教训</strong>：软件 bug 的特征是"休眠"直到特定条件触发，且<strong>同时影响所有实例</strong>（因为是同一份代码），这让基于"独立故障"假设的冗余策略失效。
+    </div>
+  </div>
+</section>
+
+<!-- ==================== TWITTER ==================== -->
+<section class="section" id="twitter">
+  <div class="section-tag info">02 — Scalability · Twitter 案例</div>
+  <h2>Twitter 时间线：fan-out 写 vs <em>fan-out 读</em></h2>
+  <p class="desc">
+    这是 DDIA 中最经典的架构取舍案例。Twitter 面临的核心问题：
+    一个用户发推时，如何高效地让所有关注者看到？两种方案各有利弊，最终走向混合架构。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>交互式模拟器</div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('fanout-write')">Fan-out 写</button>
+      <button class="tab-btn" onclick="switchTab('fanout-read')">Fan-out 读</button>
+      <button class="tab-btn" onclick="switchTab('fanout-hybrid')">混合方案</button>
+    </div>
+
+    <!-- Fan-out Write -->
+    <div class="tab-panel active" id="panel-fanout-write">
+      <div class="insight" style="margin-top:0; margin-bottom:1rem;">
+        <strong>写扩散</strong>：发推时，将推文副本写入<strong>每一个关注者</strong>的时间线缓存。读取时直接查自己的缓存，无需合并。
+      </div>
+      <div class="tw-canvas" id="canvas-write">
+        <div class="tw-label" style="left:12px;top:8px;">发推者</div>
+        <div class="tw-label" style="right:12px;top:8px;">关注者</div>
+        <div class="tw-label" style="bottom:48px;left:50%;transform:translateX(-50%);">时间线缓存</div>
+      </div>
+      <div class="tw-stats" id="stats-write">
+        <div class="tw-stat"><div class="val mid" id="write-writes">1+30</div><div class="lbl">写入次数</div></div>
+        <div class="tw-stat"><div class="val good">1</div><div class="lbl">读取次数</div></div>
+        <div class="tw-stat"><div class="val mid">~150ms</div><div class="lbl">写入延迟</div></div>
+      </div>
+      <div class="btn-group">
+        <button class="btn primary" onclick="runSimulation('write', 'normal')">普通人发推</button>
+        <button class="btn danger" onclick="runSimulation('write', 'celeb')">名人发推 (3千万粉丝)</button>
+      </div>
+      <div id="write-explain" style="font-size:0.85rem; color:var(--fg-muted); margin-top:0.75rem;"></div>
+    </div>
+
+    <!-- Fan-out Read -->
+    <div class="tab-panel" id="panel-fanout-read">
+      <div class="insight info" style="margin-top:0; margin-bottom:1rem; border-color:var(--info); background:var(--info-glow);">
+        <strong style="color:var(--info);">读扩散</strong>：发推时只写入自己的发推表。读取时，从所有关注者的发推表中取出推文并合并排序。
+      </div>
+      <div class="tw-canvas" id="canvas-read">
+        <div class="tw-label" style="left:12px;top:8px;">发推表</div>
+        <div class="tw-label" style="right:12px;top:8px;">读者</div>
+        <div class="tw-label" style="bottom:48px;left:50%;transform:translateX(-50%);">合并排序</div>
+      </div>
+      <div class="tw-stats" id="stats-read">
+        <div class="tw-stat"><div class="val good">1</div><div class="lbl">写入次数</div></div>
+        <div class="tw-stat"><div class="val mid" id="read-reads">30</div><div class="lbl">读取合并数</div></div>
+        <div class="tw-stat"><div class="val mid">~50ms</div><div class="lbl">读取延迟</div></div>
+      </div>
+      <div class="btn-group">
+        <button class="btn primary" onclick="runSimulation('read', 'normal')">普通人读时间线</button>
+        <button class="btn danger" onclick="runSimulation('read', 'celeb')">关注很多名人</button>
+      </div>
+      <div id="read-explain" style="font-size:0.85rem; color:var(--fg-muted); margin-top:0.75rem;"></div>
+    </div>
+
+    <!-- Hybrid -->
+    <div class="tab-panel" id="panel-fanout-hybrid">
+      <div class="insight warn" style="margin-top:0; margin-bottom:1rem;">
+        <strong style="color:var(--warn);">混合方案</strong>（Twitter 实际采用）：普通人用 fan-out 写，名人用 fan-out 读。名人发推不写入粉丝缓存，粉丝读时间线时额外查询名人的发推表并合并。
+      </div>
+      <div class="tw-canvas" id="canvas-hybrid">
+        <div class="tw-label" style="left:12px;top:8px;">普通人 · 写扩散</div>
+        <div class="tw-label" style="right:12px;top:8px;">名人 · 读扩散</div>
+        <div class="tw-label" style="bottom:48px;left:50%;transform:translateX(-50%);">混合时间线</div>
+      </div>
+      <div class="tw-stats">
+        <div class="tw-stat"><div class="val good">1+小量</div><div class="lbl">写入次数</div></div>
+        <div class="tw-stat"><div class="val good">1+少量</div><div class="lbl">读取合并数</div></div>
+        <div class="tw-stat"><div class="val good">最优</div><div class="lbl">综合延迟</div></div>
+      </div>
+      <div class="btn-group">
+        <button class="btn primary" onclick="runSimulation('hybrid', 'normal')">模拟混合方案</button>
+      </div>
+      <div id="hybrid-explain" style="font-size:0.85rem; color:var(--fg-muted); margin-top:0.75rem;"></div>
+    </div>
+  </div>
+
+  <!-- Detailed comparison -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>三种方案深度对比</div>
+    <table class="compare-table">
+      <thead>
+        <tr><th>维度</th><th>Fan-out 写</th><th>Fan-out 读</th><th>混合方案</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>发推成本</td>
+          <td><span class="tag tag-red">O(粉丝数)</span> 粉丝多时极慢</td>
+          <td><span class="tag tag-green">O(1)</span> 只写自己的表</td>
+          <td><span class="tag tag-green">O(普通粉丝数)</span> 跳过名人粉丝</td>
+        </tr>
+        <tr>
+          <td>读时间线成本</td>
+          <td><span class="tag tag-green">O(1)</span> 查自己的缓存</td>
+          <td><span class="tag tag-red">O(关注数)</span> 合并排序</td>
+          <td><span class="tag tag-green">O(1+名人数)</span> 少量额外查询</td>
+        </tr>
+        <tr>
+          <td>名人发推</td>
+          <td><span class="tag tag-red">灾难</span> 写入 3000 万次</td>
+          <td><span class="tag tag-green">O(1)</span></td>
+          <td><span class="tag tag-green">O(1)</span> 不写粉丝缓存</td>
+        </tr>
+        <tr>
+          <td>存储开销</td>
+          <td><span class="tag tag-red">高</span> 每条推文存 N 份</td>
+          <td><span class="tag tag-green">低</span> 只存 1 份</td>
+          <td><span class="tag tag-yellow">中</span> 普通人扩散，名人1份</td>
+        </tr>
+        <tr>
+          <td>删除推文</td>
+          <td><span class="tag tag-red">难</span> 需删所有缓存副本</td>
+          <td><span class="tag tag-green">易</span> 删源数据即可</td>
+          <td><span class="tag tag-yellow">中</span> 源+部分缓存</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="insight" style="margin-top:1.5rem;">
+      <strong>面试黄金回答</strong>：没有完美的方案，只有适合业务特征的取舍。Twitter 选择混合方案的核心原因是<strong>关注数分布的幂律特征</strong>——少数名人拥有海量粉丝，多数人只有少量关注。
+    </div>
+  </div>
+</section>
+
+<!-- ==================== LATENCY ==================== -->
+<section class="section" id="latency">
+  <div class="section-tag warn">03 — Performance · 百分位数</div>
+  <h2>为什么<em>平均值</em>毫无意义？</h2>
+  <p class="desc">
+    如果你的 p50 延迟是 100ms，p99 是 2s——"平均 200ms"掩盖了 1% 用户的糟糕体验。
+    在支付系统中，这 1% 可能就是交易失败。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>响应时间分布模拟器</div>
+    <div class="btn-group" style="margin-bottom:1rem;">
+      <button class="btn primary" onclick="generateLatency('normal')">正常负载</button>
+      <button class="btn" onclick="generateLatency('gc')">GC 停顿</button>
+      <button class="btn danger" onclick="generateLatency('overload')">过载排队</button>
+    </div>
+    <div class="latency-chart" id="latency-chart"></div>
+    <div class="latency-annotations" id="latency-annotations"></div>
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-top:1.5rem;">
+      <div class="tw-stat">
+        <div class="val good" id="lat-p50">—</div><div class="lbl">p50</div>
+      </div>
+      <div class="tw-stat">
+        <div class="val" id="lat-p95" style="color:var(--warn)">—</div><div class="lbl">p95</div>
+      </div>
+      <div class="tw-stat">
+        <div class="val" id="lat-p99" style="color:var(--danger)">—</div><div class="lbl">p99</div>
+      </div>
+      <div class="tw-stat">
+        <div class="val" id="lat-avg" style="color:var(--fg-muted)">—</div><div class="lbl">平均值</div>
+      </div>
+    </div>
+    <div id="latency-insight" style="font-size:0.85rem; color:var(--fg-muted); margin-top:1rem;"></div>
+  </div>
+
+  <!-- Queueing effect -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>排队效应：为什么延迟会指数级增长</div>
+    <p style="color:var(--fg-muted); font-size:0.9rem; margin-bottom:1rem;">
+      当服务器 CPU 利用率从 80% 升到 95%，吞吐量只增加 15%，但排队延迟却<strong style="color:var(--danger)">翻了 4 倍</strong>。
+      这就是为什么容量规划要留余量。
+    </p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+      <div>
+        <div style="font-family:var(--mono); font-size:0.7rem; color:var(--fg-muted); margin-bottom:0.5rem;">利用率 60%</div>
+        <div class="load-bar-container"><div class="load-bar-track"><div class="load-bar-fill" style="width:60%"></div></div><div class="load-bar-label"><span>队列长度: ~1.5</span><span>延迟: 1x</span></div></div>
+      </div>
+      <div>
+        <div style="font-family:var(--mono); font-size:0.7rem; color:var(--fg-muted); margin-bottom:0.5rem;">利用率 90%</div>
+        <div class="load-bar-container"><div class="load-bar-track"><div class="load-bar-fill high" style="width:90%"></div></div><div class="load-bar-label"><span>队列长度: ~9</span><span>延迟: 4x</span></div></div>
+      </div>
+    </div>
+    <div class="insight" style="margin-top:1rem;">
+      <strong>排队论公式</strong>：根据 Little's Law 和 M/D/1 队列模型，平均等待时间 ≈ 服务时间 × 利用率/(1-利用率)。利用率 80% 时延迟翻倍，90% 时翻 4 倍，95% 时翻 10 倍。
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SCALING ==================== -->
+<section class="section" id="scaling">
+  <div class="section-tag">04 — Scalability · 有状态扩展</div>
+  <h2>有状态服务的<em>水平扩展</em>难题</h2>
+  <p class="desc">
+    无状态服务（Web 服务器）加机器就行。有状态服务（数据库）水平扩展极难——
+    数据怎么分？事务怎么做？一致性怎么保？这是 DDIA 后半本的核心主题。
+  </p>
+
+  <div class="scale-panel reveal">
+    <!-- Stateless -->
+    <div class="scale-box">
+      <div class="scale-box-title">
+        无状态服务
+        <span class="badge badge-easy">水平扩展容易</span>
+      </div>
+      <div class="scale-nodes" id="stateless-nodes"></div>
+      <div class="load-bar-container">
+        <div style="font-family:var(--mono); font-size:0.65rem; color:var(--fg-muted); margin-bottom:4px;">每节点负载</div>
+        <div class="load-bar-track"><div class="load-bar-fill" id="stateless-load" style="width:50%"></div></div>
+        <div class="load-bar-label"><span id="stateless-load-text">50%</span><span>请求均匀分布</span></div>
+      </div>
+      <div class="btn-group" style="margin-top:0.75rem;">
+        <button class="btn primary" onclick="scaleStateless(1)">+1 节点</button>
+        <button class="btn" onclick="scaleStateless(3)">+3 节点</button>
+        <button class="btn danger" onclick="scaleStateless(-1)">-1 节点</button>
+      </div>
+    </div>
+
+    <!-- Stateful -->
+    <div class="scale-box">
+      <div class="scale-box-title">
+        有状态服务（数据库）
+        <span class="badge badge-hard">水平扩展极难</span>
+      </div>
+      <div class="scale-nodes" id="stateful-nodes"></div>
+      <div class="load-bar-container">
+        <div style="font-family:var(--mono); font-size:0.65rem; color:var(--fg-muted); margin-bottom:4px;">主节点负载</div>
+        <div class="load-bar-track"><div class="load-bar-fill" id="stateful-load" style="width:80%"></div></div>
+        <div class="load-bar-label"><span id="stateful-load-text">80%</span><span>写入全部压在主节点</span></div>
+      </div>
+      <div class="btn-group" style="margin-top:0.75rem;">
+        <button class="btn" onclick="scaleStateful('replica')">+1 从节点(只分读)</button>
+        <button class="btn" onclick="scaleStateful('shard')">+1 分片(要迁移数据)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stateful scaling strategies -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>有状态服务的扩展策略全景</div>
+    <table class="compare-table">
+      <thead>
+        <tr><th>策略</th><th>原理</th><th>解决的问题</th><th>引入的新问题</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-green">读写分离</span></td>
+          <td>主节点写，从节点读</td>
+          <td>读压力大时分散读负载</td>
+          <td>复制延迟 → 读到旧数据；写入仍是单点</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-yellow">分片/分区</span></td>
+          <td>按 key 哈希或范围拆分数据到不同节点</td>
+          <td>写入和存储都可以水平扩展</td>
+          <td>跨分片事务/JOIN；热点分片；再平衡</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-yellow">缓存层</span></td>
+          <td>Redis/Memcached 缓存热数据</td>
+          <td>减少数据库读取</td>
+          <td>缓存一致性；缓存穿透/雪崩</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">多主复制</span></td>
+          <td>多个节点都可写入</td>
+          <td>写入也可以水平扩展</td>
+          <td>写冲突解决极复杂；一致性保证困难</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="insight" style="margin-top:1rem;">
+      <strong>核心矛盾</strong>：有状态服务的水平扩展本质上是要在<strong>一致性、可用性、分区容忍</strong>之间取舍（CAP 定理，Ch9 详述）。支付系统通常选择一致性 → 放弃了最简单的写入水平扩展。
+    </div>
+  </div>
+
+  <!-- Payment scenario -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>支付系统怎么扩展？</div>
+    <p style="color:var(--fg-muted); font-size:0.9rem; margin-bottom:1rem;">
+      支付系统是有状态的（账户余额），且对一致性要求极高。实际扩展路径：
+    </p>
+    <div style="font-family:var(--mono); font-size:0.8rem; line-height:2.2; color:var(--fg-muted);">
+      <div style="padding:0.5rem 0; border-left:3px solid var(--accent); padding-left:1rem; margin-bottom:0.5rem;">
+        <strong style="color:var(--accent);">Step 1</strong> — 单主 + 读写分离 → 写入仍是单点
+      </div>
+      <div style="padding:0.5rem 0; border-left:3px solid var(--info); padding-left:1rem; margin-bottom:0.5rem;">
+        <strong style="color:var(--info);">Step 2</strong> — 按用户 ID 分片 → 写入水平扩展，但跨分片事务困难
+      </div>
+      <div style="padding:0.5rem 0; border-left:3px solid var(--warn); padding-left:1rem; margin-bottom:0.5rem;">
+        <strong style="color:var(--warn);">Step 3</strong> — 业务拆分（账户/订单/流水分离）→ 每个服务独立扩展
+      </div>
+      <div style="padding:0.5rem 0; border-left:3px solid var(--danger); padding-left:1rem;">
+        <strong style="color:var(--danger);">Step 4</strong> — 异步化 + 对账兜底 → 核心路径同步，非核心异步
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== CASCADING FAILURE ==================== -->
+<section class="section" id="cascade">
+  <div class="section-tag danger">05 — Reliability · 级联故障</div>
+  <h2>级联故障：<em>一个节点倒下</em>，全军覆没</h2>
+  <p class="desc">
+    生产环境最常见的系统性故障。一个节点变慢 → 上游超时重试 → 压力传导到其他节点 → 雪崩。
+    点击下方按钮，观察级联故障如何一步步扩散。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>级联故障模拟器</div>
+    <div class="cf-grid" id="cf-grid"></div>
+    <div class="btn-group">
+      <button class="btn danger" onclick="triggerCascadingFailure()">触发故障</button>
+      <button class="btn" onclick="enableCircuitBreaker()">启用熔断器</button>
+      <button class="btn" onclick="resetCascade()">重置</button>
+    </div>
+    <div id="cascade-log" style="font-family:var(--mono); font-size:0.75rem; color:var(--fg-muted); margin-top:1rem; max-height:120px; overflow-y:auto;"></div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; margin-top:1.5rem;">
+      <div class="insight danger" style="margin:0;">
+        <strong>无熔断</strong>：1 节点故障 → 重试风暴 → 全部过载 → 雪崩
+      </div>
+      <div class="insight" style="margin:0;">
+        <strong>有熔断</strong>：1 节点故障 → 熔断器打开 → 快速失败 → 保护其他节点
+      </div>
+      <div class="insight warn" style="margin:0;">
+        <strong>降级</strong>：返回兜底数据而非报错 → 用户无感知
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== MAINTAINABILITY ==================== -->
+<section class="section" id="maintainability">
+  <div class="section-tag">06 — Maintainability</div>
+  <h2>可维护性：消除<em>意外复杂度</em></h2>
+  <p class="desc">
+    好的抽象能隐藏意外复杂度，暴露本质复杂度。数据库是存储的抽象，消息队列是通信的抽象。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>本质复杂度 vs 意外复杂度</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
+      <div style="background:var(--accent-glow); border:1px solid rgba(0,229,160,0.2); border-radius:var(--radius); padding:1.25rem;">
+        <div style="font-family:var(--mono); font-size:0.75rem; color:var(--accent); font-weight:700; margin-bottom:0.75rem;">本质复杂度</div>
+        <div style="font-size:0.85rem; color:var(--fg-muted); line-height:1.8;">
+          问题域本身的复杂度<br>
+          <span style="color:var(--fg);">支付业务规则</span>（双人复核、T+1 结算）<br>
+          <span style="color:var(--fg);">合规要求</span>（反洗钱、KYC）<br>
+          <span style="color:var(--fg);">金融精度</span>（不能浮点运算）<br>
+          → <strong style="color:var(--accent);">无法消除，只能管理</strong>
+        </div>
+      </div>
+      <div style="background:var(--danger-glow); border:1px solid rgba(255,77,106,0.2); border-radius:var(--radius); padding:1.25rem;">
+        <div style="font-family:var(--mono); font-size:0.75rem; color:var(--danger); font-weight:700; margin-bottom:0.75rem;">意外复杂度</div>
+        <div style="font-size:0.85rem; color:var(--fg-muted); line-height:1.8;">
+          实现引入的非必要复杂度<br>
+          <span style="color:var(--fg);">纠缠的依赖</span>（循环 import）<br>
+          <span style="color:var(--fg);">不一致的命名</span>（3 种"订单"定义）<br>
+          <span style="color:var(--fg);">过度设计</span>（不需要的抽象层）<br>
+          → <strong style="color:var(--danger);">必须消除</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer style="text-align:center; padding:3rem; color:var(--fg-dim); font-family:var(--mono); font-size:0.7rem; letter-spacing:0.05em;">
+  DDIA Ch1 可视化 · 数据密集型应用系统设计 · Martin Kleppmann
+</footer>
+
+<script>
+// ============ UTILITIES ============
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function rand(min, max) { return Math.random() * (max - min) + min; }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// ============ HERO COUNTERS ============
+function animateCounter(el, target, duration=1500) {
+  let start = 0;
+  const step = target / (duration / 16);
+  function tick() {
+    start += step;
+    if (start >= target) { el.textContent = target; return; }
+    el.textContent = Math.floor(start);
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+animateCounter(document.getElementById('counter-reliability'), 3);
+animateCounter(document.getElementById('counter-scalability'), 3);
+animateCounter(document.getElementById('counter-principle'), 3);
+
+// ============ SCROLL REVEAL ============
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// ============ TABS ============
+function switchTab(id) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('panel-' + id).classList.add('active');
+}
+
+// ============ TWITTER SIMULATOR ============
+let simRunning = false;
+
+function createNodeHTML(cls, label, x, y) {
+  return `<div class="tw-node ${cls}" style="left:${x}px;top:${y}px">${label}</div>`;
+}
+
+async function runSimulation(mode, type) {
+  if (simRunning) return;
+  simRunning = true;
+
+  if (mode === 'write') {
+    const canvas = document.getElementById('canvas-write');
+    // Clear dynamic content
+    canvas.querySelectorAll('.tw-node, .tw-particle, .tw-db.timeline-db').forEach(e => e.remove());
+
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const isCeleb = type === 'celeb';
+
+    // Author
+    const author = document.createElement('div');
+    author.className = 'tw-node author';
+    author.style.cssText = `left:30px;top:${ch/2-32}px;`;
+    author.textContent = isCeleb ? '名人' : '用户';
+    canvas.appendChild(author);
+
+    // Followers
+    const followerCount = isCeleb ? 12 : 6;
+    const followers = [];
+    for (let i = 0; i < followerCount; i++) {
+      const f = document.createElement('div');
+      f.className = 'tw-node follower';
+      f.style.cssText = `right:30px;top:${30 + i * 35}px;`;
+      f.textContent = 'F' + (i+1);
+      canvas.appendChild(f);
+      followers.push(f);
+    }
+
+    // Timeline DB
+    const db = document.createElement('div');
+    db.className = 'tw-db timeline-db';
+    db.textContent = '时间线缓存';
+    canvas.appendChild(db);
+
+    // Animate: write to each follower's timeline
+    if (isCeleb) {
+      db.classList.add('writing');
+      db.textContent = '写入 3000万 条...';
+      const explain = document.getElementById('write-explain');
+      explain.innerHTML = '<span style="color:var(--danger)">灾难！</span>名人有 3000 万粉丝 → 发一条推要写入 3000 万条缓存 → 延迟可达数十秒甚至分钟。这是 fan-out 写的<strong>致命缺陷</strong>。';
+      await sleep(2000);
+      // Show only a few, then flash red
+      for (let i = 0; i < Math.min(followerCount, 6); i++) {
+        await sleep(200);
+        followers[i].classList.add('highlighted');
+      }
+      await sleep(500);
+      db.textContent = '超时风险极高!';
+      db.style.borderColor = 'var(--danger)';
+      db.style.color = 'var(--danger)';
+      db.style.boxShadow = '0 0 15px var(--danger-glow)';
+    } else {
+      db.classList.add('writing');
+      db.textContent = '写入中...';
+      const explain = document.getElementById('write-explain');
+      explain.innerHTML = '普通人只有几个粉丝 → 发推写入几条缓存 → 很快完成。读取时只查自己的缓存，<span style="color:var(--accent)">O(1)</span>。';
+      for (let i = 0; i < followerCount; i++) {
+        await sleep(300);
+        followers[i].classList.add('highlighted');
+      }
+      await sleep(500);
+      db.textContent = '写入完成 ✓';
+      db.classList.remove('writing');
+      db.style.borderColor = 'var(--accent)';
+    }
+
+  } else if (mode === 'read') {
+    const canvas = document.getElementById('canvas-read');
+    canvas.querySelectorAll('.tw-node, .tw-particle, .tw-db.timeline-db').forEach(e => e.remove());
+
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const isCeleb = type === 'celeb';
+
+    // Author tables (people you follow)
+    const authorCount = isCeleb ? 10 : 5;
+    const authors = [];
+    for (let i = 0; i < authorCount; i++) {
+      const a = document.createElement('div');
+      a.className = 'tw-node ' + (isCeleb && i < 3 ? 'celeb' : 'follower');
+      a.style.cssText = `left:30px;top:${30 + i * 38}px;`;
+      a.textContent = isCeleb && i < 3 ? '名' : 'A' + (i+1);
+      canvas.appendChild(a);
+      authors.push(a);
+    }
+
+    // Reader
+    const reader = document.createElement('div');
+    reader.className = 'tw-node author';
+    reader.style.cssText = `right:30px;top:${ch/2-32}px;`;
+    reader.textContent = '读者';
+    canvas.appendChild(reader);
+
+    // Merge
+    const merge = document.createElement('div');
+    merge.className = 'tw-db timeline-db';
+    merge.textContent = '合并排序';
+    canvas.appendChild(merge);
+
+    const explain = document.getElementById('read-explain');
+    if (isCeleb) {
+      explain.innerHTML = '关注了 30 个人 → 读取时间线需要查询 30 个发推表并合并排序 → <span style="color:var(--warn)">延迟与关注数成正比</span>。关注越多越慢。';
+      merge.classList.add('reading');
+      for (let i = 0; i < authorCount; i++) {
+        await sleep(150);
+        authors[i].classList.add('highlighted');
+      }
+      merge.textContent = '合并 30 个表...';
+      await sleep(1500);
+      merge.textContent = '排序完成 (较慢)';
+    } else {
+      explain.innerHTML = '关注 5 个人 → 合并 5 个发推表 → 尚可接受。但如果关注数很多（>100），<span style="color:var(--danger)">读取会非常慢</span>。';
+      merge.classList.add('reading');
+      for (let i = 0; i < authorCount; i++) {
+        await sleep(250);
+        authors[i].classList.add('highlighted');
+      }
+      merge.textContent = '合并 5 个表...';
+      await sleep(800);
+      merge.textContent = '排序完成 ✓';
+    }
+
+  } else if (mode === 'hybrid') {
+    const canvas = document.getElementById('canvas-hybrid');
+    canvas.querySelectorAll('.tw-node, .tw-particle, .tw-db.timeline-db').forEach(e => e.remove());
+
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+
+    // Left: normal user (fan-out write)
+    const normalUser = document.createElement('div');
+    normalUser.className = 'tw-node author';
+    normalUser.style.cssText = `left:30px;top:${ch/2-32}px;`;
+    normalUser.textContent = '普通';
+    canvas.appendChild(normalUser);
+
+    const nf = [];
+    for (let i = 0; i < 3; i++) {
+      const f = document.createElement('div');
+      f.className = 'tw-node follower';
+      f.style.cssText = `left:140px;top:${ch/2 - 60 + i * 45}px;`;
+      f.textContent = 'F' + (i+1);
+      canvas.appendChild(f);
+      nf.push(f);
+    }
+
+    // Right: celebrity (fan-out read)
+    const celeb = document.createElement('div');
+    celeb.className = 'tw-node celeb';
+    celeb.style.cssText = `right:30px;top:${ch/2-32}px;`;
+    celeb.textContent = '名人';
+    canvas.appendChild(celeb);
+
+    const celebTable = document.createElement('div');
+    celebTable.className = 'tw-node celeb';
+    celebTable.style.cssText = `right:140px;top:${ch/2-26}px; width:48px; height:48px; border-radius:6px;`;
+    celebTable.textContent = '发推表';
+    canvas.appendChild(celebTable);
+
+    // Timeline
+    const timeline = document.createElement('div');
+    timeline.className = 'tw-db timeline-db';
+    timeline.textContent = '混合时间线';
+    canvas.appendChild(timeline);
+
+    // Step 1: Normal user writes → fan-out to followers
+    const explain = document.getElementById('hybrid-explain');
+    explain.innerHTML = '<strong style="color:var(--accent)">Step 1</strong>: 普通人发推 → 写入少量粉丝的缓存（fan-out 写）';
+    for (let i = 0; i < nf.length; i++) {
+      await sleep(400);
+      nf[i].classList.add('highlighted');
+    }
+    await sleep(800);
+
+    // Step 2: Celebrity doesn't fan out
+    explain.innerHTML = '<strong style="color:var(--warn)">Step 2</strong>: 名人发推 → 不写粉丝缓存，只写自己的发推表';
+    celebTable.classList.add('highlighted');
+    await sleep(800);
+
+    // Step 3: Read timeline → merge
+    timeline.classList.add('reading');
+    explain.innerHTML = '<strong style="color:var(--info)">Step 3</strong>: 读时间线 → 查自己缓存 + 查名人发推表 → 少量合并 → <strong style="color:var(--accent)">最优方案</strong>';
+    timeline.textContent = '缓存 + 少量查询';
+    await sleep(1000);
+    timeline.textContent = '完成 ✓ (快速)';
+  }
+
+  simRunning = false;
+}
+
+// ============ LATENCY HISTOGRAM ============
+function generateLatency(mode) {
+  const chart = document.getElementById('latency-chart');
+  const annotations = document.getElementById('latency-annotations');
+  chart.innerHTML = '';
+  annotations.innerHTML = '';
+
+  const count = 50;
+  let data = [];
+
+  if (mode === 'normal') {
+    // Log-normal distribution
+    for (let i = 0; i < count; i++) {
+      data.push(Math.exp(rand(3.5, 1.2)) + 20);
+    }
+    document.getElementById('latency-insight').innerHTML = '正常负载下，大多数请求在 50-200ms，p99 可能在 500ms 左右。<strong style="color:var(--accent)">平均值被少数慢请求拉高</strong>，不能代表典型体验。';
+  } else if (mode === 'gc') {
+    // Mostly fast, some very slow (GC pauses)
+    for (let i = 0; i < count; i++) {
+      if (Math.random() < 0.06) {
+        data.push(rand(1500, 5000)); // GC pause
+      } else {
+        data.push(rand(30, 150));
+      }
+    }
+    document.getElementById('latency-insight').innerHTML = 'GC 停顿导致<strong style="color:var(--danger)">少数请求延迟飙升</strong>。p99 可能是 2-5 秒，而 p50 只有 80ms。平均值完全掩盖了 GC 停顿的影响。';
+  } else {
+    // Overload: exponential tail
+    for (let i = 0; i < count; i++) {
+      if (Math.random() < 0.3) {
+        data.push(rand(2000, 10000)); // queued
+      } else {
+        data.push(rand(100, 500));
+      }
+    }
+    document.getElementById('latency-insight').innerHTML = '过载时排队效应导致<strong style="color:var(--danger)">30% 的请求严重超时</strong>。p999 可能达到 10 秒。这就是为什么容量规划要在 70% 利用率就考虑扩容。';
+  }
+
+  data.sort((a, b) => a - b);
+  const maxVal = data[data.length - 1];
+
+  // Calculate percentiles
+  const p50 = data[Math.floor(count * 0.5)];
+  const p95 = data[Math.floor(count * 0.95)];
+  const p99 = data[Math.floor(count * 0.99)];
+  const avg = Math.round(data.reduce((s, v) => s + v, 0) / count);
+
+  document.getElementById('lat-p50').textContent = p50 + 'ms';
+  document.getElementById('lat-p95').textContent = p95 + 'ms';
+  document.getElementById('lat-p99').textContent = p99 + 'ms';
+  document.getElementById('lat-avg').textContent = avg + 'ms';
+
+  // Draw bars
+  data.forEach((val, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'latency-bar';
+    if (i === Math.floor(count * 0.5)) bar.classList.add('p50');
+    if (i === Math.floor(count * 0.95)) bar.classList.add('p95');
+    if (i === Math.floor(count * 0.99)) bar.classList.add('p99');
+    bar.style.height = '0%';
+    chart.appendChild(bar);
+    setTimeout(() => {
+      bar.style.height = (val / maxVal * 100) + '%';
+    }, i * 20);
+  });
+
+  // Annotations
+  const annData = [
+    { pct: 'p50', ms: p50, pos: 50, cls: 'green' },
+    { pct: 'p95', ms: p95, pos: 95, cls: 'yellow' },
+    { pct: 'p99', ms: p99, pos: 99, cls: 'red' },
+  ];
+  annData.forEach(a => {
+    const ann = document.createElement('div');
+    ann.className = 'latency-ann';
+    ann.style.left = a.pos + '%';
+    ann.innerHTML = `<div class="line"></div><div class="pct">${a.pct}</div><div class="ms ${a.cls}">${a.ms}ms</div>`;
+    annotations.appendChild(ann);
+  });
+}
+
+// ============ SCALING VISUALIZER ============
+let statelessCount = 3;
+let statefulPrimaries = 1;
+let statefulReplicas = 2;
+let statefulShards = 1;
+
+function renderStateless() {
+  const container = document.getElementById('stateless-nodes');
+  container.innerHTML = '';
+  for (let i = 0; i < statelessCount; i++) {
+    const node = document.createElement('div');
+    node.className = 'scale-node stateless';
+    node.innerHTML = `<span style="font-size:1.2rem;">⚡</span><span>S${i+1}</span>`;
+    container.appendChild(node);
+  }
+  const load = Math.min(95, Math.round(150 / statelessCount));
+  const loadBar = document.getElementById('stateless-load');
+  loadBar.style.width = load + '%';
+  loadBar.className = 'load-bar-fill' + (load > 80 ? ' critical' : load > 60 ? ' high' : '');
+  document.getElementById('stateless-load-text').textContent = load + '%';
+}
+
+function renderStateful() {
+  const container = document.getElementById('stateful-nodes');
+  container.innerHTML = '';
+
+  // Primary
+  const primary = document.createElement('div');
+  primary.className = 'scale-node stateful';
+  primary.style.borderColor = 'var(--warn)';
+  primary.innerHTML = `<span style="font-size:1rem;">👑</span><span>主</span><div class="data-bar" style="background:var(--warn);"></div>`;
+  container.appendChild(primary);
+
+  // Replicas
+  for (let i = 0; i < statefulReplicas; i++) {
+    const r = document.createElement('div');
+    r.className = 'scale-node stateful';
+    r.innerHTML = `<span style="font-size:1rem;">📖</span><span>从${i+1}</span><div class="data-bar"></div>`;
+    container.appendChild(r);
+  }
+
+  // Shards
+  for (let i = 0; i < statefulShards - 1; i++) {
+    const s = document.createElement('div');
+    s.className = 'scale-node stateful';
+    s.style.borderColor = 'var(--info)';
+    s.innerHTML = `<span style="font-size:1rem;">🔀</span><span>分片${i+2}</span><div class="data-bar" style="background:var(--info);"></div>`;
+    container.appendChild(s);
+  }
+
+  const writeLoad = Math.max(20, Math.round(90 / statefulShards));
+  const loadBar = document.getElementById('stateful-load');
+  loadBar.style.width = writeLoad + '%';
+  loadBar.className = 'load-bar-fill' + (writeLoad > 80 ? ' critical' : writeLoad > 60 ? ' high' : '');
+  document.getElementById('stateful-load-text').textContent = writeLoad + '%';
+}
+
+function scaleStateless(delta) {
+  statelessCount = Math.max(1, statelessCount + delta);
+  const container = document.getElementById('stateless-nodes');
+  // Add new node with animation
+  if (delta > 0) {
+    const node = document.createElement('div');
+    node.className = 'scale-node stateless new';
+    node.innerHTML = `<span style="font-size:1.2rem;">⚡</span><span>S${statelessCount}</span>`;
+    container.appendChild(node);
+    setTimeout(() => {
+      node.classList.remove('new');
+      renderStateless();
+    }, 600);
+  } else {
+    const nodes = container.querySelectorAll('.scale-node');
+    if (nodes.length > 0) nodes[nodes.length - 1].remove();
+    setTimeout(renderStateless, 100);
+  }
+}
+
+function scaleStateful(type) {
+  if (type === 'replica') {
+    statefulReplicas++;
+    const container = document.getElementById('stateful-nodes');
+    const node = document.createElement('div');
+    node.className = 'scale-node stateful';
+    node.style.cssText = 'border-color:var(--accent); color:var(--accent); box-shadow:0 0 12px var(--accent-glow);';
+    node.innerHTML = `<span style="font-size:1rem;">📖</span><span>从${statefulReplicas}</span><div class="data-bar" style="background:var(--accent);"></div>`;
+    container.appendChild(node);
+    setTimeout(() => {
+      node.style.cssText = '';
+      renderStateful();
+    }, 800);
+    // Show note: replicas only help with reads
+    const loadBar = document.getElementById('stateful-load');
+    // Write load doesn't change
+    const note = document.createElement('div');
+    note.style.cssText = 'font-family:var(--mono); font-size:0.7rem; color:var(--warn); margin-top:0.5rem;';
+    note.textContent = '⚠ 从节点只分摊读压力，写入仍在主节点';
+    loadBar.parentElement.parentElement.appendChild(note);
+    setTimeout(() => note.remove(), 3000);
+  } else if (type === 'shard') {
+    statefulShards++;
+    const container = document.getElementById('stateful-nodes');
+    const node = document.createElement('div');
+    node.className = 'scale-node stateful';
+    node.style.cssText = 'border-color:var(--info); color:var(--info); box-shadow:0 0 12px var(--info-glow);';
+    node.innerHTML = `<span style="font-size:1rem;">🔀</span><span>分片${statefulShards}</span><div class="data-bar" style="background:var(--info);"></div>`;
+    container.appendChild(node);
+    setTimeout(() => {
+      node.style.cssText = '';
+      renderStateful();
+    }, 800);
+  }
+}
+
+// ============ CASCADING FAILURE ============
+let cfNodes = [];
+let cfCircuitBreaker = false;
+const CF_SIZE = 10;
+
+function initCascade() {
+  const grid = document.getElementById('cf-grid');
+  grid.innerHTML = '';
+  cfNodes = [];
+  for (let i = 0; i < CF_SIZE; i++) {
+    const node = document.createElement('div');
+    node.className = 'cf-node healthy';
+    node.innerHTML = `<span class="icon">●</span><span>节点${i+1}</span><div class="load-bar"></div>`;
+    grid.appendChild(node);
+    cfNodes.push({ el: node, status: 'healthy', load: 30 });
+  }
+}
+
+function updateCFNode(i, status, load) {
+  const node = cfNodes[i];
+  node.status = status;
+  node.load = load;
+  node.el.className = 'cf-node ' + status;
+  node.el.querySelector('.load-bar').style.height = load + '%';
+}
+
+async function triggerCascadingFailure() {
+  const log = document.getElementById('cascade-log');
+  log.innerHTML = '';
+
+  function addLog(msg, color) {
+    const d = document.createElement('div');
+    d.style.color = color || 'var(--fg-muted)';
+    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    log.prepend(d);
+  }
+
+  // Reset
+  cfNodes.forEach((n, i) => updateCFNode(i, 'healthy', 30));
+  await sleep(500);
+
+  // Step 1: Node 3 fails
+  addLog('⚠ 节点3 磁盘 I/O 异常，响应变慢...', 'var(--warn)');
+  updateCFNode(2, 'stressed', 85);
+  await sleep(800);
+
+  // Step 2: Requests to node 3 timeout, clients retry
+  addLog('⚠ 上游超时，开始重试 → 压力转移到相邻节点', 'var(--warn)');
+  updateCFNode(1, 'stressed', 70);
+  updateCFNode(3, 'stressed', 70);
+  await sleep(600);
+
+  if (cfCircuitBreaker) {
+    // Circuit breaker kicks in
+    addLog('✓ 熔断器打开！快速失败，不再重试节点3', 'var(--accent)');
+    updateCFNode(2, 'failed', 0);
+    updateCFNode(1, 'stressed', 65);
+    updateCFNode(3, 'stressed', 65);
+    await sleep(800);
+    addLog('✓ 剩余节点负载逐渐恢复', 'var(--accent)');
+    updateCFNode(1, 'healthy', 45);
+    updateCFNode(3, 'healthy', 45);
+    await sleep(600);
+    addLog('✓ 节点3 恢复中，熔断器半开', 'var(--info)');
+    updateCFNode(2, 'recovering', 20);
+    await sleep(1000);
+    addLog('✓ 节点3 恢复完成，熔断器关闭', 'var(--accent)');
+    updateCFNode(2, 'healthy', 35);
+  } else {
+    // No circuit breaker: cascading failure
+    addLog('✗ 无熔断 → 重试风暴！', 'var(--danger)');
+    updateCFNode(2, 'failed', 0);
+    await sleep(400);
+    addLog('✗ 节点2 过载...', 'var(--danger)');
+    updateCFNode(1, 'overloaded', 95);
+    await sleep(400);
+    addLog('✗ 节点4 过载...', 'var(--danger)');
+    updateCFNode(3, 'overloaded', 95);
+    await sleep(400);
+    addLog('✗ 节点2 崩溃！', 'var(--danger)');
+    updateCFNode(1, 'failed', 0);
+    await sleep(300);
+    addLog('✗ 节点4 崩溃！', 'var(--danger)');
+    updateCFNode(3, 'failed', 0);
+    await sleep(300);
+    // Cascade further
+    for (let i = 4; i < CF_SIZE; i++) {
+      updateCFNode(i, 'overloaded', 90 + Math.random() * 10);
+      addLog(`✗ 节点${i+1} 过载...`, 'var(--danger)');
+      await sleep(250);
+    }
+    await sleep(300);
+    for (let i = 4; i < CF_SIZE; i++) {
+      updateCFNode(i, 'failed', 0);
+    }
+    addLog('💀 全部节点崩溃 — 雪崩！', 'var(--danger)');
+  }
+}
+
+function enableCircuitBreaker() {
+  cfCircuitBreaker = true;
+  const log = document.getElementById('cascade-log');
+  log.innerHTML = '<div style="color:var(--accent)">✓ 熔断器已启用。再次触发故障观察效果。</div>';
+}
+
+function resetCascade() {
+  cfCircuitBreaker = false;
+  initCascade();
+  document.getElementById('cascade-log').innerHTML = '';
+}
+
+// ============ INIT ============
+document.addEventListener('DOMContentLoaded', () => {
+  renderStateless();
+  renderStateful();
+  initCascade();
+  generateLatency('normal');
+
+  // Nav active state
+  const sections = document.querySelectorAll('.section');
+  const navLinks = document.querySelectorAll('.nav-links a');
+  window.addEventListener('scroll', () => {
+    let current = '';
+    sections.forEach(s => {
+      if (window.scrollY >= s.offsetTop - 100) current = s.id;
+    });
+    navLinks.forEach(a => {
+      a.classList.toggle('active', a.dataset.section === current);
+    });
+  });
+});
+</script>
+</body>
+</html>

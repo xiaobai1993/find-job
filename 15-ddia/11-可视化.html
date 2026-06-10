@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch11 — 流处理</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+:root{--bg:#0b0f15;--bg-card:#111820;--bg-el:#171f2b;--fg:#e4eaf1;--fg-m:#7a8da3;--fg-d:#3e5168;--accent:#00d4ff;--accent2:#a78bfa;--ag:rgba(0,212,255,.12);--a2g:rgba(167,139,250,.12);--danger:#ff5272;--dg:rgba(255,82,114,.12);--warn:#f5a623;--wg:rgba(245,166,35,.12);--success:#2ee6a8;--sg:rgba(46,230,168,.12);--border:#1c2736;--ba:rgba(0,212,255,.3);--radius:8px;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans SC',system-ui,sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;}html{scroll-behavior:smooth;}body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;overflow-x:hidden;}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.01) 2px,rgba(0,212,255,.01) 4px);pointer-events:none;z-index:9999;}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,15,21,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}.logo span{color:var(--fg-m);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap;}.nav-links a{font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;}.nav-links a:hover{color:var(--accent);background:var(--ag);}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,var(--ag) 0%,var(--a2g) 40%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation:hp 5s ease-in-out infinite;}
+@keyframes hp{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;}.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-m);max-width:640px;position:relative;}
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}.section-tag.t2{color:var(--accent2);}.section-tag.t3{color:var(--warn);}.section-tag.t4{color:var(--danger);}.section-tag.t5{color:var(--success);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;}.section h2 em{font-style:normal;color:var(--accent);}.section .desc{color:var(--fg-m);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+.btn{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg);cursor:pointer;transition:.2s;}.btn:hover{border-color:var(--accent);background:var(--ag);}.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}.btn.primary:hover{opacity:.85;}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;}.card:hover{border-color:var(--ba);}
+
+/* Window types */
+.window-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.window-demo{position:relative;height:180px;background:var(--bg-card);border-radius:6px;margin:1rem 0;overflow:hidden;}
+.window-timeline{position:absolute;top:0;left:0;right:0;height:30px;background:var(--bg-el);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.65rem;color:var(--fg-m);}
+.window-event{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--accent);transition:all .3s;}
+.window-box{position:absolute;border:2px solid;border-radius:4px;opacity:.6;transition:all .3s;}
+.window-tabs{display:flex;gap:.5rem;margin-bottom:.5rem;flex-wrap:wrap;}
+.window-tab{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg-m);cursor:pointer;transition:.2s;}
+.window-tab:hover,.window-tab.active{border-color:var(--accent);color:var(--accent);background:var(--ag);}
+.window-desc{font-size:.82rem;color:var(--fg-m);padding:.8rem;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--accent);}
+
+/* Exactly-once */
+.exactly-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.exactly-flow{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0;}
+.exactly-step{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem;min-width:120px;text-align:center;flex:1;max-width:180px;transition:all .4s;}
+.exactly-step.active{border-color:var(--accent);box-shadow:0 0 12px var(--ag);}
+.exactly-step .step-label{font-family:var(--mono);font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:.3rem;}
+.exactly-step .step-detail{font-size:.68rem;color:var(--fg-m);}
+.exactly-arrow{display:flex;align-items:center;color:var(--fg-d);font-size:1rem;}
+
+/* Lambda vs Kappa */
+.arch-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;}@media(max-width:768px){.arch-grid{grid-template-columns:1fr;}}
+.arch-box{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;}
+.arch-box h4{font-family:var(--mono);font-size:.8rem;margin-bottom:.8rem;}
+.arch-box .flow-step{display:flex;align-items:center;gap:.5rem;margin:.4rem 0;font-size:.8rem;color:var(--fg-m);}
+.arch-box .flow-step .box{font-family:var(--mono);font-size:.68rem;padding:.3rem .6rem;border-radius:4px;background:rgba(255,255,255,.03);border:1px solid var(--border);}
+.arch-box .flow-step .arrow{color:var(--fg-d);}
+.arch-box .pros{color:var(--success);font-size:.78rem;margin:.2rem 0;}
+.arch-box .cons{color:var(--danger);font-size:.78rem;margin:.2rem 0;}
+
+.payment-card{background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(167,139,250,.08));border:1px solid var(--ba);border-radius:var(--radius);padding:2rem;margin-top:1rem;}.payment-card h3{color:var(--accent);font-size:1.1rem;margin-bottom:1rem;}.payment-card .point{display:flex;gap:.8rem;margin:.6rem 0;align-items:flex-start;}.payment-card .point .num{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem;flex-shrink:0;}.payment-card .point .text{font-size:.88rem;color:var(--fg-m);}
+.code-block{font-family:var(--mono);font-size:.72rem;background:var(--bg-el);border:1px solid var(--border);border-radius:6px;padding:1rem;margin-top:.8rem;line-height:1.6;color:var(--fg-m);}
+footer{padding:3rem 2rem;text-align:center;color:var(--fg-d);font-family:var(--mono);font-size:.7rem;border-top:1px solid var(--border);margin-top:4rem;}
+</style>
+</head>
+<body>
+<nav><div class="logo">DDIA<span> · Ch11</span></div><div class="nav-links"><a href="#window">窗口类型</a><a href="#exactly">Exactly-Once</a><a href="#duality">流表二象</a><a href="#arch">Lambda vs Kappa</a><a href="#payment">支付场景</a></div></nav>
+<div class="hero"><div class="hero-tag">Chapter 11</div><h1>流处理</h1><p class="hero-sub">在事件发生时立即处理——不像批处理等数据积累再处理。事件流是数据系统"活"的部分，批处理是"快照"。</p></div>
+
+<!-- Window types -->
+<div class="section" id="window">
+  <div class="section-tag t1">01 — Window Types</div>
+  <h2>窗口<em>类型</em></h2>
+  <p class="desc">流处理的核心问题：如何在无界流上定义有界计算？三种窗口类型适合不同场景。</p>
+  <div class="window-container">
+    <div class="window-tabs">
+      <div class="window-tab active" onclick="showWindow(0)">滚动窗口</div>
+      <div class="window-tab" onclick="showWindow(1)">滑动窗口</div>
+      <div class="window-tab" onclick="showWindow(2)">会话窗口</div>
+    </div>
+    <div class="window-demo" id="windowDemo"></div>
+    <div class="window-desc" id="windowDesc">滚动窗口：固定大小，不重叠。如每小时统计交易量。10:00-11:00、11:00-12:00 各自独立。</div>
+  </div>
+</div>
+
+<!-- Exactly-Once -->
+<div class="section" id="exactly">
+  <div class="section-tag t2">02 — Exactly-Once</div>
+  <h2>Exactly-Once <em>语义</em></h2>
+  <p class="desc">流处理最核心的问题：如何保证每条消息恰好处理一次？支付系统必须用幂等消费者方案。</p>
+  <div class="exactly-container">
+    <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap;">
+      <button class="btn primary" onclick="showExactly(0)">幂等生产者</button>
+      <button class="btn primary" onclick="showExactly(1)">Kafka事务</button>
+      <button class="btn primary" onclick="showExactly(2)">Flink Checkpoint</button>
+      <button class="btn primary" onclick="showExactly(3)">幂等消费者</button>
+    </div>
+    <div class="exactly-flow" id="exactlyFlow"></div>
+    <div style="font-family:var(--mono);font-size:.78rem;padding:.8rem;background:var(--bg-card);border-radius:4px;min-height:60px;" id="exactlyDesc">点击上方按钮查看不同 Exactly-Once 方案</div>
+  </div>
+</div>
+
+<!-- Stream-Table Duality -->
+<div class="section" id="duality">
+  <div class="section-tag t5">03 — Duality</div>
+  <h2>流表<em>二象性</em></h2>
+  <p class="desc">流和表是同一数据的两种视图。流 = 变更日志，表 = 聚合结果。两者可以互转。</p>
+  <div class="card">
+    <div style="display:flex;gap:2rem;flex-wrap:wrap;justify-content:center;">
+      <div style="text-align:center;">
+        <div style="font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--accent);margin-bottom:.5rem;">流 → 表</div>
+        <div style="font-size:.82rem;color:var(--fg-m);">流上的聚合操作 → 物化为表</div>
+        <div style="font-size:.75rem;color:var(--fg-d);margin-top:.3rem;">交易流 → 聚合 → 每日统计表</div>
+      </div>
+      <div style="font-size:2rem;color:var(--fg-d);display:flex;align-items:center;">⇄</div>
+      <div style="text-align:center;">
+        <div style="font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--accent2);margin-bottom:.5rem;">表 → 流</div>
+        <div style="font-size:.82rem;color:var(--fg-m);">表的变更日志（CDC）→ 流</div>
+        <div style="font-size:.75rem;color:var(--fg-d);margin-top:.3rem;">MySQL Binlog → Kafka → 流处理</div>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;padding:1rem;background:var(--bg-el);border-radius:6px;text-align:center;font-family:var(--mono);font-size:.72rem;color:var(--fg-m);">
+      变更日志(CDC) → [流处理] → 物化视图(表) → 表变更 → 日志 → 循环
+    </div>
+  </div>
+</div>
+
+<!-- Lambda vs Kappa -->
+<div class="section" id="arch">
+  <div class="section-tag t3">04 — Architecture</div>
+  <h2>Lambda vs Kappa <em>架构</em></h2>
+  <p class="desc">两种流批结合架构。Lambda 用两套代码保证正确性，Kappa 用一套代码简化维护。趋势走向 Kappa。</p>
+  <div class="arch-container">
+    <div class="arch-grid">
+      <div class="arch-box" style="border-top:3px solid var(--warn);">
+        <h4 style="color:var(--warn)">Lambda 架构</h4>
+        <div class="flow-step"><span class="box">数据</span><span class="arrow">→</span><span class="box" style="border-color:var(--accent)">批处理层</span><span class="arrow">→</span><span class="box">批视图</span></div>
+        <div class="flow-step"><span class="box">数据</span><span class="arrow">→</span><span class="box" style="border-color:var(--warn)">速度层</span><span class="arrow">→</span><span class="box">实时视图</span></div>
+        <div class="flow-step"><span class="box" style="border-color:var(--accent2)">服务层</span><span class="arrow">→</span>合并两个视图</div>
+        <div class="pros">✓ 批处理保证正确性</div>
+        <div class="pros">✓ 实时层提供低延迟</div>
+        <div class="cons">✗ 两套代码（批+流）</div>
+        <div class="cons">✗ 合并逻辑复杂</div>
+      </div>
+      <div class="arch-box" style="border-top:3px solid var(--success);">
+        <h4 style="color:var(--success)">Kappa 架构</h4>
+        <div class="flow-step"><span class="box">数据</span><span class="arrow">→</span><span class="box" style="border-color:var(--success)">流处理层</span><span class="arrow">→</span><span class="box">实时视图</span></div>
+        <div class="flow-step" style="margin-left:60px;">↑ 可重放（Kafka 保留日志）</div>
+        <div class="pros">✓ 一套代码</div>
+        <div class="pros">✓ 维护简单</div>
+        <div class="cons">✗ 依赖 exactly-once</div>
+        <div class="cons">✗ 重放大量数据延迟高</div>
+      </div>
+    </div>
+    <div style="margin-top:1rem;padding:.8rem;background:var(--ag);border-radius:4px;font-size:.8rem;color:var(--accent);">
+      支付场景：对账系统用 Lambda（批处理保证 100% 正确），风控系统用 Kappa（需要低延迟）。趋势：Flink 统一批流 → 逐渐走向 Kappa。
+    </div>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="section" id="payment">
+  <div class="section-tag t3">05 — Payment Domain</div>
+  <h2>支付场景<em>幂等消费</em></h2>
+  <div class="payment-card">
+    <h3>支付 Exactly-Once 设计</h3>
+    <div class="code-block">
+Kafka 消息 → 消费者 → 查幂等表 → 已处理? → 是 → 跳过(提交offset)
+                                 → 否 → 处理业务 + 写幂等表 + 提交offset（同一事务）
+    </div>
+    <div class="point" style="margin-top:1rem;"><div class="num">01</div><div class="text">幂等表和业务数据在同一个数据库事务中 → 原子性保证</div></div>
+    <div class="point"><div class="num">02</div><div class="text">幂等键 = 订单号（唯一标识一笔交易）→ 重复消费自动跳过</div></div>
+    <div class="point"><div class="num">03</div><div class="text">不依赖消息系统的 exactly-once → 业务层保证最可靠</div></div>
+    <div style="margin-top:1.2rem;padding:1rem;background:var(--bg-el);border-radius:6px;border-left:3px solid var(--accent);">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.3rem;">面试关键</div>
+      <div style="font-size:.88rem;color:var(--fg);">"支付系统必须用业务层幂等消费保证 exactly-once。幂等表 + 业务事务 + 提交 offset 原子化。Kafka 事务可以辅助，但不能完全依赖。"</div>
+    </div>
+  </div>
+</div>
+<footer>DDIA · Chapter 11 · 流处理 · Visualization</footer>
+<script>
+const windowConfigs=[
+  {desc:'滚动窗口：固定大小，不重叠。如每小时统计交易量。',draw:(ctx,w,h)=>{
+    for(let i=0;i<5;i++){ctx.fillStyle=i%2===0?'rgba(0,212,255,.1)':'rgba(167,139,250,.1)';ctx.fillRect(i*w/5,30,w/5,h-30);ctx.strokeStyle=i%2===0?'rgba(0,212,255,.3)':'rgba(167,139,250,.3)';ctx.strokeRect(i*w/5,30,w/5,h-30);ctx.fillStyle='#7a8da3';ctx.font='10px JetBrains Mono';ctx.textAlign='center';ctx.fillText((10+i)+'时',i*w/5+w/10,h-5);}
+    [[.1,.5],[.15,.7],[.25,.4],[.35,.6],[.45,.3],[.55,.8],[.65,.5],[.75,.6],[.85,.4],[.95,.7]].forEach(([x,y])=>{ctx.beginPath();ctx.arc(x*w,30+y*(h-40),3,0,2*Math.PI);ctx.fillStyle='#00d4ff';ctx.fill();});
+  }},
+  {desc:'滑动窗口：固定大小，有重叠。如"最近5分钟"每1分钟滑动。窗口之间有重叠区域。',draw:(ctx,w,h)=>{
+    for(let i=0;i<8;i++){ctx.fillStyle='rgba(0,212,255,.06)';ctx.fillRect(i*w/8,30,w/4,h-30);ctx.strokeStyle='rgba(0,212,255,.15)';ctx.strokeRect(i*w/8,30,w/4,h-30);}
+    [[.1,.5],[.2,.7],[.3,.4],[.4,.6],[.5,.3],[.6,.8],[.7,.5],[.8,.6],[.9,.4]].forEach(([x,y])=>{ctx.beginPath();ctx.arc(x*w,30+y*(h-40),3,0,2*Math.PI);ctx.fillStyle='#a78bfa';ctx.fill();});
+  }},
+  {desc:'会话窗口：按活动间隔动态划分。如用户30分钟无活动则结束会话。支付场景：同一用户的连续操作归为一个会话。',draw:(ctx,w,h)=>{
+    const sessions=[{start:.05,end:.3,y:.4},{start:.4,end:.55,y:.6},{start:.65,end:.9,y:.35}];
+    sessions.forEach(s=>{ctx.fillStyle='rgba(245,166,35,.1)';ctx.fillRect(s.start*w,30+s.y*(h-60),(s.end-s.start)*w,40);ctx.strokeStyle='rgba(245,166,35,.4)';ctx.strokeRect(s.start*w,30+s.y*(h-60),(s.end-s.start)*w,40);});
+    [[.1,.5],[.15,.6],[.2,.4],[.25,.55],[.45,.7],[.5,.5],[.7,.3],[.75,.45],[.8,.4],[.85,.5]].forEach(([x,y])=>{ctx.beginPath();ctx.arc(x*w,30+y*(h-40),3,0,2*Math.PI);ctx.fillStyle='#f5a623';ctx.fill();});
+  }}
+];
+
+function showWindow(idx){
+  document.querySelectorAll('.window-tab').forEach((t,i)=>{t.classList.toggle('active',i===idx);});
+  document.getElementById('windowDesc').textContent=windowConfigs[idx].desc;
+  const demo=document.getElementById('windowDemo');
+  const canvas=document.createElement('canvas');
+  canvas.width=demo.offsetWidth||600;canvas.height=180;canvas.style.width='100%';canvas.style.height='180px';
+  demo.innerHTML='';demo.appendChild(canvas);
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#111820';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#7a8da3';ctx.font='10px JetBrains Mono';ctx.textAlign='center';ctx.fillText('时间 →',canvas.width/2,18);
+  windowConfigs[idx].draw(ctx,canvas.width,canvas.height);
+}
+
+setTimeout(()=>showWindow(0),100);
+
+const exactlySchemes=[
+  {title:'幂等生产者',steps:[
+    {label:'Producer',detail:'PID + SeqNum'},{label:'Broker',detail:'去重检查'},{label:'Partition',detail:'只写一次'}
+  ],desc:'Kafka 0.11+ 支持。每条消息有 Producer ID + Sequence Number。Broker 去重 → 相同 PID+SeqNum 只写入一次。<br><span style="color:var(--fg-d)">局限：只能防单 Producer 内重试，不能跨 Producer</span>'},
+  {title:'Kafka 事务',steps:[
+    {label:'Begin TX',detail:'开始事务'},{label:'Consume+Process',detail:'消费处理'},{label:'Produce',detail:'产出结果'},{label:'Commit',detail:'原子提交'}
+  ],desc:'"消费-处理-产出" 原子化。消费 offset 和产出结果在同一事务中提交。<br><span style="color:var(--fg-d)">局限：只能保证 Kafka 内部的 exactly-once</span>'},
+  {title:'Flink Checkpoint',steps:[
+    {label:'Barrier',detail:'Chandy-Lamport'},{label:'Snapshot',detail:'全局状态快照'},{label:'Failure',detail:'从快照恢复'}
+  ],desc:'定期做全局状态快照（Chandy-Lamport 算法）。故障时从最近快照恢复 → 保证 exactly-once。<br><span style="color:var(--fg-d)">局限：需要数据源支持重放</span>'},
+  {title:'幂等消费者 (业务层)',steps:[
+    {label:'Consume',detail:'消费消息'},{label:'查幂等表',detail:'是否已处理'},{label:'Process+Record',detail:'业务+幂等表(同一事务)'},{label:'Commit',detail:'提交 offset'}
+  ],desc:'<span style="color:var(--success);font-weight:700;">最可靠的方案：业务层去重</span><br>用唯一键（如订单号）做幂等判断。幂等表和业务数据在同一个数据库事务中。<br><span style="color:var(--accent)">支付系统必须用这个方案 → 不依赖消息系统的 exactly-once</span>'}
+];
+
+function showExactly(idx){
+  const scheme=exactlySchemes[idx];
+  const flow=document.getElementById('exactlyFlow');
+  let html='';
+  scheme.steps.forEach((s,i)=>{
+    if(i>0)html+='<div class="exactly-arrow">→</div>';
+    html+='<div class="exactly-step"><div class="step-label">'+s.label+'</div><div class="step-detail">'+s.detail+'</div></div>';
+  });
+  flow.innerHTML=html;
+  document.getElementById('exactlyDesc').innerHTML='<b style="color:var(--accent)">'+scheme.title+'</b><br>'+scheme.desc;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch6 — 分区</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+:root{
+  --bg:#0b0f15;--bg-card:#111820;--bg-el:#171f2b;--fg:#e4eaf1;--fg-m:#7a8da3;--fg-d:#3e5168;
+  --accent:#00d4ff;--accent2:#a78bfa;--ag:rgba(0,212,255,.12);--a2g:rgba(167,139,250,.12);
+  --danger:#ff5272;--dg:rgba(255,82,114,.12);--warn:#f5a623;--wg:rgba(245,166,35,.12);
+  --success:#2ee6a8;--sg:rgba(46,230,168,.12);--border:#1c2736;--ba:rgba(0,212,255,.3);
+  --radius:8px;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans SC',system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;overflow-x:hidden;}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.01) 2px,rgba(0,212,255,.01) 4px);pointer-events:none;z-index:9999;}
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,15,21,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}
+.logo span{color:var(--fg-m);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;flex-wrap:wrap;}
+.nav-links a{font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;}
+.nav-links a:hover{color:var(--accent);background:var(--ag);}
+
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,var(--ag) 0%,var(--a2g) 40%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation:hp 5s ease-in-out infinite;}
+@keyframes hp{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;}
+.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-m);max-width:640px;position:relative;}
+
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}
+.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}.section-tag.t2{color:var(--accent2);}.section-tag.t3{color:var(--warn);}.section-tag.t4{color:var(--danger);}.section-tag.t5{color:var(--success);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;letter-spacing:-.01em;}
+.section h2 em{font-style:normal;color:var(--accent);}
+.section .desc{color:var(--fg-m);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;transition:border-color .3s;}
+.card:hover{border-color:var(--ba);}
+
+.btn{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg);cursor:pointer;transition:.2s;}
+.btn:hover{border-color:var(--accent);background:var(--ag);}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}
+.btn.primary:hover{opacity:.85;}
+.btn.danger{border-color:var(--danger);color:var(--danger);}
+
+/* Consistent Hashing Ring */
+.hash-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.hash-ring-wrap{display:flex;gap:2rem;flex-wrap:wrap;justify-content:center;align-items:flex-start;}
+.hash-ring{position:relative;width:400px;height:400px;flex-shrink:0;}
+.hash-ring canvas{width:100%;height:100%;}
+.hash-info{flex:1;min-width:250px;}
+.hash-info h4{font-family:var(--mono);font-size:.8rem;color:var(--accent);margin-bottom:.8rem;}
+.hash-key-input{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap;}
+.hash-key-input input{font-family:var(--mono);font-size:.75rem;padding:.4rem .8rem;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--fg);flex:1;min-width:120px;}
+.hash-key-input input:focus{outline:none;border-color:var(--accent);}
+.hash-log{font-family:var(--mono);font-size:.72rem;color:var(--fg-m);padding:.8rem;background:var(--bg-card);border-radius:4px;min-height:80px;max-height:200px;overflow-y:auto;}
+.hash-log .hit{color:var(--accent);}
+.hash-log .key-found{color:var(--success);}
+.hash-log .migrate{color:var(--warn);}
+
+/* Partition strategies */
+.strategy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.5rem;margin-top:1rem;}
+.strategy-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;transition:border-color .3s;}
+.strategy-card:hover{border-color:var(--ba);}
+.strategy-card h4{font-family:var(--mono);font-size:.8rem;margin-bottom:.6rem;}
+.strategy-card .pros{color:var(--success);font-size:.8rem;margin:.3rem 0;}
+.strategy-card .cons{color:var(--danger);font-size:.8rem;margin:.3rem 0;}
+
+/* Secondary index */
+.idx-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.idx-tabs{display:flex;gap:.5rem;margin-bottom:1rem;}
+.idx-tab{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg-m);cursor:pointer;transition:.2s;}
+.idx-tab:hover,.idx-tab.active{border-color:var(--accent);color:var(--accent);background:var(--ag);}
+.idx-demo{display:none;padding:1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:.82rem;color:var(--fg-m);line-height:1.8;}
+.idx-demo.active{display:block;}
+.idx-demo .partition{display:inline-block;padding:.3rem .6rem;background:rgba(255,255,255,.03);border-radius:4px;margin:.2rem;font-family:var(--mono);font-size:.7rem;}
+.idx-demo .partition.p1{border-left:3px solid var(--accent);}
+.idx-demo .partition.p2{border-left:3px solid var(--accent2);}
+.idx-demo .partition.p3{border-left:3px solid var(--warn);}
+.idx-demo .step-num{color:var(--accent);font-weight:700;font-family:var(--mono);}
+
+/* Payment */
+.payment-card{background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(167,139,250,.08));border:1px solid var(--ba);border-radius:var(--radius);padding:2rem;margin-top:1rem;}
+.payment-card h3{color:var(--accent);font-size:1.1rem;margin-bottom:1rem;}
+.payment-card .point{display:flex;gap:.8rem;margin:.6rem 0;align-items:flex-start;}
+.payment-card .point .num{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem;flex-shrink:0;}
+.payment-card .point .text{font-size:.88rem;color:var(--fg-m);}
+
+footer{padding:3rem 2rem;text-align:center;color:var(--fg-d);font-family:var(--mono);font-size:.7rem;border-top:1px solid var(--border);margin-top:4rem;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--fg-d);border-radius:3px;}
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo">DDIA<span> · Ch6</span></div>
+  <div class="nav-links">
+    <a href="#strategy">分区策略</a>
+    <a href="#hashring">一致性哈希</a>
+    <a href="#index">二级索引</a>
+    <a href="#payment">支付场景</a>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="hero-tag">Chapter 06</div>
+  <h1>分区</h1>
+  <p class="hero-sub">复制解决可用性和延迟，分区解决扩展性。将大数据集拆分到多个节点，每个节点只负责一部分数据。</p>
+</div>
+
+<!-- Partition Strategies -->
+<div class="section" id="strategy">
+  <div class="section-tag t1">01 — Strategies</div>
+  <h2>分区<em>策略</em></h2>
+  <p class="desc">两种基本策略：键范围分区适合范围查询但有热点问题，哈希分区均匀分布但失去范围查询。混合策略取两者之长。</p>
+  <div class="strategy-grid">
+    <div class="strategy-card">
+      <h4 style="color:var(--accent)">键范围分区</h4>
+      <div style="font-size:.8rem;color:var(--fg-m);margin-bottom:.5rem;">每个分区负责一段连续的键范围<br>A-M, M-S, S-Z</div>
+      <div class="pros">✓ 高效范围查询（扫一个分区）</div>
+      <div class="cons">✗ 热点问题（按时间写入时最新分区过载）</div>
+      <div style="font-size:.72rem;color:var(--fg-d);margin-top:.3rem;">代表: HBase, BigTable</div>
+    </div>
+    <div class="strategy-card">
+      <h4 style="color:var(--accent2)">哈希分区</h4>
+      <div style="font-size:.8rem;color:var(--fg-m);margin-bottom:.5rem;">对键做哈希，取模分配分区<br>hash(key) % N</div>
+      <div class="pros">✓ 数据均匀分布，无热点</div>
+      <div class="cons">✗ 范围查询需要查所有分区</div>
+      <div style="font-size:.72rem;color:var(--fg-d);margin-top:.3rem;">代表: Cassandra, DynamoDB</div>
+    </div>
+    <div class="strategy-card">
+      <h4 style="color:var(--warn)">混合策略</h4>
+      <div style="font-size:.8rem;color:var(--fg-m);margin-bottom:.5rem;">复合主键：第一个键哈希分区，第二个键范围排序<br>(user_id, timestamp)</div>
+      <div class="pros">✓ 均匀分布 + 范围查询</div>
+      <div class="cons">✗ 复杂度更高</div>
+      <div style="font-size:.72rem;color:var(--fg-d);margin-top:.3rem;">代表: Cassandra</div>
+    </div>
+  </div>
+</div>
+
+<!-- Consistent Hashing Ring -->
+<div class="section" id="hashring">
+  <div class="section-tag t2">02 — Core Algorithm</div>
+  <h2>一致性哈希<em>环</em></h2>
+  <p class="desc">节点在哈希环上占多个位置（虚拟节点），key 顺时针找到第一个节点。增减节点只影响相邻区间 → 最小化数据迁移。这是面试高频考点。</p>
+  <div class="hash-container">
+    <div class="hash-ring-wrap">
+      <div class="hash-ring">
+        <canvas id="hashCanvas" width="400" height="400"></canvas>
+      </div>
+      <div class="hash-info">
+        <h4>交互演示</h4>
+        <div class="hash-key-input">
+          <input type="text" id="hashKeyInput" placeholder="输入 key（如 user_123）">
+          <button class="btn primary" onclick="addKeyToRing()">查找节点</button>
+        </div>
+        <div style="display:flex;gap:.5rem;margin-bottom:.8rem;flex-wrap:wrap;">
+          <button class="btn" onclick="addNode()">+ 添加节点</button>
+          <button class="btn danger" onclick="removeNode()">- 移除节点</button>
+          <button class="btn" onclick="resetRing()">重置</button>
+        </div>
+        <div class="hash-log" id="hashLog">点击「查找节点」查看 key 路由过程<br>添加/移除节点观察数据迁移</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Secondary Index -->
+<div class="section" id="index">
+  <div class="section-tag t3">03 — Secondary Index</div>
+  <h2>分区与<em>二级索引</em></h2>
+  <p class="desc">二级索引是分区的难点：索引条目可能和主数据不在同一分区。两种方案各有取舍。</p>
+  <div class="idx-container">
+    <div class="idx-tabs">
+      <div class="idx-tab active" onclick="showIdx(0)">本地索引 (Scatter/Gather)</div>
+      <div class="idx-tab" onclick="showIdx(1)">全局索引 (Term-Partitioned)</div>
+    </div>
+    <div class="idx-demo active" id="idx0">
+      <div style="margin-bottom:.8rem;">查询"状态=成功的支付订单"：</div>
+      <div><span class="step-num">1</span> 查询发送到所有分区（扇出 / fan-out）</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0;">
+        <div class="partition p1">分区1: [订单A✓, 订单C✓]</div>
+        <div class="partition p2">分区2: [订单D✓]</div>
+        <div class="partition p3">分区3: [订单F✓, 订单G✓]</div>
+      </div>
+      <div><span class="step-num">2</span> 每个分区各自搜索本地索引</div>
+      <div><span class="step-num">3</span> 聚合结果 → [订单A, 订单C, 订单D, 订单F, 订单G]</div>
+      <div style="margin-top:.8rem;padding:.6rem;background:var(--dg);border-radius:4px;border-left:3px solid var(--danger);">
+        <span style="color:var(--danger)">问题</span>：读放大，查询延迟取决于最慢的分区<br>
+        <span style="color:var(--fg-d)">代表: MongoDB, Cassandra</span>
+      </div>
+    </div>
+    <div class="idx-demo" id="idx1">
+      <div style="margin-bottom:.8rem;">查询"状态=成功的支付订单"：</div>
+      <div><span class="step-num">1</span> 直接查询全局索引分区</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0;">
+        <div class="partition p1">索引分区1: "成功" → [订单A✓, 订单D✓, 订单F✓, 订单G✓]</div>
+        <div class="partition p2">索引分区2: "失败" → [订单B, 订单E]</div>
+      </div>
+      <div><span class="step-num">2</span> 只需访问一个分区 → 快</div>
+      <div style="margin-top:.8rem;padding:.6rem;background:var(--wg);border-radius:4px;border-left:3px solid var(--warn);">
+        <span style="color:var(--warn)">问题</span>：写入时需跨分区更新索引 → 影响写入性能和一致性<br>
+        <span style="color:var(--fg-d)">代表: DynamoDB GSI</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="section" id="payment">
+  <div class="section-tag t3">04 — Payment Domain</div>
+  <h2>支付场景<em>分区设计</em></h2>
+  <div class="payment-card">
+    <h3>支付系统分区策略</h3>
+    <div class="point"><div class="num">01</div><div class="text">按用户 ID 哈希分区 → 同一用户的支付记录在同一个分区，避免跨分区查询用户交易历史。</div></div>
+    <div class="point"><div class="num">02</div><div class="text">范围查询需求（按时间查交易流水）→ 需要二级索引。本地索引 scatter/gather 对支付可接受（用户维度查）。</div></div>
+    <div class="point"><div class="num">03</div><div class="text">热点问题：大商户交易量远超普通商户。解决方案：大商户 ID 加随机前缀分散到多个分区，查询时聚合。</div></div>
+    <div class="point"><div class="num">04</div><div class="text">一致性哈希在支付系统的应用：Redis Cluster 用一致性哈希分配 slot，节点扩缩容时最小化数据迁移。</div></div>
+    <div style="margin-top:1.2rem;padding:1rem;background:var(--bg-el);border-radius:6px;border-left:3px solid var(--accent);">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.3rem;">面试关键</div>
+      <div style="font-size:.88rem;color:var(--fg);">"支付系统按用户 ID 哈希分区 + 二级索引处理范围查询。为什么不用 hash % N？因为加节点时几乎所有数据都要迁移。一致性哈希只移动相邻区间的数据。"</div>
+    </div>
+  </div>
+</div>
+
+<footer>DDIA · Chapter 06 · 分区 · Visualization</footer>
+
+<script>
+// ===== Consistent Hashing Ring =====
+const RING_SIZE=360;
+const NODE_COLORS=['#00d4ff','#a78bfa','#f5a623','#2ee6a8','#ff5272','#47b3ff','#c084fc','#fbbf24'];
+let nodes=[];
+let virtualNodes=[];
+let keys=[];
+let keyAssignments=[];
+
+function hashCode(s){
+  let h=0;
+  for(let i=0;i<s.length;i++){
+    h=((h<<5)-h)+s.charCodeAt(i);
+    h|=0;
+  }
+  return ((h%RING_SIZE)+RING_SIZE)%RING_SIZE;
+}
+
+function initRing(){
+  nodes=['Node-A','Node-B','Node-C'];
+  rebuildVirtualNodes();
+  keys=['user_001','user_002','user_003','user_004','user_005'];
+  keyAssignments=keys.map(k=>({key:k,hash:hashCode(k),node:findNode(hashCode(k))}));
+  drawRing();
+}
+
+function rebuildVirtualNodes(){
+  virtualNodes=[];
+  nodes.forEach((name,idx)=>{
+    for(let v=0;v<3;v++){
+      const pos=hashCode(name+'_v'+v);
+      virtualNodes.push({node:name,pos:pos,color:NODE_COLORS[idx%NODE_COLORS.length]});
+    }
+  });
+  virtualNodes.sort((a,b)=>a.pos-b.pos);
+}
+
+function findNode(pos){
+  if(virtualNodes.length===0)return null;
+  for(let i=0;i<virtualNodes.length;i++){
+    if(virtualNodes[i].pos>=pos)return virtualNodes[i].node;
+  }
+  return virtualNodes[0].node;
+}
+
+function drawRing(){
+  const canvas=document.getElementById('hashCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=400,H=400,cx=W/2,cy=H/2,R=150,r=20;
+
+  ctx.clearRect(0,0,W,H);
+
+  // Draw ring
+  ctx.beginPath();
+  ctx.arc(cx,cy,R,0,2*Math.PI);
+  ctx.strokeStyle='#1c2736';
+  ctx.lineWidth=2;
+  ctx.stroke();
+
+  // Draw node arcs
+  const nodeMap={};
+  nodes.forEach((n,i)=>{nodeMap[n]=NODE_COLORS[i%NODE_COLORS.length];});
+
+  if(virtualNodes.length>0){
+    for(let i=0;i<virtualNodes.length;i++){
+      const startAngle=(virtualNodes[i].pos/RING_SIZE)*2*Math.PI-Math.PI/2;
+      const endIdx=(i+1)%virtualNodes.length;
+      const endAngle=(virtualNodes[endIdx].pos/RING_SIZE)*2*Math.PI-Math.PI/2;
+      const adjustedEnd=endAngle>startAngle?endAngle:endAngle+2*Math.PI;
+      ctx.beginPath();
+      ctx.arc(cx,cy,R,startAngle,adjustedEnd);
+      ctx.strokeStyle=virtualNodes[i].color;
+      ctx.lineWidth=6;
+      ctx.globalAlpha=0.3;
+      ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  // Draw virtual node dots
+  virtualNodes.forEach(vn=>{
+    const angle=(vn.pos/RING_SIZE)*2*Math.PI-Math.PI/2;
+    const x=cx+R*Math.cos(angle);
+    const y=cy+R*Math.sin(angle);
+    ctx.beginPath();
+    ctx.arc(x,y,6,0,2*Math.PI);
+    ctx.fillStyle=vn.color;
+    ctx.fill();
+    ctx.strokeStyle='#0b0f15';
+    ctx.lineWidth=2;
+    ctx.stroke();
+  });
+
+  // Draw node labels
+  const nodePositions={};
+  virtualNodes.forEach(vn=>{
+    if(!nodePositions[vn.node])nodePositions[vn.node]=[];
+    nodePositions[vn.node].push(vn.pos);
+  });
+
+  Object.entries(nodePositions).forEach(([name,positions])=>{
+    const avg=positions.reduce((a,b)=>a+b,0)/positions.length;
+    const angle=(avg/RING_SIZE)*2*Math.PI-Math.PI/2;
+    const labelR=R+30;
+    const x=cx+labelR*Math.cos(angle);
+    const y=cy+labelR*Math.sin(angle);
+    ctx.font='bold 11px JetBrains Mono';
+    ctx.fillStyle=nodeMap[name];
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(name,x,y);
+  });
+
+  // Draw keys
+  keyAssignments.forEach(ka=>{
+    const angle=(ka.hash/RING_SIZE)*2*Math.PI-Math.PI/2;
+    const keyR=R-25;
+    const x=cx+keyR*Math.cos(angle);
+    const y=cy+keyR*Math.sin(angle);
+    ctx.beginPath();
+    ctx.arc(x,y,4,0,2*Math.PI);
+    ctx.fillStyle=nodeMap[ka.node]||'#7a8da3';
+    ctx.globalAlpha=0.7;
+    ctx.fill();
+    ctx.globalAlpha=1;
+  });
+
+  // Center text
+  ctx.font='11px JetBrains Mono';
+  ctx.fillStyle='#3e5168';
+  ctx.textAlign='center';
+  ctx.fillText(nodes.length+' nodes · '+virtualNodes.length+' vnodes',cx,cy-8);
+  ctx.fillText(keyAssignments.length+' keys',cx,cy+8);
+}
+
+function addKeyToRing(){
+  const input=document.getElementById('hashKeyInput');
+  const key=input.value.trim();
+  if(!key)return;
+  const log=document.getElementById('hashLog');
+
+  const hash=hashCode(key);
+  const node=findNode(hash);
+
+  if(keyAssignments.find(ka=>ka.key===key)){
+    log.innerHTML+='<div style="color:var(--warn)">⚠ key "'+key+'" 已存在</div>';
+    return;
+  }
+
+  keyAssignments.push({key,hash,node});
+
+  // Animate: find the path
+  log.innerHTML+='<div>🔑 key="<span class="hit">'+key+'</span>" → hash='+hash+'° → 顺时针 → <span class="key-found">'+node+'</span></div>';
+  log.scrollTop=log.scrollHeight;
+
+  drawRing();
+  input.value='';
+}
+
+function addNode(){
+  const name='Node-'+String.fromCharCode(65+nodes.length);
+  const log=document.getElementById('hashLog');
+  const oldAssignments=keyAssignments.map(ka=>({...ka}));
+
+  nodes.push(name);
+  rebuildVirtualNodes();
+
+  // Recompute key assignments
+  keyAssignments.forEach(ka=>{ka.node=findNode(ka.hash);});
+
+  // Find migrated keys
+  let migrated=0;
+  keyAssignments.forEach((ka,i)=>{
+    if(ka.node!==oldAssignments[i].node)migrated++;
+  });
+
+  log.innerHTML+='<div style="color:var(--success)">+ 添加 '+name+'（3个虚拟节点）</div>';
+  if(migrated>0){
+    log.innerHTML+='<div class="migrate">↪ '+migrated+' 个 key 需要迁移到 '+name+'</div>';
+  }else{
+    log.innerHTML+='<div>↪ 无需迁移 key</div>';
+  }
+  log.scrollTop=log.scrollHeight;
+  drawRing();
+}
+
+function removeNode(){
+  if(nodes.length<=1){return;}
+  const removed=nodes.pop();
+  const log=document.getElementById('hashLog');
+
+  rebuildVirtualNodes();
+  keyAssignments.forEach(ka=>{ka.node=findNode(ka.hash);});
+
+  log.innerHTML+='<div style="color:var(--danger)">- 移除 '+removed+'</div>';
+  log.innerHTML+='<div class="migrate">↪ 原 '+removed+' 的 key 迁移到相邻节点</div>';
+  log.scrollTop=log.scrollHeight;
+  drawRing();
+}
+
+function resetRing(){
+  nodes=[];virtualNodes=[];keys=[];keyAssignments=[];
+  document.getElementById('hashLog').innerHTML='点击「查找节点」查看 key 路由过程<br>添加/移除节点观察数据迁移';
+  initRing();
+}
+
+// Secondary index tabs
+function showIdx(idx){
+  document.querySelectorAll('.idx-tab').forEach((t,i)=>{t.classList.toggle('active',i===idx);});
+  document.querySelectorAll('.idx-demo').forEach((d,i)=>{d.classList.toggle('active',i===idx);});
+}
+
+initRing();
+</script>
+</body>
+</html>

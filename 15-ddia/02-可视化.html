@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch2 — 数据模型与查询语言</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+
+:root {
+  --bg: #0b0f15;
+  --bg-card: #111820;
+  --bg-elevated: #171f2b;
+  --bg-deep: #0d1117;
+  --fg: #e4eaf1;
+  --fg-muted: #7a8da3;
+  --fg-dim: #3e5168;
+  --accent: #00d4ff;
+  --accent2: #a78bfa;
+  --accent-glow: rgba(0,212,255,0.12);
+  --accent2-glow: rgba(167,139,250,0.12);
+  --danger: #ff5272;
+  --danger-glow: rgba(255,82,114,0.12);
+  --warn: #f5a623;
+  --warn-glow: rgba(245,166,35,0.12);
+  --success: #2ee6a8;
+  --success-glow: rgba(46,230,168,0.12);
+  --border: #1c2736;
+  --border-accent: rgba(0,212,255,0.3);
+  --radius: 8px;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Noto Sans SC', system-ui, sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:var(--sans);line-height:1.7;overflow-x:hidden;
+}
+body::after{
+  content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,0.01) 2px,rgba(0,212,255,0.01) 4px);
+  pointer-events:none;z-index:9999;
+}
+
+/* NAV */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(11,15,21,0.88);backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--border);
+  padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;
+}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}
+.logo span{color:var(--fg-muted);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;}
+.nav-links a{
+  font-family:var(--mono);font-size:.7rem;color:var(--fg-muted);
+  text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;letter-spacing:.04em;
+}
+.nav-links a:hover,.nav-links a.active{color:var(--accent);background:var(--accent-glow);}
+
+/* HERO */
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;
+  text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;width:700px;height:700px;border-radius:50%;
+  background:radial-gradient(circle,var(--accent-glow) 0%,var(--accent2-glow) 40%,transparent 70%);
+  top:50%;left:50%;transform:translate(-50%,-50%);animation:heroPulse 5s ease-in-out infinite;
+}
+@keyframes heroPulse{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;letter-spacing:-.02em;}
+.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-muted);max-width:620px;position:relative;}
+.hero-cols{display:flex;gap:4rem;margin-top:2.5rem;position:relative;}
+.hero-col{text-align:center;}
+.hero-col .icon{font-size:2.2rem;margin-bottom:.5rem;}
+.hero-col .name{font-family:var(--mono);font-size:.75rem;font-weight:700;letter-spacing:.05em;}
+.hero-col .name.sql{color:var(--accent);}
+.hero-col .name.doc{color:var(--accent2);}
+.hero-col .name.graph{color:var(--warn);}
+.hero-col .desc{font-size:.7rem;color:var(--fg-muted);margin-top:.25rem;}
+.hero-arrow{display:flex;align-items:center;color:var(--fg-dim);font-family:var(--mono);font-size:1.2rem;}
+
+/* SECTION */
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}
+.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}
+.section-tag.t2{color:var(--accent2);}
+.section-tag.t3{color:var(--warn);}
+.section-tag.t4{color:var(--danger);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;letter-spacing:-.01em;}
+.section h2 em{font-style:normal;color:var(--accent);}
+.section .desc{color:var(--fg-muted);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+
+/* CARD */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;transition:border-color .3s;}
+.card:hover{border-color:var(--border-accent);}
+.card-title{font-family:var(--mono);font-size:.78rem;font-weight:700;letter-spacing:.06em;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem;}
+.card-title .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:blink 2s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+/* TABS */
+.tabs{display:flex;gap:.25rem;background:var(--bg);padding:4px;border-radius:6px;margin-bottom:1.5rem;width:fit-content;}
+.tab-btn{
+  font-family:var(--mono);font-size:.72rem;padding:.45rem .9rem;border:none;border-radius:4px;
+  cursor:pointer;background:0;color:var(--fg-muted);transition:.25s;letter-spacing:.03em;
+}
+.tab-btn:hover{color:var(--fg);}
+.tab-btn.active-sql{background:var(--accent);color:var(--bg);font-weight:700;}
+.tab-btn.active-doc{background:var(--accent2);color:var(--bg);font-weight:700;}
+.tab-btn.active-graph{background:var(--warn);color:var(--bg);font-weight:700;}
+.tab-panel{display:none;}
+.tab-panel.active{display:block;animation:fadeUp .4s;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* INSIGHT */
+.insight{border-left:3px solid var(--accent);background:var(--accent-glow);padding:1rem 1.25rem;border-radius:0 var(--radius) var(--radius) 0;margin:1.5rem 0;font-size:.88rem;}
+.insight.purple{border-color:var(--accent2);background:var(--accent2-glow);}
+.insight.warn{border-color:var(--warn);background:var(--warn-glow);}
+.insight.danger{border-color:var(--danger);background:var(--danger-glow);}
+.insight strong{color:var(--accent);}
+.insight.purple strong{color:var(--accent2);}
+.insight.warn strong{color:var(--warn);}
+.insight.danger strong{color:var(--danger);}
+
+/* CODE */
+.code{
+  font-family:var(--mono);font-size:.78rem;background:var(--bg-deep);
+  border:1px solid var(--border);border-radius:6px;padding:1.1rem 1.3rem;
+  overflow-x:auto;line-height:1.9;position:relative;
+}
+.code .kw{color:var(--accent);}
+.code .str{color:var(--success);}
+.code .cmt{color:var(--fg-dim);font-style:italic;}
+.code .fn{color:var(--accent2);}
+.code .num{color:var(--warn);}
+.code .key{color:var(--accent2);}
+.code .punc{color:var(--fg-muted);}
+
+/* TABLE */
+.cmp-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+.cmp-table th{font-family:var(--mono);font-size:.68rem;font-weight:700;text-align:left;padding:.7rem 1rem;border-bottom:2px solid var(--border);color:var(--fg-muted);text-transform:uppercase;letter-spacing:.06em;}
+.cmp-table td{padding:.6rem 1rem;border-bottom:1px solid var(--border);vertical-align:top;}
+.cmp-table tr:hover td{background:rgba(0,212,255,.03);}
+.tag{display:inline-block;font-family:var(--mono);font-size:.58rem;padding:2px 6px;border-radius:3px;margin-right:4px;}
+.tag-blue{background:var(--accent-glow);color:var(--accent);}
+.tag-purple{background:var(--accent2-glow);color:var(--accent2);}
+.tag-yellow{background:var(--warn-glow);color:var(--warn);}
+.tag-red{background:var(--danger-glow);color:var(--danger);}
+.tag-green{background:var(--success-glow);color:var(--success);}
+
+/* ===== SCENARIO PICKER ===== */
+.scenario-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin:1.5rem 0;}
+.scenario-card{
+  background:var(--bg-elevated);border:2px solid var(--border);border-radius:var(--radius);
+  padding:1.5rem;cursor:pointer;transition:.3s;position:relative;overflow:hidden;
+}
+.scenario-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.3);}
+.scenario-card.selected{border-color:var(--accent);box-shadow:0 0 20px var(--accent-glow);}
+.scenario-card .sc-icon{font-size:2rem;margin-bottom:.5rem;}
+.scenario-card .sc-name{font-weight:700;font-size:1rem;margin-bottom:.3rem;}
+.scenario-card .sc-desc{font-size:.8rem;color:var(--fg-muted);}
+.scenario-card .sc-badge{
+  position:absolute;top:1rem;right:1rem;font-family:var(--mono);font-size:.6rem;
+  padding:2px 8px;border-radius:3px;letter-spacing:.05em;
+}
+
+/* ===== RESULT PANEL ===== */
+.result-panel{
+  background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);
+  padding:2rem;margin-top:1.5rem;display:none;animation:fadeUp .5s;
+}
+.result-panel.show{display:block;}
+.result-header{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;}
+.result-verdict{
+  font-family:var(--mono);font-size:.7rem;padding:.35rem .8rem;border-radius:4px;font-weight:700;letter-spacing:.05em;
+}
+.verdict-sql{background:var(--accent-glow);color:var(--accent);border:1px solid rgba(0,212,255,.3);}
+.verdict-doc{background:var(--accent2-glow);color:var(--accent2);border:1px solid rgba(167,139,250,.3);}
+.verdict-graph{background:var(--warn-glow);color:var(--warn);border:1px solid rgba(245,166,35,.3);}
+.verdict-hybrid{background:var(--success-glow);color:var(--success);border:1px solid rgba(46,230,168,.3);}
+.result-title{font-size:1.3rem;font-weight:700;}
+
+/* SCHEMA VISUALIZER */
+.schema-viz{display:flex;gap:2rem;margin:1.5rem 0;flex-wrap:wrap;}
+.schema-side{flex:1;min-width:280px;}
+.schema-side-title{font-family:var(--mono);font-size:.72rem;font-weight:700;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem;}
+.schema-side-title.sql-t{color:var(--accent);}
+.schema-side-title.doc-t{color:var(--accent2);}
+.schema-box{
+  background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:1rem;
+  font-family:var(--mono);font-size:.72rem;line-height:1.6;min-height:120px;transition:.3s;
+}
+.schema-box.flash{box-shadow:0 0 15px var(--accent-glow);border-color:var(--accent);}
+.schema-box.flash-purple{box-shadow:0 0 15px var(--accent2-glow);border-color:var(--accent2);}
+
+/* ===== DENORMALIZATION DEMO ===== */
+.denorm-canvas{
+  position:relative;min-height:320px;background:var(--bg-deep);border:1px solid var(--border);border-radius:6px;
+  overflow:hidden;
+}
+.denorm-record{
+  position:absolute;width:200px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;
+  padding:.75rem;font-family:var(--mono);font-size:.68rem;transition:.4s;z-index:2;
+}
+.denorm-record .rec-title{font-weight:700;margin-bottom:.4rem;font-size:.72rem;}
+.denorm-record .rec-field{display:flex;justify-content:space-between;padding:2px 0;}
+.denorm-record .rec-field .val{color:var(--fg-muted);transition:.3s;}
+.denorm-record .rec-field .val.stale{color:var(--danger);text-decoration:line-through;}
+.denorm-record .rec-field .val.fresh{color:var(--success);}
+.denorm-record.outdated{border-color:var(--danger);box-shadow:0 0 12px var(--danger-glow);}
+.denorm-record.synced{border-color:var(--success);box-shadow:0 0 12px var(--success-glow);}
+.denorm-particle{
+  position:absolute;width:5px;height:5px;border-radius:50%;z-index:1;pointer-events:none;opacity:0;
+}
+
+/* ===== DECLARATIVE VS IMPERATIVE ===== */
+.code-race{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin:1.5rem 0;}
+@media(max-width:768px){.code-race{grid-template-columns:1fr;}}
+.race-side{position:relative;}
+.race-label{
+  font-family:var(--mono);font-size:.7rem;font-weight:700;margin-bottom:.5rem;
+  display:flex;align-items:center;gap:.5rem;
+}
+.race-label.sql-l{color:var(--accent);}
+.race-label.code-l{color:var(--accent2);}
+.race-code{
+  background:var(--bg-deep);border:1px solid var(--border);border-radius:6px;padding:1rem;
+  font-family:var(--mono);font-size:.75rem;line-height:1.9;min-height:200px;position:relative;
+  overflow:hidden;
+}
+.race-code .cursor{
+  display:inline-block;width:2px;height:1.1em;background:var(--accent);animation:cursorBlink 1s step-end infinite;vertical-align:text-bottom;
+}
+@keyframes cursorBlink{0%,100%{opacity:1;}50%{opacity:0;}}
+.race-result{
+  margin-top:.75rem;font-family:var(--mono);font-size:.72rem;
+  padding:.5rem .75rem;border-radius:4px;min-height:2rem;
+}
+.race-result.done{background:var(--success-glow);color:var(--success);border:1px solid rgba(46,230,168,.3);}
+.race-result.running{background:var(--accent-glow);color:var(--accent);border:1px solid rgba(0,212,255,.3);}
+
+/* ===== GRAPH TRAVERSAL ===== */
+.graph-canvas{
+  width:100%;height:380px;background:var(--bg-deep);border:1px solid var(--border);border-radius:6px;
+  position:relative;overflow:hidden;
+}
+.g-node{
+  position:absolute;width:56px;height:56px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:.6rem;font-weight:700;z-index:3;
+  transition:.4s;cursor:default;
+}
+.g-node.person{background:var(--bg-elevated);border:2px solid var(--accent);color:var(--accent);}
+.g-node.company{background:var(--bg-elevated);border:2px solid var(--accent2);color:var(--accent2);border-radius:8px;width:auto;padding:0 12px;}
+.g-node.skill{background:var(--bg-elevated);border:2px solid var(--warn);color:var(--warn);border-radius:4px;width:auto;padding:0 10px;height:36px;}
+.g-node.visited{box-shadow:0 0 20px var(--accent-glow);transform:scale(1.15);}
+.g-edge{
+  position:absolute;z-index:1;pointer-events:none;
+}
+.g-edge svg{overflow:visible;}
+.g-edge-line{stroke:var(--fg-dim);stroke-width:1.5;stroke-dasharray:4,3;transition:.3s;}
+.g-edge-line.active{stroke:var(--accent);stroke-width:2;stroke-dasharray:none;filter:drop-shadow(0 0 4px var(--accent));}
+.g-edge-label{
+  position:absolute;font-family:var(--mono);font-size:.55rem;color:var(--fg-dim);
+  z-index:4;pointer-events:none;transition:.3s;
+}
+.g-edge-label.active{color:var(--accent);}
+.g-step-info{
+  position:absolute;bottom:12px;left:12px;right:12px;
+  background:rgba(11,15,21,.9);backdrop-filter:blur(8px);border:1px solid var(--border);
+  border-radius:6px;padding:.75rem 1rem;z-index:5;
+  font-family:var(--mono);font-size:.7rem;color:var(--fg-muted);
+}
+
+/* REVEAL */
+.reveal{opacity:0;transform:translateY(30px);transition:opacity .6s,transform .6s;}
+.reveal.visible{opacity:1;transform:translateY(0);}
+
+/* BUTTONS */
+.btn{
+  font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);
+  border-radius:4px;background:var(--bg-elevated);color:var(--fg);cursor:pointer;transition:.2s;letter-spacing:.03em;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent);box-shadow:0 0 10px var(--accent-glow);}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}
+.btn.primary:hover{box-shadow:0 0 20px var(--accent-glow);transform:translateY(-1px);}
+.btn.purple{background:var(--accent2);color:var(--bg);border-color:var(--accent2);font-weight:700;}
+.btn-group{display:flex;gap:.5rem;margin:1rem 0;flex-wrap:wrap;}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  nav .nav-links{display:none;}
+  .hero-cols{flex-direction:column;gap:1.5rem;}
+  .schema-viz{flex-direction:column;}
+  .scenario-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">DDIA <span>· Ch2</span></div>
+  <div class="nav-links">
+    <a href="#model" data-section="model">数据模型</a>
+    <a href="#denorm" data-section="denorm">反规范化</a>
+    <a href="#schema" data-section="schema">Schema真相</a>
+    <a href="#query" data-section="query">查询语言</a>
+    <a href="#graph" data-section="graph">图模型</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-tag">Chapter 02</div>
+  <h1>数据模型与<em>查询语言</em></h1>
+  <p class="hero-sub">选对数据模型，后面少踩一半坑。选错了？那叫"技术债"，迟早得还。</p>
+  <div class="hero-cols">
+    <div class="hero-col"><div class="icon">🗄️</div><div class="name sql">关系模型</div><div class="desc">SQL / MySQL / PG</div></div>
+    <div class="hero-arrow">→</div>
+    <div class="hero-col"><div class="icon">📄</div><div class="name doc">文档模型</div><div class="desc">MongoDB / JSON</div></div>
+    <div class="hero-arrow">→</div>
+    <div class="hero-col"><div class="icon">🕸️</div><div class="name graph">图模型</div><div class="desc">Neo4j / Cypher</div></div>
+  </div>
+</section>
+
+<!-- ==================== MODEL PICKER ==================== -->
+<section class="section" id="model">
+  <div class="section-tag t1">01 — 数据模型选型</div>
+  <h2>场景不同，模型<em>天差地别</em></h2>
+  <p class="desc">
+    不要上来就"我们用 MySQL"或者"NoSQL 真香"。先想清楚你的数据长什么样、怎么读、怎么写。
+    点下面的场景卡片，看看哪种模型最适合。
+  </p>
+
+  <div class="scenario-grid reveal">
+    <div class="scenario-card" onclick="pickScenario('order')">
+      <div class="sc-icon">🛒</div>
+      <div class="sc-name">电商订单系统</div>
+      <div class="sc-desc">用户、商品、订单、支付、物流，多对多关系密集</div>
+      <div class="sc-badge tag-blue">点击选型</div>
+    </div>
+    <div class="scenario-card" onclick="pickScenario('log')">
+      <div class="sc-icon">📋</div>
+      <div class="sc-name">日志/事件流</div>
+      <div class="sc-desc">每条日志自包含，写入多，极少关联查询</div>
+      <div class="sc-badge tag-purple">点击选型</div>
+    </div>
+    <div class="scenario-card" onclick="pickScenario('content')">
+      <div class="sc-icon">📝</div>
+      <div class="sc-name">内容管理 CMS</div>
+      <div class="sc-desc">文章+嵌套评论，一对多层次结构，读多写少</div>
+      <div class="sc-badge tag-purple">点击选型</div>
+    </div>
+    <div class="scenario-card" onclick="pickScenario('social')">
+      <div class="sc-icon">👥</div>
+      <div class="sc-name">社交关系链</div>
+      <div class="sc-desc">多跳好友推荐、共同好友、关系遍历</div>
+      <div class="sc-badge tag-yellow">点击选型</div>
+    </div>
+    <div class="scenario-card" onclick="pickScenario('payment')">
+      <div class="sc-icon">💳</div>
+      <div class="sc-name">支付账单系统</div>
+      <div class="sc-desc">账户、流水、对账，强事务 + 强一致</div>
+      <div class="sc-badge tag-blue">点击选型</div>
+    </div>
+    <div class="scenario-card" onclick="pickScenario('config')">
+      <div class="sc-icon">⚙️</div>
+      <div class="sc-name">配置中心</div>
+      <div class="sc-desc">schema 经常变，不同服务字段不一样</div>
+      <div class="sc-badge tag-purple">点击选型</div>
+    </div>
+  </div>
+
+  <div class="result-panel" id="result-panel">
+    <div class="result-header">
+      <div class="result-verdict" id="result-verdict"></div>
+      <div class="result-title" id="result-title"></div>
+    </div>
+    <div id="result-body"></div>
+  </div>
+</section>
+
+<!-- ==================== DENORMALIZATION ==================== -->
+<section class="section" id="denorm">
+  <div class="section-tag t2">02 — 文档模型的坑</div>
+  <h2>反规范化的<em>更新异常</em></h2>
+  <p class="desc">
+    文档模型为了省 JOIN，把冗余数据塞进每条记录。读起来确实爽——一条查完。但改的时候呢？
+    点下面按钮，改个用户昵称试试。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot" style="background:var(--accent2)"></span>更新异常演示：改个昵称有多难？</div>
+    <p style="color:var(--fg-muted);font-size:.85rem;margin-bottom:1rem;">
+      用户"张三"的昵称被冗余存储在订单、评论、点赞三条文档里。点击修改昵称，观察数据一致性变化。
+    </p>
+    <div class="denorm-canvas" id="denorm-canvas"></div>
+    <div class="btn-group" style="margin-top:1rem;">
+      <button class="btn purple" onclick="startDenormDemo()">修改昵称为"三哥"</button>
+      <button class="btn" onclick="syncDenorm()">手动同步（3次写操作）</button>
+      <button class="btn" onclick="resetDenorm()">重置</button>
+    </div>
+    <div id="denorm-log" style="font-family:var(--mono);font-size:.72rem;color:var(--fg-muted);margin-top:1rem;max-height:100px;overflow-y:auto;"></div>
+
+    <div class="insight purple" style="margin-top:1.5rem;">
+      <strong>这就是反规范化的代价</strong>：读 1 次 JOIN 省了，写 1 次变成了写 N 次。而且这 N 次写入如果不在一个事务里——中间挂了怎么办？文档模型没有跨文档事务 → <strong>数据不一致</strong>。MongoDB 4.0 才支持多文档事务，但性能打折。
+    </div>
+  </div>
+
+  <!-- vs SQL approach -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>关系模型怎么做？</div>
+    <div class="schema-viz">
+      <div class="schema-side">
+        <div class="schema-side-title doc-t">❌ 文档模型：冗余存储</div>
+        <div class="schema-box" id="schema-doc-denorm">
+<span class="key">订单文档</span> { order_id, <span style="color:var(--danger)">user_name:"张三"</span>, amount }
+<span class="key">评论文档</span> { comment_id, <span style="color:var(--danger)">user_name:"张三"</span>, content }
+<span class="key">点赞文档</span> { like_id, <span style="color:var(--danger)">user_name:"张三"</span>, target_id }
+
+<span class="cmt">// 改昵称 → 更新 3 个集合 × N 条文档</span>
+<span class="cmt">// 不在事务里 → 可能改了一半挂了</span></div>
+      </div>
+      <div class="schema-side">
+        <div class="schema-side-title sql-t">✅ 关系模型：规范化</div>
+        <div class="schema-box" id="schema-sql-norm">
+<span class="key">users</span>   { id, <span style="color:var(--success)">name:"张三"</span> }
+<span class="key">orders</span>  { id, <span style="color:var(--accent)">user_id</span>, amount }
+<span class="key">comments</span> { id, <span style="color:var(--accent)">user_id</span>, content }
+<span class="key">likes</span>   { id, <span style="color:var(--accent)">user_id</span>, target_id }
+
+<span class="cmt">// 改昵称 → 更新 1 行，搞定</span>
+<span class="cmt">// 查询时 JOIN 拿名字，永远最新</span></div>
+      </div>
+    </div>
+    <div class="insight">
+      <strong>一句话总结</strong>：文档模型用"空间换时间"（冗余存储省 JOIN），关系模型用"时间换空间"（JOIN 换一致性）。<strong>写入频繁的字段千万别冗余</strong>。
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SCHEMA MYTH ==================== -->
+<section class="section" id="schema">
+  <div class="section-tag t1">03 — "无模式"真相</div>
+  <h2>"Schemaless"是个<em>伪命题</em></h2>
+  <p class="desc">
+    MongoDB 宣传的"无模式"让很多人以为可以随意加字段，不用管数据结构。
+    骗人的。模式只是从数据库搬到了应用代码里——而且更隐蔽、更难改。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot" style="background:var(--accent2)"></span>Schema 到底在哪？</div>
+
+    <div class="tabs">
+      <button class="tab-btn active-sql" onclick="switchSchemaTab('write')">Schema-on-Write (SQL)</button>
+      <button class="tab-btn" onclick="switchSchemaTab('read')">Schema-on-Read (NoSQL)</button>
+      <button class="tab-btn" onclick="switchSchemaTab('compare')">对比</button>
+    </div>
+
+    <div class="tab-panel active" id="panel-write">
+      <div class="code">
+<span class="cmt">-- MySQL: 写的时候就校验，不合规直接报错</span>
+<span class="kw">CREATE TABLE</span> users (
+  id         <span class="fn">BIGINT PRIMARY KEY</span>,
+  name       <span class="fn">VARCHAR(64) NOT NULL</span>,   <span class="cmt">-- 必填，最长64</span>
+  email      <span class="fn">VARCHAR(255) UNIQUE</span>,    <span class="cmt">-- 唯一约束</span>
+  age        <span class="fn">INT CHECK (age >= 0)</span>,   <span class="cmt">-- 范围约束</span>
+  created_at <span class="fn">TIMESTAMP DEFAULT NOW()</span>
+);
+
+<span class="cmt">-- 插入不合规数据？当场打回：</span>
+<span class="kw">INSERT INTO</span> users(id, name, email) <span class="kw">VALUES</span>(1, <span class="str">NULL</span>, <span class="str">'bad'</span>);
+<span class="cmt">-- ❌ ERROR: name violates NOT NULL constraint</span>
+</div>
+      <div class="insight" style="margin-top:1rem;">
+        <strong>优点</strong>：数据库帮你守规矩，脏数据进不来。<strong>缺点</strong>：改 schema 要 DDL，大表加列可能锁表（MySQL < 8.0 的坑）。
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panel-read">
+      <div class="code">
+<span class="cmt">// MongoDB: 写的时候啥都不管，想存啥存啥</span>
+db.users.insertOne({
+  name: <span class="str">"张三"</span>,
+  emial: <span class="str">"zhangsan@qq.com"</span>,  <span class="cmt">// 拼错了！email → emial</span>
+  age: <span class="str">"二十岁"</span>,                <span class="cmt">// 字符串？也行！</span>
+  extra_field: <span class="str">"随便加"</span>         <span class="cmt">// 突然冒出个字段？没事！</span>
+});
+
+<span class="cmt">// 不报错，看起来很爽——直到查询的时候：</span>
+db.users.find({ email: <span class="str">"zhangsan@qq.com"</span> });
+<span class="cmt">// ❌ 查不到！因为存的是 emial</span>
+<span class="cmt">// 而且这种 bug 不会在开发时暴露，</span>
+<span class="cmt">// 可能上线几周后才发现数据对不上</span>
+</div>
+      <div class="insight purple" style="margin-top:1rem;">
+        <strong>"无模式"的真相</strong>：模式并没有消失，它只是从数据库的 DDL 藏到了应用代码的 struct/class 里。而且更糟的是——<strong>数据库不帮你校验，你只能靠 code review 和测试</strong>。一旦有老代码写了奇怪格式的数据，那就永远在那了。
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panel-compare">
+      <table class="cmp-table">
+        <thead><tr><th>维度</th><th>Schema-on-Write</th><th>Schema-on-Read</th></tr></thead>
+        <tbody>
+          <tr><td>谁校验</td><td><span class="tag tag-blue">数据库</span>DDL 强制</td><td><span class="tag tag-purple">应用代码</span>靠自觉</td></tr>
+          <tr><td>脏数据</td><td><span class="tag tag-green">进不来</span></td><td><span class="tag tag-red">随便进</span>后患无穷</td></tr>
+          <tr><td>改字段</td><td><span class="tag tag-yellow">要 DDL</span>可能锁表</td><td><span class="tag tag-green">随时加</span>老代码可能崩</td></tr>
+          <tr><td>数据一致性</td><td><span class="tag tag-green">强</span></td><td><span class="tag tag-red">弱</span>不同文档可能格式不同</td></tr>
+          <tr><td>团队协作</td><td><span class="tag tag-green">表结构是契约</span></td><td><span class="tag tag-red">各写各的</span>字段名打架</td></tr>
+          <tr><td>踩坑时机</td><td>写入时</td><td><strong>查询时</strong>（晚了）</td></tr>
+        </tbody>
+      </table>
+      <div class="insight warn" style="margin-top:1rem;">
+        <strong>实战经验</strong>：即使选了 MongoDB，也一定要在应用层做 schema 校验（如 JSON Schema / Mongoose Schema）。所谓"灵活"是给快速原型用的，不是给偷懒用的。<strong>生产环境的无模式 = 无纪律 = 定时炸弹</strong>。
+      </div>
+    </div>
+  </div>
+
+  <!-- Convergence -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>趋势：两者在"合体"</div>
+    <p style="color:var(--fg-muted);font-size:.88rem;margin-bottom:1rem;">
+      现实是大家都在往对方的地盘靠：
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+      <div style="background:var(--accent-glow);border:1px solid rgba(0,212,255,.2);border-radius:var(--radius);padding:1.25rem;">
+        <div style="font-family:var(--mono);font-size:.75rem;color:var(--accent);font-weight:700;margin-bottom:.5rem;">SQL 学 NoSQL</div>
+        <div style="font-size:.85rem;color:var(--fg-muted);line-height:1.8;">
+          PostgreSQL <strong style="color:var(--fg)">JSONB</strong> → 一个列存 JSON<br>
+          MySQL 8.0 <strong style="color:var(--fg)">JSON 列</strong> + 虚拟列索引<br>
+          → 关系表里嵌文档，两头沾<br>
+          <span style="color:var(--success)">真香指数：⭐⭐⭐⭐⭐</span>
+        </div>
+      </div>
+      <div style="background:var(--accent2-glow);border:1px solid rgba(167,139,250,.2);border-radius:var(--radius);padding:1.25rem;">
+        <div style="font-family:var(--mono);font-size:.75rem;color:var(--accent2);font-weight:700;margin-bottom:.5rem;">NoSQL 学 SQL</div>
+        <div style="font-size:.85rem;color:var(--fg-muted);line-height:1.8;">
+          MongoDB 4.0 <strong style="color:var(--fg)">多文档事务</strong><br>
+          MongoDB 5.0 <strong style="color:var(--fg)">Window Functions</strong><br>
+          → NoSQL 越来越像 SQL<br>
+          <span style="color:var(--warn)">"我们不是 NoSQL，我们是 YesSQL"</span>
+        </div>
+      </div>
+    </div>
+    <div class="insight" style="margin-top:1rem;">
+      <strong>面试加分回答</strong>："现在主流做法是 PostgreSQL + JSONB——主体用关系模型保一致性，动态字段用 JSONB 灵活存取。既不用 MongoDB 那样放弃事务，也不用纯 SQL 那样 DDL 改表。"
+    </div>
+  </div>
+</section>
+
+<!-- ==================== QUERY LANGUAGE ==================== -->
+<section class="section" id="query">
+  <div class="section-tag t1">04 — 查询语言</div>
+  <h2>声明式 vs 命令式：<em>说"要什么"</em>比"怎么做"强在哪？</h2>
+  <p class="desc">
+    SQL 是声明式的：你只说"我要已付款的最近10单"，数据库自己想怎么做。
+    代码是命令式的：你得自己写循环、排序、截断。差在哪？看演示。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>代码赛跑：同一段逻辑，两种写法</div>
+    <p style="color:var(--fg-muted);font-size:.85rem;margin-bottom:1rem;">
+      需求：从订单表里找出已付款的，按时间倒序，取前 10 条。点"开跑"看两种写法的执行过程。
+    </p>
+
+    <div class="code-race" id="code-race">
+      <div class="race-side">
+        <div class="race-label sql-l">📖 声明式 (SQL)</div>
+        <div class="race-code" id="race-sql"></div>
+        <div class="race-result" id="race-sql-result"></div>
+      </div>
+      <div class="race-side">
+        <div class="race-label code-l">🔧 命令式 (代码)</div>
+        <div class="race-code" id="race-code"></div>
+        <div class="race-result" id="race-code-result"></div>
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn primary" onclick="startCodeRace()">开跑</button>
+      <button class="btn" onclick="resetCodeRace()">重置</button>
+    </div>
+
+    <div id="race-conclusion" style="display:none;margin-top:1.5rem;">
+      <table class="cmp-table">
+        <thead><tr><th>对比</th><th>📖 声明式 SQL</th><th>🔧 命令式代码</th></tr></thead>
+        <tbody>
+          <tr><td>我写的</td><td><span class="tag tag-green">1 行</span> SELECT ... WHERE ... ORDER BY</td><td><span class="tag tag-red">7 行</span> 循环+判断+排序+截断</td></tr>
+          <tr><td>谁优化</td><td><span class="tag tag-blue">优化器自动</span>选索引、并行</td><td><span class="tag tag-red">你自己</span>手写优化逻辑</td></tr>
+          <tr><td>加索引</td><td><span class="tag tag-green">不用改代码</span>自动走索引</td><td><span class="tag tag-red">要改代码</span>手动用索引</td></tr>
+          <tr><td>并行</td><td><span class="tag tag-green">天然支持</span></td><td><span class="tag tag-red">要自己管</span>锁、竞争</td></tr>
+          <tr><td>可读性</td><td>懂 SQL 的一眼懂</td><td>要看逻辑才明白意图</td></tr>
+        </tbody>
+      </table>
+      <div class="insight" style="margin-top:1rem;">
+        <strong>核心优势</strong>：声明式查询把<strong>"怎么做"的决策权交给数据库</strong>。数据库比你更了解数据分布、索引、统计信息——它能选出最优执行计划。你只管"要什么"就行。
+      </div>
+    </div>
+  </div>
+
+  <!-- MapReduce -->
+  <div class="card reveal">
+    <div class="card-title"><span class="dot" style="background:var(--warn)"></span>MongoDB 的弯路：MapReduce → Aggregation Pipeline</div>
+    <p style="color:var(--fg-muted);font-size:.88rem;margin-bottom:1rem;">
+      MongoDB 早期做聚合只能用 MapReduce——让你写 JavaScript 函数来 map 和 reduce。
+      又慢又难写，后来自己都看不下去了，搞了 Aggregation Pipeline。
+    </p>
+    <div class="schema-viz">
+      <div class="schema-side">
+        <div class="schema-side-title doc-t" style="color:var(--danger)">❌ MapReduce（命令式）</div>
+        <div class="code" style="font-size:.72rem;line-height:1.7;">
+<span class="cmt">// 每个 document 调一次 map</span>
+<span class="kw">var</span> map = <span class="kw">function</span>() {
+  emit(<span class="kw">this</span>.channel, <span class="num">1</span>);
+};
+<span class="cmt">// 按 key 聚合</span>
+<span class="kw">var</span> reduce = <span class="kw">function</span>(key, vals) {
+  <span class="kw">return</span> vals.reduce(<span class="kw">function</span>(a,b){
+    <span class="kw">return</span> a + b;
+  }, <span class="num">0</span>);
+};
+db.orders.mapReduce(map, reduce, {
+  out: <span class="str">"result"</span>
+});
+<span class="cmt">// ← JavaScript 执行，不能走索引</span>
+<span class="cmt">// ← 写起来啰嗦，调试痛苦</span>
+</div>
+      </div>
+      <div class="schema-side">
+        <div class="schema-side-title sql-t">✅ Aggregation Pipeline（声明式）</div>
+        <div class="code" style="font-size:.72rem;line-height:1.7;">
+db.orders.aggregate([
+  { <span class="key">$group</span>: {
+    _id: <span class="str">"$channel"</span>,
+    count: { <span class="key">$sum</span>: <span class="num">1</span> }
+  }},
+  { <span class="key">$sort</span>:  { count: <span class="num">-1</span> } },
+  { <span class="key">$limit</span>: <span class="num">10</span> }
+]);
+
+<span class="cmt">// ← 声明式，优化器可优化</span>
+<span class="cmt">// ← 像不像 SQL 的 GROUP BY + ORDER BY?</span>
+<span class="cmt">// ← MongoDB 终于想通了</span>
+</div>
+      </div>
+    </div>
+    <div class="insight warn" style="margin-top:1rem;">
+      <strong>这说明什么？</strong>连 NoSQL 阵营的代表 MongoDB 都在往声明式方向靠。<strong>声明式是正道，命令式是迫不得已</strong>。面试时如果被问到"NoSQL 和 SQL 的本质区别"，不要只说"没有 JOIN"——查询范式的差异才是核心。
+    </div>
+  </div>
+</section>
+
+<!-- ==================== GRAPH MODEL ==================== -->
+<section class="section" id="graph">
+  <div class="section-tag t3">05 — 图模型</div>
+  <h2>什么时候该上<em>图数据库</em>？</h2>
+  <p class="desc">
+    别被社交网络的例子忽悠了。大部分业务用关系模型 + 递归 CTE 就够了。
+    图数据库真正不可替代的场景是：多跳遍历 + 关系本身有属性。
+  </p>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot" style="background:var(--warn)"></span>交互演示：找共同好友 vs 多跳推荐</div>
+    <p style="color:var(--fg-muted);font-size:.85rem;margin-bottom:1rem;">
+      左边是关系模型（JOIN），右边是图模型（遍历）。点击不同查询，看两者的执行差异。
+    </p>
+
+    <div class="btn-group" style="margin-bottom:1rem;">
+      <button class="btn primary" onclick="runGraphQuery('common')">1跳：共同好友</button>
+      <button class="btn" onclick="runGraphQuery('2hop')">2跳：朋友的朋友</button>
+      <button class="btn" onclick="runGraphQuery('3hop')">3跳：二度人脉推荐</button>
+      <button class="btn" onclick="runGraphQuery('path')">路径：A到B怎么认识？</button>
+    </div>
+
+    <div class="graph-canvas" id="graph-canvas"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1.5rem;">
+      <div class="code" style="font-size:.7rem;line-height:1.7;" id="graph-sql-code">
+<span class="cmt">-- 关系模型 SQL</span>
+<span class="cmt">-- 点击上方查询按钮查看</span>
+      </div>
+      <div class="code" style="font-size:.7rem;line-height:1.7;" id="graph-cypher-code">
+<span class="cmt">// 图模型 Cypher</span>
+<span class="cmt">// 点击上方查询按钮查看</span>
+      </div>
+    </div>
+    <div id="graph-result" style="font-family:var(--mono);font-size:.75rem;margin-top:1rem;color:var(--fg-muted);"></div>
+  </div>
+
+  <div class="card reveal">
+    <div class="card-title"><span class="dot"></span>图模型到底值不值？</div>
+    <table class="cmp-table">
+      <thead><tr><th>场景</th><th>SQL + 递归CTE</th><th>图数据库</th><th>推荐</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1跳关系（共同好友）</td>
+          <td><span class="tag tag-green">轻松</span>1个 JOIN</td>
+          <td><span class="tag tag-green">轻松</span>1跳遍历</td>
+          <td><span class="tag tag-blue">SQL 就够</span></td>
+        </tr>
+        <tr>
+          <td>2跳（朋友的朋友）</td>
+          <td><span class="tag tag-yellow">2个 JOIN</span>还行</td>
+          <td><span class="tag tag-green">2跳遍历</span>更自然</td>
+          <td><span class="tag tag-blue">SQL 可扛</span></td>
+        </tr>
+        <tr>
+          <td>3~N跳（人脉推荐）</td>
+          <td><span class="tag tag-red">N个 JOIN</span>爆炸</td>
+          <td><span class="tag tag-green">遍历</span>天然适合</td>
+          <td><span class="tag tag-yellow">图数据库</span></td>
+        </tr>
+        <tr>
+          <td>最短路径</td>
+          <td><span class="tag tag-red">极难</span>递归SQL</td>
+          <td><span class="tag tag-green">原生支持</span></td>
+          <td><span class="tag tag-yellow">图数据库</span></td>
+        </tr>
+        <tr>
+          <td>关系上有属性</td>
+          <td><span class="tag tag-yellow">关联表</span>勉强</td>
+          <td><span class="tag tag-green">边属性</span>一等公民</td>
+          <td><span class="tag tag-yellow">看复杂度</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="insight warn" style="margin-top:1rem;">
+      <strong>面试清醒剂</strong>：图数据库不是银弹。大多数互联网公司的"社交关系"用 MySQL + 缓存就够了。<strong>上 Neo4j 之前先问自己：你的查询真的需要 3 跳以上遍历吗？</strong>如果不需要，引入图数据库是给自己加运维负担。
+    </div>
+  </div>
+</section>
+
+<footer style="text-align:center;padding:3rem;color:var(--fg-dim);font-family:var(--mono);font-size:.7rem;letter-spacing:.05em;">
+  DDIA Ch2 可视化 · 数据模型与查询语言 · Martin Kleppmann
+</footer>
+
+<script>
+// ============ SCROLL ============
+const observer = new IntersectionObserver(e => {
+  e.forEach(el => { if (el.isIntersecting) el.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Nav active
+window.addEventListener('scroll', () => {
+  const sections = document.querySelectorAll('.section');
+  const links = document.querySelectorAll('.nav-links a');
+  let cur = '';
+  sections.forEach(s => { if (scrollY >= s.offsetTop - 100) cur = s.id; });
+  links.forEach(a => a.classList.toggle('active', a.dataset.section === cur));
+});
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============ SCENARIO PICKER ============
+const scenarios = {
+  order: {
+    verdict: 'verdict-sql', verdictText: '推荐：关系模型',
+    title: '电商订单 → 关系模型 (MySQL/PG)',
+    body: `
+      <div style="font-size:.9rem;color:var(--fg-muted);line-height:1.9;">
+        <p>用户下单一个订单，里面有多个商品，对应一条支付、一条物流——这是典型的<strong style="color:var(--fg)">多对多</strong>关系。</p>
+        <p style="margin-top:.75rem;">用文档模型的话，你得把商品列表嵌进订单文档。但商品信息改了怎么办？<strong style="color:var(--danger)">所有包含这个商品的订单文档都要更新</strong>——这就是反规范化的坑。</p>
+        <div class="code" style="margin-top:1rem;">
+<span class="cmt">-- 关系模型：干净利落</span>
+<span class="kw">SELECT</span> o.id, u.name, p.title, o.amount
+<span class="kw">FROM</span> orders o
+  <span class="kw">JOIN</span> users u <span class="kw">ON</span> o.user_id = u.id
+  <span class="kw">JOIN</span> order_items oi <span class="kw">ON</span> o.id = oi.order_id
+  <span class="kw">JOIN</span> products p <span class="kw">ON</span> oi.product_id = p.id;
+<span class="cmt">-- 商品改价格？改 products 表一行，所有查询自动最新</span>
+        </div>
+        <div class="insight danger" style="margin-top:1rem;margin-bottom:0;">
+          <strong>淘宝怎么做的？</strong>订单库用 MySQL 分库分表，商品库也是 MySQL。没有用 MongoDB 存订单——因为订单的多对多关系 + 事务需求，文档模型搞不定。
+        </div>
+      </div>`
+  },
+  log: {
+    verdict: 'verdict-doc', verdictText: '推荐：文档模型',
+    title: '日志/事件流 → 文档模型 (Elasticsearch/MongoDB)',
+    body: `
+      <div style="font-size:.9rem;color:var(--fg-muted);line-height:1.9;">
+        <p>每条日志自包含：请求ID、时间戳、请求路径、响应码、耗时……一条查完，不需要 JOIN。写入多，几乎不更新。</p>
+        <p style="margin-top:.75rem;">这种场景文档模型<strong style="color:var(--success)">碾压</strong>关系模型：写入快（append-only），查询一条日志不需要 5 个 JOIN。</p>
+        <div class="code" style="margin-top:1rem;">
+{
+  <span class="key">"trace_id"</span>: <span class="str">"abc-123"</span>,
+  <span class="key">"timestamp"</span>: <span class="str">"2024-01-15T10:30:00Z"</span>,
+  <span class="key">"method"</span>: <span class="str">"POST"</span>,
+  <span class="key">"path"</span>: <span class="str">"/api/pay"</span>,
+  <span class="key">"status"</span>: <span class="num">200</span>,
+  <span class="key">"latency_ms"</span>: <span class="num">142</span>,
+  <span class="key">"user_agent"</span>: <span class="str">"AlipaySDK/3.0"</span>
+}
+<span class="cmt">// 一条文档包含所有信息，查 trace_id 就够了</span>
+        </div>
+        <div class="insight purple" style="margin-top:1rem;margin-bottom:0;">
+          <strong>实战</strong>：ELK 栈（Elasticsearch + Logstash + Kibana）就是文档模型存日志。阿里云日志服务 SLS 也是类似的 JSON 文档结构。
+        </div>
+      </div>`
+  },
+  content: {
+    verdict: 'verdict-doc', verdictText: '推荐：文档模型',
+    title: '内容管理 CMS → 文档模型 (MongoDB/PG+JSONB)',
+    body: `
+      <div style="font-size:.9rem;color:var(--fg-muted);line-height:1.9;">
+        <p>文章 + 嵌套评论 + 多种字段类型（视频、音频、图片）——这是<strong style="color:var(--fg)">一对多层次结构</strong>，文档模型天然适合。</p>
+        <div class="code" style="margin-top:1rem;">
+{
+  <span class="key">"title"</span>: <span class="str">"Go 并发编程指南"</span>,
+  <span class="key">"author"</span>: <span class="str">"张三"</span>,
+  <span class="key">"content"</span>: <span class="str">"..."</span>,
+  <span class="key">"comments"</span>: [
+    { <span class="key">"user"</span>: <span class="str">"李四"</span>, <span class="key">"text"</span>: <span class="str">"收藏了"</span> },
+    { <span class="key">"user"</span>: <span class="str">"王五"</span>, <span class="key">"text"</span>: <span class="str">"讲得好"</span>,
+      <span class="key">"replies"</span>: [{ <span class="key">"user"</span>: <span class="str">"张三"</span>, <span class="key">"text"</span>: <span class="str">"谢谢！"</span> }]
+    }
+  ]
+}
+<span class="cmt">// 评论嵌套在文章里，一条查询拿到所有数据</span>
+        </div>
+        <div class="insight" style="margin-top:1rem;margin-bottom:0;">
+          <strong>但注意</strong>：如果评论量很大（10 万+），嵌套会导致文档超大 → MongoDB 单文档 16MB 限制。这时候要拆成独立的 comments 集合，用 <code>$lookup</code> 做"伪 JOIN"——其实已经开始走关系模型的老路了。
+        </div>
+      </div>`
+  },
+  social: {
+    verdict: 'verdict-graph', verdictText: '推荐：图模型',
+    title: '社交关系链 → 图模型 (Neo4j/MySQL+CTE)',
+    body: `
+      <div style="font-size:.9rem;color:var(--fg-muted);line-height:1.9;">
+        <p>"你可能认识的人" = 朋友的朋友中，不是你直接朋友的人。这是<strong style="color:var(--warn)">多跳遍历</strong>问题，图模型最擅长。</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;">
+          <div class="code" style="font-size:.7rem;line-height:1.5;">
+<span class="cmt">-- MySQL 递归 CTE (8.0+)</span>
+<span class="kw">WITH RECURSIVE</span> friends <span class="kw">AS</span> (
+  <span class="kw">SELECT</span> friend_id, 1 <span class="kw">AS</span> hop
+  <span class="kw">FROM</span> friendships
+  <span class="kw">WHERE</span> user_id = <span class="num">1</span>
+  <span class="kw">UNION ALL</span>
+  <span class="kw">SELECT</span> f2.friend_id, f1.hop+1
+  <span class="kw">FROM</span> friendships f2
+  <span class="kw">JOIN</span> friends f1
+    <span class="kw">ON</span> f2.user_id = f1.friend_id
+  <span class="kw">WHERE</span> f1.hop < <span class="num">3</span>
+)
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> friends <span class="kw">WHERE</span> hop = 2;
+<span class="cmt">-- 能写，但3跳以上性能骤降</span>
+          </div>
+          <div class="code" style="font-size:.7rem;line-height:1.5;">
+<span class="cmt">// Neo4j Cypher</span>
+<span class="kw">MATCH</span> (me:User {id: <span class="num">1</span>})
+      -[:FRIEND*2..3]-(rec:User)
+<span class="kw">WHERE NOT</span> (me)-[:FRIEND]-(rec)
+<span class="kw">RETURN</span> rec.name, count(*) <span class="kw">AS</span> strength
+<span class="kw">ORDER BY</span> strength <span class="kw">DESC</span>
+<span class="kw">LIMIT</span> 10;
+<span class="cmt">// 简洁，且索引邻接加速</span>
+          </div>
+        </div>
+        <div class="insight warn" style="margin-top:1rem;margin-bottom:0;">
+          <strong>清醒点</strong>：微信朋友圈的关系链存在 MySQL 里，不用 Neo4j。因为微信主要做 1~2 跳查询，MySQL + 缓存够用。<strong>只有做深度推荐（3跳+）才真的需要图数据库</strong>。
+        </div>
+      </div>`
+  },
+  payment: {
+    verdict: 'verdict-sql', verdictText: '推荐：关系模型',
+    title: '支付账单 → 关系模型 (MySQL)',
+    body: `
+      <div style="font-size:.9rem;color:var(--fg-muted);line-height:1.9;">
+        <p>账户余额、交易流水、对账记录——<strong style="color:var(--fg)">强事务 + 强一致</strong>，不是选不选的问题，是<strong style="color:var(--danger)">文档模型根本扛不住</strong>。</p>
+        <div class="code" style="margin-top:1rem;">
+<span class="cmt">-- 支付扣款：必须原子操作</span>
+<span class="kw">BEGIN</span>;
+<span class="kw">SELECT</span> balance <span class="kw">FROM</span> accounts <span class="kw">WHERE</span> id=<span class="num">123</span> <span class="kw">FOR UPDATE</span>;
+<span class="kw">UPDATE</span> accounts <span class="kw">SET</span> balance = balance - <span class="num">100</span> <span class="kw">WHERE</span> id=<span class="num">123</span>;
+<span class="kw">INSERT INTO</span> transactions (...) <span class="kw">VALUES</span> (...);
+<span class="kw">COMMIT</span>;
+<span class="cmt">-- 这3步必须是原子的，文档模型没有这种事务保证</span>
+<span class="cmt">-- MongoDB 4.0 多文档事务？性能打骨折，别碰</span>
+        </div>
+        <div class="insight danger" style="margin-top:1rem;margin-bottom:0;">
+          <strong>铁律</strong>：涉及钱的系统，选 MySQL / PostgreSQL，没有第二个选项。MongoDB 的多文档事务是给"偶尔需要事务"的场景用的，不是给"每个操作都需要事务"的支付系统用的。
+        </div>
+      </div>`
+  },
+  config: {
+    verdict: 'verdict-hybrid', verdictText: '推荐：混合方案',
+    title: '配置中心 → PostgreSQL + JSONB',
+    body: `
+      <div style="font-size:.9rem;color:var(--fg-muted);line-height:1.9;">
+        <p>不同服务的配置字段不一样，而且经常加新字段。纯 SQL 改 DDL 太重，纯 NoSQL 没事务保障。</p>
+        <div class="code" style="margin-top:1rem;">
+<span class="cmt">-- PostgreSQL JSONB：两全其美</span>
+<span class="kw">CREATE TABLE</span> configs (
+  id        <span class="fn">SERIAL PRIMARY KEY</span>,
+  service   <span class="fn">VARCHAR(64) NOT NULL</span>,
+  env       <span class="fn">VARCHAR(16) NOT NULL</span>,
+  data      <span class="fn">JSONB NOT NULL</span>,        <span class="cmt">-- 动态字段存这里</span>
+  updated_at <span class="fn">TIMESTAMP DEFAULT NOW()</span>
+);
+
+<span class="cmt">-- 查询 JSONB 内部字段（可以用 GIN 索引加速）</span>
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> configs
+<span class="kw">WHERE</span> data->><span class="str">'max_retry'</span> = <span class="str">'3'</span>;
+
+<span class="cmt">-- 加字段？直接在 JSONB 里加，不用 ALTER TABLE</span>
+<span class="kw">UPDATE</span> configs
+<span class="kw">SET</span> data = jsonb_set(data, <span class="str">'{timeout_ms}'</span>, <span class="str">'5000'</span>)
+<span class="kw">WHERE</span> service = <span class="str">'payment'</span>;
+        </div>
+        <div class="insight" style="margin-top:1rem;margin-bottom:0;">
+          <strong>最佳实践</strong>：固定字段（service、env）用普通列+索引，动态字段存 JSONB。这是目前国内互联网公司最常见的折中方案——<strong>既不用改 DDL，又能享受 PG 的事务和索引</strong>。
+        </div>
+      </div>`
+  }
+};
+
+function pickScenario(key) {
+  document.querySelectorAll('.scenario-card').forEach(c => c.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  const s = scenarios[key];
+  const panel = document.getElementById('result-panel');
+  panel.classList.add('show');
+  document.getElementById('result-verdict').className = 'result-verdict ' + s.verdict;
+  document.getElementById('result-verdict').textContent = s.verdictText;
+  document.getElementById('result-title').textContent = s.title;
+  document.getElementById('result-body').innerHTML = s.body;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ============ SCHEMA TABS ============
+function switchSchemaTab(id) {
+  document.querySelectorAll('#schema .tab-btn').forEach(b => {
+    b.className = 'tab-btn';
+  });
+  document.querySelectorAll('#schema .tab-panel').forEach(p => p.classList.remove('active'));
+  if (id === 'write') event.target.classList.add('active-sql');
+  else if (id === 'read') event.target.classList.add('active-doc');
+  else event.target.classList.add('active-graph');
+  document.getElementById('panel-' + id).classList.add('active');
+}
+
+// ============ DENORMALIZATION DEMO ============
+let denormRecords = [];
+const denormData = {
+  order: { title: '订单文档', x: 30, y: 30, fields: { order_id: 'ORD-001', user_name: '张三', amount: '¥299' } },
+  comment: { title: '评论文档', x: 250, y: 30, fields: { comment_id: 'CMT-042', user_name: '张三', content: '好评！' } },
+  like: { title: '点赞文档', x: 470, y: 30, fields: { like_id: 'LIK-108', user_name: '张三', target_id: 'POST-007' } }
+};
+let denormState = 'initial'; // initial | updating | partial | synced
+
+function renderDenorm() {
+  const canvas = document.getElementById('denorm-canvas');
+  canvas.querySelectorAll('.denorm-record').forEach(e => e.remove());
+  const cw = canvas.clientWidth;
+
+  denormRecords = [];
+  const positions = [
+    { key: 'order', x: 30, y: 40 },
+    { key: 'comment', x: cw/2 - 110, y: 40 },
+    { key: 'like', x: cw - 230, y: 40 }
+  ];
+
+  positions.forEach(p => {
+    const data = denormData[p.key];
+    const rec = document.createElement('div');
+    rec.className = 'denorm-record';
+    rec.style.cssText = `left:${p.x}px;top:${p.y}px;width:200px;`;
+
+    let fieldsHTML = '';
+    Object.entries(data.fields).forEach(([k, v]) => {
+      const isUserName = k === 'user_name';
+      let cls = '';
+      if (isUserName && denormState === 'partial') cls = ' stale';
+      if (isUserName && denormState === 'synced') cls = ' fresh';
+      const displayVal = isUserName && (denormState === 'partial' || denormState === 'synced')
+        ? (denormState === 'synced' ? '三哥' : (p.key === 'order' ? '三哥' : '张三'))
+        : v;
+      const oldVal = isUserName && denormState === 'partial' && p.key !== 'order' ? `<span style="color:var(--fg-dim);font-size:.6rem;margin-left:4px;">← 应为"三哥"</span>` : '';
+      fieldsHTML += `<div class="rec-field"><span>${k}</span><span class="val${cls}">${displayVal}</span>${oldVal}</div>`;
+    });
+
+    rec.innerHTML = `<div class="rec-title">${data.title}</div>${fieldsHTML}`;
+    if (denormState === 'partial' && p.key !== 'order') rec.classList.add('outdated');
+    if (denormState === 'synced') rec.classList.add('synced');
+    canvas.appendChild(rec);
+    denormRecords.push(rec);
+  });
+
+  // Add status indicator at bottom
+  const statusDiv = document.createElement('div');
+  statusDiv.style.cssText = 'position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:.72rem;padding:.35rem .8rem;border-radius:4px;';
+  if (denormState === 'initial') {
+    statusDiv.style.background = 'var(--success-glow)';
+    statusDiv.style.color = 'var(--success)';
+    statusDiv.style.border = '1px solid rgba(46,230,168,.3)';
+    statusDiv.textContent = '✓ 数据一致：所有文档中 user_name="张三"';
+  } else if (denormState === 'partial') {
+    statusDiv.style.background = 'var(--danger-glow)';
+    statusDiv.style.color = 'var(--danger)';
+    statusDiv.style.border = '1px solid rgba(255,82,114,.3)';
+    statusDiv.textContent = '✗ 数据不一致！订单已改，评论和点赞还是旧值';
+  } else if (denormState === 'synced') {
+    statusDiv.style.background = 'var(--success-glow)';
+    statusDiv.style.color = 'var(--success)';
+    statusDiv.style.border = '1px solid rgba(46,230,168,.3)';
+    statusDiv.textContent = '✓ 已同步：3次写入，user_name 全部="三哥"';
+  }
+  canvas.appendChild(statusDiv);
+}
+
+async function startDenormDemo() {
+  if (denormState !== 'initial') return;
+  const log = document.getElementById('denorm-log');
+
+  function addLog(msg, color) {
+    const d = document.createElement('div');
+    d.style.color = color || 'var(--fg-muted)';
+    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    log.prepend(d);
+  }
+
+  addLog('→ 收到请求：修改用户昵称 "张三" → "三哥"', 'var(--accent2)');
+  await sleep(500);
+
+  addLog('→ 更新订单文档中的 user_name... (1/3)', 'var(--accent2)');
+  denormState = 'partial';
+  denormData.order.fields.user_name = '三哥';
+  renderDenorm();
+  await sleep(600);
+
+  addLog('⚠ 只改了订单！评论和点赞的 user_name 还是 "张三"', 'var(--danger)');
+  addLog('⚠ 这就是反规范化的更新异常——数据不一致了！', 'var(--danger)');
+}
+
+async function syncDenorm() {
+  if (denormState !== 'partial') return;
+  const log = document.getElementById('denorm-log');
+
+  function addLog(msg, color) {
+    const d = document.createElement('div');
+    d.style.color = color || 'var(--fg-muted)';
+    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    log.prepend(d);
+  }
+
+  addLog('→ 手动同步评论文档 user_name... (2/3)', 'var(--warn)');
+  await sleep(400);
+  denormData.comment.fields.user_name = '三哥';
+  renderDenorm();
+  addLog('→ 手动同步点赞文档 user_name... (3/3)', 'var(--warn)');
+  await sleep(400);
+  denormData.like.fields.user_name = '三哥';
+  denormState = 'synced';
+  renderDenorm();
+  addLog('✓ 全部同步完成。总共写了 3 次，而且这 3 次不在一个事务里！', 'var(--success)');
+  addLog('💡 如果用关系模型，只需 UPDATE users SET name="三哥" WHERE id=1 — 1 次搞定', 'var(--accent)');
+}
+
+function resetDenorm() {
+  denormState = 'initial';
+  denormData.order.fields.user_name = '张三';
+  denormData.comment.fields.user_name = '张三';
+  denormData.like.fields.user_name = '张三';
+  document.getElementById('denorm-log').innerHTML = '';
+  renderDenorm();
+}
+
+// ============ CODE RACE ============
+const sqlCode = `<span class="kw">SELECT</span> * <span class="kw">FROM</span> orders
+<span class="kw">WHERE</span> status = <span class="str">'paid'</span>
+<span class="kw">ORDER BY</span> created_at <span class="kw">DESC</span>
+<span class="kw">LIMIT</span> <span class="num">10</span>;`;
+
+const codeCode = `<span class="cmt"># 命令式：自己写每一步</span>
+results = []
+<span class="kw">for</span> order <span class="kw">in</span> all_orders:
+    <span class="kw">if</span> order.status == <span class="str">'paid'</span>:
+        results.append(order)
+results.sort(
+    key=<span class="kw">lambda</span> x: x.created_at,
+    reverse=<span class="kw">True</span>
+)
+<span class="kw">return</span> results[:<span class="num">10</span>]`;
+
+let raceRunning = false;
+
+async function startCodeRace() {
+  if (raceRunning) return;
+  raceRunning = true;
+  resetCodeRace();
+
+  const sqlEl = document.getElementById('race-sql');
+  const codeEl = document.getElementById('race-code');
+  const sqlResult = document.getElementById('race-sql-result');
+  const codeResult = document.getElementById('race-code-result');
+
+  sqlResult.className = 'race-result running';
+  codeResult.className = 'race-result running';
+
+  // Type SQL code character by character (fast)
+  sqlResult.textContent = '⚡ 解析查询... 优化器选择索引 idx_status_created...';
+  await typeCode(sqlEl, sqlCode, 15);
+  await sleep(300);
+  sqlResult.className = 'race-result done';
+  sqlResult.textContent = '✓ 完成！0.8ms — 优化器自动走了复合索引，只扫描了 10 行';
+
+  // Type imperative code (slower to emphasize more work)
+  codeResult.textContent = '🔧 执行循环... 全表扫描 500,000 条...';
+  await typeCode(codeEl, codeCode, 25);
+  await sleep(200);
+  codeResult.textContent = '⏳ 排序 23,456 条匹配结果...';
+  await sleep(600);
+  codeResult.className = 'race-result done';
+  codeResult.textContent = '✓ 完成！347ms — 全表扫描 + 内存排序，慢了 400 倍';
+
+  raceRunning = false;
+  document.getElementById('race-conclusion').style.display = 'block';
+}
+
+async function typeCode(el, html, delay) {
+  el.innerHTML = '';
+  // Parse into visible chunks
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  const text = temp.textContent;
+  el.innerHTML = html; // Show full at once with typing animation
+  el.style.opacity = '0';
+  el.style.transition = 'opacity 0.5s';
+  await sleep(50);
+  el.style.opacity = '1';
+  await sleep(text.length * delay / 10);
+}
+
+function resetCodeRace() {
+  document.getElementById('race-sql').innerHTML = '';
+  document.getElementById('race-code').innerHTML = '';
+  document.getElementById('race-sql-result').className = 'race-result';
+  document.getElementById('race-sql-result').textContent = '';
+  document.getElementById('race-code-result').className = 'race-result';
+  document.getElementById('race-code-result').textContent = '';
+  document.getElementById('race-conclusion').style.display = 'none';
+}
+
+// ============ GRAPH TRAVERSAL ============
+const graphNodes = [
+  { id: 'a', label: '张三', type: 'person', x: 80, y: 80 },
+  { id: 'b', label: '李四', type: 'person', x: 250, y: 40 },
+  { id: 'c', label: '王五', type: 'person', x: 250, y: 160 },
+  { id: 'd', label: '赵六', type: 'person', x: 420, y: 40 },
+  { id: 'e', label: '孙七', type: 'person', x: 420, y: 160 },
+  { id: 'f', label: '周八', type: 'person', x: 580, y: 100 },
+  { id: 'co1', label: '字节跳动', type: 'company', x: 140, y: 250 },
+  { id: 'co2', label: '阿里巴巴', type: 'company', x: 400, y: 250 },
+  { id: 's1', label: 'Go', type: 'skill', x: 60, y: 190 },
+  { id: 's2', label: 'Java', type: 'skill', x: 550, y: 250 },
+];
+
+const graphEdges = [
+  { from: 'a', to: 'b', label: '好友' },
+  { from: 'a', to: 'c', label: '好友' },
+  { from: 'b', to: 'd', label: '好友' },
+  { from: 'b', to: 'c', label: '好友' },
+  { from: 'c', to: 'e', label: '好友' },
+  { from: 'd', to: 'f', label: '好友' },
+  { from: 'e', to: 'f', label: '同事' },
+  { from: 'a', to: 'co1', label: '就职' },
+  { from: 'd', to: 'co1', label: '就职' },
+  { from: 'e', to: 'co2', label: '就职' },
+  { from: 'f', to: 'co2', label: '就职' },
+  { from: 'a', to: 's1', label: '会' },
+  { from: 'd', to: 's1', label: '会' },
+  { from: 'e', to: 's2', label: '会' },
+  { from: 'f', to: 's2', label: '会' },
+];
+
+function renderGraph() {
+  const canvas = document.getElementById('graph-canvas');
+  const cw = canvas.clientWidth;
+  const ch = canvas.clientHeight;
+  const scale = Math.min(cw / 700, ch / 350, 1);
+
+  canvas.innerHTML = '';
+
+  // Draw edges
+  graphEdges.forEach(edge => {
+    const from = graphNodes.find(n => n.id === edge.from);
+    const to = graphNodes.find(n => n.id === edge.to);
+    const x1 = from.x * scale + 28 * scale;
+    const y1 = from.y * scale + 28 * scale;
+    const x2 = to.x * scale + (to.type === 'person' ? 28 * scale : to.type === 'skill' ? 30 * scale : 30 * scale);
+    const y2 = to.y * scale + (to.type === 'skill' ? 18 * scale : 28 * scale);
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+
+    const edgeDiv = document.createElement('div');
+    edgeDiv.className = 'g-edge';
+    edgeDiv.dataset.from = edge.from;
+    edgeDiv.dataset.to = edge.to;
+    edgeDiv.innerHTML = `<svg width="${cw}" height="${ch}" style="position:absolute;top:0;left:0;">
+      <line class="g-edge-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" data-from="${edge.from}" data-to="${edge.to}"/>
+    </svg>`;
+    canvas.appendChild(edgeDiv);
+
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'g-edge-label';
+    labelDiv.dataset.from = edge.from;
+    labelDiv.dataset.to = edge.to;
+    labelDiv.textContent = edge.label;
+    labelDiv.style.cssText = `left:${mx}px;top:${my - 8}px;transform:translateX(-50%);`;
+    canvas.appendChild(labelDiv);
+  });
+
+  // Draw nodes
+  graphNodes.forEach(node => {
+    const div = document.createElement('div');
+    div.className = 'g-node ' + node.type;
+    div.id = 'gn-' + node.id;
+    const offsetY = node.type === 'skill' ? -10 : 0;
+    div.style.cssText = `left:${node.x * scale}px;top:${(node.y + offsetY) * scale}px;`;
+    div.textContent = node.label;
+    canvas.appendChild(div);
+  });
+}
+
+async function runGraphQuery(type) {
+  const canvas = document.getElementById('graph-canvas');
+  // Reset highlights
+  canvas.querySelectorAll('.g-node').forEach(n => n.classList.remove('visited'));
+  canvas.querySelectorAll('.g-edge-line').forEach(l => l.classList.remove('active'));
+  canvas.querySelectorAll('.g-edge-label').forEach(l => l.classList.remove('active'));
+
+  const sqlCode = document.getElementById('graph-sql-code');
+  const cypherCode = document.getElementById('graph-cypher-code');
+  const result = document.getElementById('graph-result');
+
+  async function visit(nodeIds, edgePairs) {
+    for (const id of nodeIds) {
+      const el = document.getElementById('gn-' + id);
+      if (el) el.classList.add('visited');
+      await sleep(300);
+    }
+    for (const [f, t] of edgePairs) {
+      canvas.querySelectorAll(`.g-edge-line[data-from="${f}"][data-to="${t}"],.g-edge-line[data-from="${t}"][data-to="${f}"]`).forEach(l => l.classList.add('active'));
+      canvas.querySelectorAll(`.g-edge-label[data-from="${f}"][data-to="${t}"],.g-edge-label[data-from="${t}"][data-to="${f}"]`).forEach(l => l.classList.add('active'));
+      await sleep(200);
+    }
+  }
+
+  if (type === 'common') {
+    sqlCode.innerHTML = `<span class="cmt">-- 共同好友：1 个 JOIN 就够了</span>
+<span class="kw">SELECT</span> f2.friend_id <span class="kw">AS</span> common_friend
+<span class="kw">FROM</span> friendships f1
+<span class="kw">JOIN</span> friendships f2
+  <span class="kw">ON</span> f1.friend_id = f2.user_id
+<span class="kw">WHERE</span> f1.user_id = <span class="num">1</span>
+  <span class="kw">AND</span> f2.friend_id != <span class="num">1</span>
+  <span class="kw">AND</span> f2.friend_id <span class="kw">NOT IN</span> (
+    <span class="kw">SELECT</span> friend_id <span class="kw">FROM</span> friendships
+    <span class="kw">WHERE</span> user_id = <span class="num">1</span>
+  );
+<span class="cmt">-- 简单，SQL 完全能扛</span>`;
+    cypherCode.innerHTML = `<span class="cmt">// Cypher: 1 跳遍历</span>
+<span class="kw">MATCH</span> (me:User {id: <span class="num">1</span>})
+      -[:FRIEND]-(mutual)
+      -[:FRIEND]-(rec:User)
+<span class="kw">WHERE NOT</span> (me)-[:FRIEND]-(rec)
+  <span class="kw">AND</span> rec <> me
+<span class="kw">RETURN</span> rec.name, mutual.name <span class="kw">AS</span> via
+<span class="kw">LIMIT</span> 10;
+<span class="cmt">// 更直观，但 SQL 也不难</span>`;
+    result.innerHTML = '<span style="color:var(--success)">1 跳查询：SQL 1个 JOIN 搞定，图模型优势不大</span>';
+    await visit(['a', 'b', 'c'], [['a','b'], ['a','c']]);
+
+  } else if (type === '2hop') {
+    sqlCode.innerHTML = `<span class="cmt">-- 2跳：2个 JOIN</span>
+<span class="kw">SELECT DISTINCT</span> f3.friend_id
+<span class="kw">FROM</span> friendships f1
+<span class="kw">JOIN</span> friendships f2
+  <span class="kw">ON</span> f1.friend_id = f2.user_id
+<span class="kw">JOIN</span> friendships f3
+  <span class="kw">ON</span> f2.friend_id = f3.user_id
+<span class="kw">WHERE</span> f1.user_id = <span class="num">1</span>
+  <span class="kw">AND</span> f3.friend_id != <span class="num">1</span>;
+<span class="cmt">-- 2 个 JOIN，还行但开始复杂了</span>`;
+    cypherCode.innerHTML = `<span class="cmt">// 2 跳遍历</span>
+<span class="kw">MATCH</span> (me:User {id:<span class="num">1</span>})
+      -[:FRIEND*2]-(rec:User)
+<span class="kw">WHERE</span> rec <> me
+  <span class="kw">AND NOT</span> (me)-[:FRIEND]-(rec)
+<span class="kw">RETURN</span> rec.name, count(*) <span class="kw">AS</span> strength
+<span class="kw">ORDER BY</span> strength <span class="kw">DESC</span>;
+<span class="cmt">// *2 表示2跳，语法简洁</span>`;
+    result.innerHTML = '<span style="color:var(--warn)">2 跳查询：SQL 2个 JOIN 还行，但图模型语法更自然</span>';
+    await visit(['a', 'b', 'c', 'd', 'e'], [['a','b'],['a','c'],['b','d'],['b','c'],['c','e']]);
+
+  } else if (type === '3hop') {
+    sqlCode.innerHTML = `<span class="cmt">-- 3跳：3个 JOIN 😵</span>
+<span class="kw">SELECT DISTINCT</span> f4.friend_id
+<span class="kw">FROM</span> friendships f1
+<span class="kw">JOIN</span> friendships f2 <span class="kw">ON</span> f1.friend_id = f2.user_id
+<span class="kw">JOIN</span> friendships f3 <span class="kw">ON</span> f2.friend_id = f3.user_id
+<span class="kw">JOIN</span> friendships f4 <span class="kw">ON</span> f3.friend_id = f4.user_id
+<span class="kw">WHERE</span> f1.user_id = <span class="num">1</span>;
+<span class="cmt">-- 3 个 JOIN，查询计划爆炸</span>
+<span class="cmt">-- 中间结果集可能巨大</span>
+<span class="cmt">-- 优化器很难选好执行路径</span>`;
+    cypherCode.innerHTML = `<span class="cmt">// 3 跳遍历</span>
+<span class="kw">MATCH</span> (me:User {id:<span class="num">1</span>})
+      -[:FRIEND*3]-(rec:User)
+<span class="kw">WHERE</span> rec <> me
+  <span class="kw">AND NOT</span> (me)-[:FRIEND*1..2]-(rec)
+<span class="kw">RETURN</span> rec.name, count(*) <span class="kw">AS</span> strength
+<span class="kw">ORDER BY</span> strength <span class="kw">DESC</span>
+<span class="kw">LIMIT</span> 20;
+<span class="cmt">// 只改 *2 → *3，图数据库</span>
+<span class="cmt">// 用索引邻接高效遍历</span>`;
+    result.innerHTML = '<span style="color:var(--danger)">3 跳查询：SQL 的 JOIN 链开始失控，图数据库碾压</span>';
+    await visit(['a','b','c','d','e','f'], [['a','b'],['a','c'],['b','d'],['c','e'],['d','f'],['e','f']]);
+
+  } else if (type === 'path') {
+    sqlCode.innerHTML = `<span class="cmt">-- 最短路径：递归 CTE</span>
+<span class="kw">WITH RECURSIVE</span> path <span class="kw">AS</span> (
+  <span class="kw">SELECT</span> friend_id <span class="kw">AS</span> node,
+         ARRAY[user_id, friend_id] <span class="kw">AS</span> route,
+         <span class="num">1</span> <span class="kw">AS</span> len
+  <span class="kw">FROM</span> friendships
+  <span class="kw">WHERE</span> user_id = <span class="num">1</span>
+  <span class="kw">UNION ALL</span>
+  <span class="kw">SELECT</span> f.friend_id,
+         p.route || f.friend_id,
+         p.len + <span class="num">1</span>
+  <span class="kw">FROM</span> friendships f, path p
+  <span class="kw">WHERE</span> f.user_id = p.node
+    <span class="kw">AND</span> p.len < <span class="num">5</span>
+    <span class="kw">AND</span> f.friend_id != <span class="kw">ALL</span>(p.route)
+)
+<span class="kw">SELECT</span> route <span class="kw">FROM</span> path
+<span class="kw">WHERE</span> node = <span class="num">6</span>  <span class="cmt">-- 周八</span>
+<span class="kw">ORDER BY</span> len <span class="kw">LIMIT</span> <span class="num">1</span>;
+<span class="cmt">-- 写完了，但你看懂了吗？🤯</span>`;
+    cypherCode.innerHTML = `<span class="cmt">// 最短路径：Cypher</span>
+<span class="kw">MATCH</span> path = shortestPath(
+  (a:User {id:<span class="num">1</span>})-[:FRIEND*]-(b:User {id:<span class="num">6</span>})
+)
+<span class="kw">RETURN</span> path;
+<span class="cmt">// 一行搞定，人能看懂</span>
+<span class="cmt">// 图数据库原生支持</span>`;
+    result.innerHTML = '<span style="color:var(--danger)">路径查询：SQL 递归 CTE 能写但极难维护，Cypher 一行搞定</span>';
+    // Animate path: 张三 → 李四 → 赵六 → 周八
+    await visit(['a'], []);
+    await sleep(200);
+    await visit(['b'], [['a','b']]);
+    await sleep(200);
+    await visit(['d'], [['b','d']]);
+    await sleep(200);
+    await visit(['f'], [['d','f']]);
+    result.innerHTML += '<br><span style="color:var(--accent)">找到路径：张三 → 李四 → 赵六 → 周八（3跳）</span>';
+  }
+}
+
+// ============ INIT ============
+document.addEventListener('DOMContentLoaded', () => {
+  renderDenorm();
+  renderGraph();
+  window.addEventListener('resize', () => { renderGraph(); });
+});
+</script>
+</body>
+</html>

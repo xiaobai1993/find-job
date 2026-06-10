@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDIA Ch3 — 存储与检索</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+:root{
+  --bg:#0b0f15;--bg-card:#111820;--bg-el:#171f2b;--fg:#e4eaf1;--fg-m:#7a8da3;--fg-d:#3e5168;
+  --accent:#00d4ff;--accent2:#a78bfa;--ag:rgba(0,212,255,.12);--a2g:rgba(167,139,250,.12);
+  --danger:#ff5272;--dg:rgba(255,82,114,.12);--warn:#f5a623;--wg:rgba(245,166,35,.12);
+  --success:#2ee6a8;--sg:rgba(46,230,168,.12);--border:#1c2736;--ba:rgba(0,212,255,.3);
+  --radius:8px;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans SC',system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;overflow-x:hidden;}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.01) 2px,rgba(0,212,255,.01) 4px);pointer-events:none;z-index:9999;}
+
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(11,15,21,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;height:52px;display:flex;align-items:center;gap:2rem;}
+.logo{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--accent);letter-spacing:.08em;white-space:nowrap;}
+.logo span{color:var(--fg-m);font-weight:400;}
+.nav-links{display:flex;gap:.25rem;margin-left:auto;}
+.nav-links a{font-family:var(--mono);font-size:.7rem;color:var(--fg-m);text-decoration:none;padding:.35rem .7rem;border-radius:4px;transition:.2s;letter-spacing:.04em;}
+.nav-links a:hover,.nav-links a.active{color:var(--accent);background:var(--ag);}
+
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:6rem 2rem 4rem;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;width:700px;height:700px;border-radius:50%;background:radial-gradient(circle,var(--ag) 0%,var(--a2g) 40%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);animation:hp 5s ease-in-out infinite;}
+@keyframes hp{0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(1);}50%{opacity:.7;transform:translate(-50%,-50%) scale(1.1);}}
+.hero-tag{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;margin-bottom:1.5rem;position:relative;}
+.hero h1{font-size:clamp(2rem,5vw,3.5rem);font-weight:900;line-height:1.15;margin-bottom:1.2rem;position:relative;}
+.hero h1 em{font-style:normal;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero-sub{font-size:1rem;color:var(--fg-m);max-width:620px;position:relative;}
+.hero-cols{display:flex;gap:3rem;margin-top:2.5rem;position:relative;flex-wrap:wrap;justify-content:center;}
+.hero-col{text-align:center;padding:1.2rem 1.5rem;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);}
+.hero-col .icon{font-size:1.8rem;margin-bottom:.4rem;}
+.hero-col .name{font-family:var(--mono);font-size:.75rem;font-weight:700;letter-spacing:.05em;}
+.hero-col .desc{font-size:.7rem;color:var(--fg-m);margin-top:.25rem;}
+
+.section{padding:5rem 2rem;max-width:1200px;margin:0 auto;}
+.section-tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;}
+.section-tag.t1{color:var(--accent);}.section-tag.t2{color:var(--accent2);}.section-tag.t3{color:var(--warn);}.section-tag.t4{color:var(--danger);}.section-tag.t5{color:var(--success);}
+.section h2{font-size:2rem;font-weight:700;margin-bottom:1rem;letter-spacing:-.01em;}
+.section h2 em{font-style:normal;color:var(--accent);}
+.section .desc{color:var(--fg-m);font-size:.95rem;max-width:720px;margin-bottom:2.5rem;}
+
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;transition:border-color .3s;}
+.card:hover{border-color:var(--ba);}
+.card h3{font-size:1.15rem;font-weight:700;margin-bottom:1rem;}
+.card h3 em{font-style:normal;color:var(--accent);}
+
+/* LSM animation */
+.lsm-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;overflow:hidden;}
+.lsm-flow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.5rem;}
+.lsm-step{display:flex;flex-direction:column;align-items:center;padding:.8rem 1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;min-width:90px;transition:all .3s;}
+.lsm-step.active{border-color:var(--accent);background:var(--ag);box-shadow:0 0 20px var(--ag);}
+.lsm-step .label{font-family:var(--mono);font-size:.7rem;font-weight:700;color:var(--accent);margin-bottom:.3rem;}
+.lsm-step .value{font-size:.72rem;color:var(--fg-m);text-align:center;}
+.lsm-arrow{color:var(--fg-d);font-size:1.2rem;}
+
+.lsm-layers{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-top:1rem;}
+.lsm-layer{flex:1;min-width:200px;max-width:300px;}
+.lsm-layer-title{font-family:var(--mono);font-size:.7rem;font-weight:700;padding:.4rem .8rem;border-radius:4px 4px 0 0;text-align:center;}
+.lsm-layer-title.mem{background:var(--sg);color:var(--success);}
+.lsm-layer-title.l0{background:var(--ag);color:var(--accent);}
+.lsm-layer-title.l1{background:var(--a2g);color:var(--accent2);}
+.lsm-layer-title.l2{background:var(--wg);color:var(--warn);}
+.lsm-layer-content{background:var(--bg-card);border:1px solid var(--border);border-top:none;border-radius:0 0 4px 4px;padding:.6rem;min-height:60px;font-family:var(--mono);font-size:.68rem;color:var(--fg-m);}
+.lsm-layer-content .entry{padding:.2rem .4rem;margin:.15rem 0;background:rgba(255,255,255,.03);border-radius:3px;animation:fadeIn .3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+
+.lsm-controls{display:flex;gap:.5rem;margin-top:1rem;justify-content:center;flex-wrap:wrap;}
+.btn{font-family:var(--mono);font-size:.72rem;padding:.5rem 1rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--fg);cursor:pointer;transition:.2s;}
+.btn:hover{border-color:var(--accent);background:var(--ag);}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700;}
+.btn.primary:hover{opacity:.85;}
+.btn.danger{border-color:var(--danger);color:var(--danger);}
+.btn.danger:hover{background:var(--dg);}
+
+/* B-Tree */
+.btree-canvas{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;overflow-x:auto;}
+.btree-node{display:inline-flex;gap:0;margin:.5rem;border:2px solid var(--border);border-radius:4px;overflow:hidden;transition:border-color .3s;}
+.btree-node.highlight{border-color:var(--accent);box-shadow:0 0 12px var(--ag);}
+.btree-node.root{border-color:var(--accent2);}
+.btree-cell{padding:.4rem .7rem;font-family:var(--mono);font-size:.72rem;font-weight:500;background:var(--bg-card);border-right:1px solid var(--border);min-width:36px;text-align:center;}
+.btree-cell:last-child{border-right:none;}
+.btree-cell.found{background:var(--ag);color:var(--accent);font-weight:700;}
+.btree-level{display:flex;justify-content:center;gap:1rem;margin:.8rem 0;position:relative;}
+.btree-ptr{width:2px;height:20px;background:var(--fg-d);margin:0 auto;}
+.btree-search-log{font-family:var(--mono);font-size:.72rem;color:var(--fg-m);margin-top:1rem;padding:1rem;background:var(--bg-card);border-radius:4px;min-height:50px;max-height:120px;overflow-y:auto;}
+.btree-search-log .step{margin:.2rem 0;}
+.btree-search-log .step .hit{color:var(--accent);}
+
+/* Bloom filter */
+.bloom-container{background:var(--bg-el);border-radius:var(--radius);padding:1.5rem;margin-top:1rem;}
+.bloom-bits{display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin:1rem 0;}
+.bloom-bit{width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.68rem;border-radius:3px;border:1px solid var(--border);background:var(--bg-card);transition:all .3s;}
+.bloom-bit.set{background:var(--sg);border-color:var(--success);color:var(--bg);font-weight:700;}
+.bloom-bit.checking{border-color:var(--warn);box-shadow:0 0 8px var(--wg);}
+.bloom-bit.miss{border-color:var(--danger);box-shadow:0 0 8px var(--dg);}
+.bloom-input-row{display:flex;gap:.5rem;align-items:center;justify-content:center;margin-top:1rem;flex-wrap:wrap;}
+.bloom-input-row input{font-family:var(--mono);font-size:.75rem;padding:.4rem .8rem;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--fg);width:160px;}
+.bloom-input-row input:focus{outline:none;border-color:var(--accent);}
+.bloom-result{font-family:var(--mono);font-size:.8rem;margin-top:.8rem;text-align:center;min-height:1.5rem;}
+.bloom-result.yes{color:var(--warn);}
+.bloom-result.no{color:var(--success);}
+
+/* Compare table */
+.compare-table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:1rem;}
+.compare-table th{text-align:left;padding:.6rem .8rem;font-family:var(--mono);font-size:.7rem;font-weight:700;color:var(--fg-m);border-bottom:2px solid var(--border);letter-spacing:.05em;}
+.compare-table td{padding:.6rem .8rem;border-bottom:1px solid var(--border);vertical-align:middle;}
+.compare-table tr:hover td{background:rgba(255,255,255,.02);}
+.compare-table .winner{color:var(--success);font-weight:600;}
+.compare-table .loser{color:var(--fg-d);}
+
+/* Row vs Column */
+.store-demo{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;}
+@media(max-width:768px){.store-demo{grid-template-columns:1fr;}}
+.store-box{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;overflow-x:auto;}
+.store-box h4{font-family:var(--mono);font-size:.75rem;margin-bottom:.8rem;}
+.store-box h4.row{color:var(--accent);}
+.store-box h4.col{color:var(--accent2);}
+.store-grid{display:grid;font-family:var(--mono);font-size:.68rem;}
+.store-cell{padding:.35rem .5rem;border:1px solid var(--border);text-align:center;transition:all .3s;}
+.store-cell.hdr{background:var(--bg-el);color:var(--fg-m);font-weight:700;}
+.store-cell.hl-row{background:var(--ag);color:var(--accent);}
+.store-cell.hl-col{background:var(--a2g);color:var(--accent2);}
+
+/* Payment card */
+.payment-card{background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(167,139,250,.08));border:1px solid var(--ba);border-radius:var(--radius);padding:2rem;margin-top:1rem;}
+.payment-card h3{color:var(--accent);font-size:1.1rem;margin-bottom:1rem;}
+.payment-card .point{display:flex;gap:.8rem;margin:.6rem 0;align-items:flex-start;}
+.payment-card .point .num{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:.85rem;flex-shrink:0;}
+.payment-card .point .text{font-size:.88rem;color:var(--fg-m);}
+
+footer{padding:3rem 2rem;text-align:center;color:var(--fg-d);font-family:var(--mono);font-size:.7rem;border-top:1px solid var(--border);margin-top:4rem;}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--fg-d);border-radius:3px;}
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo">DDIA<span> · Ch3</span></div>
+  <div class="nav-links">
+    <a href="#lsm">LSM-Tree</a>
+    <a href="#btree">B-Tree</a>
+    <a href="#bloom">Bloom Filter</a>
+    <a href="#compare">对比</a>
+    <a href="#olap">OLTP/OLAP</a>
+    <a href="#payment">支付场景</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">Chapter 03</div>
+  <h1>存储与<em>检索</em></h1>
+  <p class="hero-sub">数据库最底层做了两件事：存数据和取数据。选择什么样的索引结构，决定了数据库的性能特征和适用场景。</p>
+  <div class="hero-cols">
+    <div class="hero-col"><div class="icon">⚡</div><div class="name" style="color:var(--success)">LSM-Tree</div><div class="desc">写快读慢 · 顺序写</div></div>
+    <div class="hero-col"><div class="icon">🌲</div><div class="name" style="color:var(--accent)">B-Tree</div><div class="desc">读快写慢 · 原地更新</div></div>
+    <div class="hero-col"><div class="icon">🎯</div><div class="name" style="color:var(--accent2)">Bloom Filter</div><div class="desc">概率过滤 · 空间换时间</div></div>
+    <div class="hero-col"><div class="icon">📊</div><div class="name" style="color:var(--warn)">列存</div><div class="desc">OLAP · 高压缩比</div></div>
+  </div>
+</div>
+
+<!-- LSM-Tree -->
+<div class="section" id="lsm">
+  <div class="section-tag t1">01 — Write Path</div>
+  <h2>LSM-Tree <em>写入流程</em></h2>
+  <p class="desc">写入时先写 WAL 保证崩溃恢复，再写入内存中的 MemTable（有序数据结构），满了之后冻结刷盘为 SSTable，后台 Compaction 合并多层。</p>
+  <div class="lsm-container">
+    <div class="lsm-flow" id="lsmWriteFlow">
+      <div class="lsm-step" id="ws-wal"><div class="label">WAL</div><div class="value">崩溃恢复</div></div>
+      <div class="lsm-arrow">→</div>
+      <div class="lsm-step" id="ws-mem"><div class="label">MemTable</div><div class="value">内存有序表</div></div>
+      <div class="lsm-arrow">→</div>
+      <div class="lsm-step" id="ws-flush"><div class="label">Flush</div><div class="value">冻结刷盘</div></div>
+      <div class="lsm-arrow">→</div>
+      <div class="lsm-step" id="ws-sst"><div class="label">SSTable L0</div><div class="value">有序磁盘文件</div></div>
+      <div class="lsm-arrow">→</div>
+      <div class="lsm-step" id="ws-compact"><div class="label">Compaction</div><div class="value">合并清理</div></div>
+    </div>
+    <div class="lsm-layers">
+      <div class="lsm-layer"><div class="lsm-layer-title mem">MemTable</div><div class="lsm-layer-content" id="lsm-mem-content"></div></div>
+      <div class="lsm-layer"><div class="lsm-layer-title l0">Level 0</div><div class="lsm-layer-content" id="lsm-l0-content"></div></div>
+      <div class="lsm-layer"><div class="lsm-layer-title l1">Level 1</div><div class="lsm-layer-content" id="lsm-l1-content"></div></div>
+      <div class="lsm-layer"><div class="lsm-layer-title l2">Level 2</div><div class="lsm-layer-content" id="lsm-l2-content"></div></div>
+    </div>
+    <div class="lsm-controls">
+      <button class="btn primary" onclick="lsmWrite()">写入 key</button>
+      <button class="btn" onclick="lsmFlush()">Flush 到 L0</button>
+      <button class="btn" onclick="lsmCompact()">Compaction</button>
+      <button class="btn danger" onclick="lsmReset()">重置</button>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-tag t1">01 — Read Path</div>
+  <h2>LSM-Tree <em>读取流程</em></h2>
+  <p class="desc">读取时逐层查找：MemTable → L0 → L1 → L2 ... 找到即返回，否则继续。Bloom Filter 可跳过不存在 key 的层。</p>
+  <div class="lsm-container">
+    <div class="lsm-controls" style="margin-top:0;margin-bottom:1rem;">
+      <span style="font-family:var(--mono);font-size:.75rem;color:var(--fg-m);margin-right:.5rem;">查找 key:</span>
+      <input type="text" id="lsmReadKey" placeholder="输入 key" style="font-family:var(--mono);font-size:.75rem;padding:.4rem .8rem;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--fg);width:120px;">
+      <button class="btn primary" onclick="lsmRead()">查找</button>
+    </div>
+    <div id="lsmReadLog" style="font-family:var(--mono);font-size:.72rem;color:var(--fg-m);padding:1rem;background:var(--bg-card);border-radius:4px;min-height:60px;"></div>
+  </div>
+</div>
+
+<!-- B-Tree -->
+<div class="section" id="btree">
+  <div class="section-tag t2">02 — Structure</div>
+  <h2>B-Tree <em>结构演示</em></h2>
+  <p class="desc">B-Tree 每个节点是一页（通常 4KB），3~4 层可存储 TB 级数据。原地更新（overwrite），与 LSM-Tree 的追加写入形成对比。</p>
+  <div class="btree-canvas" id="btreeCanvas"></div>
+  <div class="lsm-controls" style="margin-top:1rem;">
+    <span style="font-family:var(--mono);font-size:.75rem;color:var(--fg-m);margin-right:.5rem;">查找:</span>
+    <input type="number" id="btreeSearchKey" placeholder="输入数字" style="font-family:var(--mono);font-size:.75rem;padding:.4rem .8rem;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--fg);width:100px;">
+    <button class="btn primary" onclick="btreeSearch()">搜索</button>
+    <button class="btn" onclick="btreeReset()">重置高亮</button>
+  </div>
+  <div class="btree-search-log" id="btreeLog">点击「搜索」查看查找路径</div>
+</div>
+
+<!-- Bloom Filter -->
+<div class="section" id="bloom">
+  <div class="section-tag t5">03 — Probabilistic</div>
+  <h2>Bloom Filter <em>互动演示</em></h2>
+  <p class="desc">位数组 + 多个哈希函数。查询时：如果所有对应位都为 1 → 可能存在（有假阳性）；如果任一位为 0 → 一定不存在（无假阴性）。LSM-Tree 用它跳过不存在的 key。</p>
+  <div class="bloom-container">
+    <div style="font-family:var(--mono);font-size:.72rem;color:var(--fg-m);margin-bottom:.5rem;text-align:center;">位数组（16 位）· 哈希函数 × 3</div>
+    <div class="bloom-bits" id="bloomBits"></div>
+    <div class="bloom-input-row">
+      <input type="text" id="bloomInput" placeholder="输入字符串">
+      <button class="btn primary" onclick="bloomAdd()">添加</button>
+      <button class="btn" onclick="bloomCheck()">查询</button>
+      <button class="btn danger" onclick="bloomReset()">重置</button>
+    </div>
+    <div class="bloom-result" id="bloomResult"></div>
+    <div style="font-family:var(--mono);font-size:.68rem;color:var(--fg-d);margin-top:.8rem;text-align:center;" id="bloomStats">已添加: 0 个元素 · 填充率: 0%</div>
+  </div>
+</div>
+
+<!-- Compare -->
+<div class="section" id="compare">
+  <div class="section-tag t3">04 — Trade-offs</div>
+  <h2>LSM-Tree vs B-Tree <em>全面对比</em></h2>
+  <p class="desc">核心权衡：LSM-Tree 写快读慢，B-Tree 读快写慢。选择取决于工作负载。</p>
+  <div class="card">
+    <table class="compare-table">
+      <thead><tr><th>维度</th><th>LSM-Tree</th><th>B-Tree</th></tr></thead>
+      <tbody>
+        <tr><td>写入</td><td class="winner">快（顺序写）</td><td class="loser">慢（随机写+WAL）</td></tr>
+        <tr><td>读取</td><td class="loser">慢（多层查找）</td><td class="winner">快（3~4次 I/O）</td></tr>
+        <tr><td>写放大</td><td class="loser">高（Compaction）</td><td>中（WAL+页分裂）</td></tr>
+        <tr><td>读放大</td><td class="loser">高（多层+Bloom）</td><td class="winner">低（树深度固定）</td></tr>
+        <tr><td>空间放大</td><td>中（旧版本未合并）</td><td class="winner">低（原地更新）</td></tr>
+        <tr><td>并发</td><td class="winner">简单（append-only）</td><td class="loser">复杂（锁/latch）</td></tr>
+        <tr><td>范围查询</td><td class="winner">快（有序扫描）</td><td class="winner">快（叶子链表）</td></tr>
+        <tr><td>适合场景</td><td>写多读少、时序</td><td>读多写少、事务</td></tr>
+        <tr><td>代表产品</td><td>RocksDB, LevelDB, Cassandra</td><td>InnoDB, PostgreSQL, Oracle</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- OLTP vs OLAP -->
+<div class="section" id="olap">
+  <div class="section-tag t4">05 — Access Patterns</div>
+  <h2>OLTP vs OLAP · <em>行存 vs 列存</em></h2>
+  <p class="desc">OLTP 场景适合行存（按行读写整条记录），OLAP 场景适合列存（只读需要的列 + 高压缩比）。点击高亮查看差异。</p>
+  <div class="store-demo">
+    <div class="store-box">
+      <h4 class="row">行存储 — OLTP（MySQL InnoDB）</h4>
+      <div class="store-grid" style="grid-template-columns:repeat(5,1fr);" id="rowStore"></div>
+      <div style="font-family:var(--mono);font-size:.68rem;color:var(--fg-m);margin-top:.6rem;">↑ 查询 amount 列需要读取所有字段 → I/O 浪费</div>
+    </div>
+    <div class="store-box">
+      <h4 class="col">列存储 — OLAP（ClickHouse）</h4>
+      <div class="store-grid" style="grid-template-columns:repeat(5,1fr);" id="colStore"></div>
+      <div style="font-family:var(--mono);font-size:.68rem;color:var(--fg-m);margin-top:.6rem;">↑ 查询 amount 列只需读该列 → 高压缩比 + 低 I/O</div>
+    </div>
+  </div>
+  <div style="text-align:center;margin-top:1rem;">
+    <button class="btn" onclick="highlightAmount()">高亮 amount 列</button>
+    <button class="btn" onclick="clearHighlight()">清除高亮</button>
+  </div>
+</div>
+
+<!-- Payment -->
+<div class="section" id="payment">
+  <div class="section-tag t3">06 — Payment Domain</div>
+  <h2>支付场景为什么选 <em>B-Tree</em></h2>
+  <div class="payment-card">
+    <h3>支付系统存储选型逻辑</h3>
+    <div class="point"><div class="num">01</div><div class="text">读多写少：查询订单、查余额远多于创建订单。B-Tree 3~4 次 I/O 的可预测延迟对支付至关重要。</div></div>
+    <div class="point"><div class="num">02</div><div class="text">事务保证：支付扣款需要 ACID，B-Tree 的原地更新天然支持行锁和事务，LSM-Tree 的并发控制更复杂。</div></div>
+    <div class="point"><div class="num">03</div><div class="text">延迟可预测：支付对延迟敏感，B-Tree 读取延迟稳定（固定深度），LSM-Tree 可能因 Compaction 出现延迟毛刺。</div></div>
+    <div class="point"><div class="num">04</div><div class="text">二级索引：支付需要按订单号、用户ID、时间范围等多维度查询，B-Tree 的二级索引成熟可靠。</div></div>
+    <div style="margin-top:1.2rem;padding:1rem;background:var(--bg-el);border-radius:6px;border-left:3px solid var(--accent);">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.3rem;">面试黄金回答</div>
+      <div style="font-size:.88rem;color:var(--fg);">"LSM-Tree 写快读慢，B-Tree 读快写慢。选择取决于工作负载。支付系统用 B-Tree（InnoDB）因为读多且需事务保证；时序监控用 LSM-Tree 因为写多。"</div>
+    </div>
+  </div>
+</div>
+
+<footer>DDIA · Chapter 03 · 存储与检索 · Visualization</footer>
+
+<script>
+// ===== LSM-Tree =====
+let lsmMem=[], lsmL0=[], lsmL1=[], lsmL2=[];
+let writeCounter=0;
+
+const payKeys=['pay:order_1001','pay:order_1002','pay:order_1003','pay:refund_5001','pay:order_1004','pay:fee_2001','pay:order_1005','pay:refund_5002','pay:order_1006','pay:settle_3001'];
+
+function nextKey(){
+  const k=payKeys[writeCounter%payKeys.length];
+  writeCounter++;
+  const v='¥'+(Math.floor(Math.random()*900)+100);
+  return k+'='+v;
+}
+
+function renderLSM(){
+  const mc=document.getElementById('lsm-mem-content');
+  const l0=document.getElementById('lsm-l0-content');
+  const l1=document.getElementById('lsm-l1-content');
+  const l2=document.getElementById('lsm-l2-content');
+  mc.innerHTML=lsmMem.map(e=>'<div class="entry">'+e+'</div>').join('')||'<span style="color:var(--fg-d)">空</span>';
+  l0.innerHTML=lsmL0.map(e=>'<div class="entry">'+e+'</div>').join('')||'<span style="color:var(--fg-d)">空</span>';
+  l1.innerHTML=lsmL1.map(e=>'<div class="entry">'+e+'</div>').join('')||'<span style="color:var(--fg-d)">空</span>';
+  l2.innerHTML=lsmL2.map(e=>'<div class="entry">'+e+'</div>').join('')||'<span style="color:var(--fg-d)">空</span>';
+}
+
+function flashStep(id){
+  const el=document.getElementById(id);
+  el.classList.add('active');
+  setTimeout(()=>el.classList.remove('active'),600);
+}
+
+function lsmWrite(){
+  const kv=nextKey();
+  flashStep('ws-wal');
+  setTimeout(()=>{
+    flashStep('ws-mem');
+    lsmMem.push(kv);
+    if(lsmMem.length>4){
+      setTimeout(()=>lsmFlush(),300);
+    }
+    renderLSM();
+  },200);
+}
+
+function lsmFlush(){
+  if(lsmMem.length===0)return;
+  flashStep('ws-flush');
+  setTimeout(()=>{
+    flashStep('ws-sst');
+    lsmL0=[...lsmMem,...lsmL0];
+    lsmMem=[];
+    renderLSM();
+  },300);
+}
+
+function lsmCompact(){
+  if(lsmL0.length===0&&lsmL1.length===0)return;
+  flashStep('ws-compact');
+  setTimeout(()=>{
+    // merge L0→L1, L1→L2 (simplified)
+    const all1=[...lsmL0,...lsmL1];
+    const seen=new Map();
+    all1.forEach(e=>{
+      const k=e.split('=')[0];
+      seen.set(k,e);
+    });
+    lsmL1=[...seen.values()].sort();
+    lsmL0=[];
+
+    if(lsmL1.length>6){
+      const all2=[...lsmL1,...lsmL2];
+      const seen2=new Map();
+      all2.forEach(e=>{const k=e.split('=')[0];seen2.set(k,e);});
+      lsmL2=[...seen2.values()].sort();
+      lsmL1=[];
+    }
+    renderLSM();
+  },400);
+}
+
+function lsmReset(){
+  lsmMem=[];lsmL0=[];lsmL1=[];lsmL2=[];writeCounter=0;
+  renderLSM();
+  document.getElementById('lsmReadLog').innerHTML='';
+}
+
+function lsmRead(){
+  const key=document.getElementById('lsmReadKey').value.trim();
+  if(!key)return;
+  const log=document.getElementById('lsmReadLog');
+  let html='';
+  let found=false;
+
+  // Search MemTable
+  html+='<div class="step">🔍 查 MemTable ... ';
+  const memHit=lsmMem.find(e=>e.startsWith(key+'='));
+  if(memHit){html+='<span class="hit">命中: '+memHit+'</span>';found=true;}
+  else{html+='未命中';}
+  html+='</div>';
+
+  if(!found){
+    html+='<div class="step">🔍 查 Level 0 SSTable ... ';
+    const l0Hit=lsmL0.find(e=>e.startsWith(key+'='));
+    if(l0Hit){html+='<span class="hit">命中: '+l0Hit+'</span>';found=true;}
+    else{html+='未命中';}
+    html+='</div>';
+  }
+
+  if(!found){
+    html+='<div class="step">🔍 查 Level 1 SSTable ... ';
+    const l1Hit=lsmL1.find(e=>e.startsWith(key+'='));
+    if(l1Hit){html+='<span class="hit">命中: '+l1Hit+'</span>';found=true;}
+    else{html+='未命中';}
+    html+='</div>';
+  }
+
+  if(!found){
+    html+='<div class="step">🔍 查 Level 2 SSTable ... ';
+    const l2Hit=lsmL2.find(e=>e.startsWith(key+'='));
+    if(l2Hit){html+='<span class="hit">命中: '+l2Hit+'</span>';found=true;}
+    else{html+='未命中';}
+    html+='</div>';
+  }
+
+  if(!found){
+    html+='<div class="step" style="color:var(--danger);">❌ key "'+key+'" 不存在</div>';
+  }
+
+  log.innerHTML=html;
+}
+
+renderLSM();
+
+// ===== B-Tree =====
+const btreeData={
+  keys:[20,50,80],
+  children:[
+    {keys:[5,10,15],children:[{keys:[1,3],leaf:true},{keys:[6,8],leaf:true},{keys:[11,13],leaf:true},{keys:[16,18],leaf:true}]},
+    {keys:[25,35,45],children:[{keys:[21,23],leaf:true},{keys:[28,30],leaf:true},{keys:[37,40],leaf:true},{keys:[47,49],leaf:true}]},
+    {keys:[55,65,75],children:[{keys:[51,53],leaf:true},{keys:[58,60],leaf:true},{keys:[67,70],leaf:true},{keys:[72,74],leaf:true}]},
+    {keys:[85,95,99],children:[{keys:[81,83],leaf:true},{keys:[88,90],leaf:true},{keys:[97,98],leaf:true},{keys:[100,102],leaf:true}]}
+  ]
+};
+
+function renderBTree(){
+  const c=document.getElementById('btreeCanvas');
+  let html='';
+
+  // Root
+  html+='<div class="btree-level"><div class="btree-node root" data-path="root">';
+  btreeData.keys.forEach(k=>{html+='<div class="btree-cell" data-key="'+k+'">'+k+'</div>';});
+  html+='</div></div>';
+
+  // Level 1
+  html+='<div class="btree-level">';
+  btreeData.children.forEach((child,ci)=>{
+    html+='<div class="btree-node" data-path="c'+ci+'">';
+    child.keys.forEach(k=>{html+='<div class="btree-cell" data-key="'+k+'">'+k+'</div>';});
+    html+='</div>';
+  });
+  html+='</div>';
+
+  // Level 2 (leaves)
+  html+='<div class="btree-level">';
+  btreeData.children.forEach((child,ci)=>{
+    child.children.forEach((leaf,li)=>{
+      html+='<div class="btree-node" data-path="c'+ci+'l'+li+'">';
+      leaf.keys.forEach(k=>{html+='<div class="btree-cell" data-key="'+k+'">'+k+'</div>';});
+      html+='</div>';
+    });
+  });
+  html+='</div>';
+
+  c.innerHTML=html;
+}
+
+function btreeSearch(){
+  const key=parseInt(document.getElementById('btreeSearchKey').value);
+  if(isNaN(key))return;
+  btreeReset();
+  const log=document.getElementById('btreeLog');
+  let html='';
+  let found=false;
+
+  // Root
+  let ci=0;
+  html+='<div class="step">1️⃣ 根节点 [20, 50, 80]: ';
+  if(key<20){ci=0;html+=key+' < 20 → 走左侧';}
+  else if(key<50){ci=1;html+='20 ≤ '+key+' < 50 → 走中间左';}
+  else if(key<80){ci=2;html+='50 ≤ '+key+' < 80 → 走中间右';}
+  else{ci=3;html+=key+' ≥ 80 → 走右侧';}
+  html+='</div>';
+
+  // Highlight root
+  document.querySelector('[data-path="root"]').classList.add('highlight');
+  const rootCell=document.querySelector('[data-path="root"] [data-key="'+(ci<btreeData.keys.length?btreeData.keys[ci>0?ci-1:0]:'')+'"]');
+
+  // Level 1
+  const child=btreeData.children[ci];
+  html+='<div class="step">2️⃣ 内部节点 ['+child.keys.join(', ')+']: ';
+  let li=0;
+  if(key<child.keys[0]){li=0;html+=key+' < '+child.keys[0]+' → 走左';}
+  else if(key<child.keys[1]){li=1;html+=child.keys[0]+' ≤ '+key+' < '+child.keys[1]+' → 走中左';}
+  else if(key<child.keys[2]){li=2;html+=child.keys[1]+' ≤ '+key+' < '+child.keys[2]+' → 走中右';}
+  else{li=3;html+=key+' ≥ '+child.keys[2]+' → 走右';}
+  html+='</div>';
+
+  document.querySelector('[data-path="c'+ci+'"]').classList.add('highlight');
+
+  // Leaf
+  const leaf=child.children[li];
+  html+='<div class="step">3️⃣ 叶子节点 ['+leaf.keys.join(', ')+']: ';
+  if(leaf.keys.includes(key)){
+    html+='<span class="hit">✓ 找到 '+key+'！</span>';found=true;
+    const leafNode=document.querySelector('[data-path="c'+ci+'l'+li+'"]');
+    leafNode.classList.add('highlight');
+    const cell=leafNode.querySelector('[data-key="'+key+'"]');
+    if(cell)cell.classList.add('found');
+  }else{
+    html+=key+' 不在叶子节点中 → 不存在';
+    document.querySelector('[data-path="c'+ci+'l'+li+'"]').classList.add('highlight');
+  }
+  html+='</div>';
+
+  if(!found){
+    html+='<div class="step" style="color:var(--danger);">❌ key '+key+' 不存在于 B-Tree 中</div>';
+  }
+
+  log.innerHTML=html;
+}
+
+function btreeReset(){
+  document.querySelectorAll('.btree-node').forEach(n=>n.classList.remove('highlight'));
+  document.querySelectorAll('.btree-cell').forEach(c=>c.classList.remove('found'));
+  document.getElementById('btreeLog').innerHTML='点击「搜索」查看查找路径';
+}
+
+renderBTree();
+
+// ===== Bloom Filter =====
+const BLOOM_SIZE=16;
+let bloomArr=new Array(BLOOM_SIZE).fill(0);
+let bloomAdded=[];
+
+function hashFns(s){
+  let h1=0,h2=0,h3=0;
+  for(let i=0;i<s.length;i++){
+    h1=(h1*31+s.charCodeAt(i))%BLOOM_SIZE;
+    h2=(h2*37+s.charCodeAt(i)*3+7)%BLOOM_SIZE;
+    h3=(h3*41+s.charCodeAt(i)*7+13)%BLOOM_SIZE;
+  }
+  return [(h1+BLOOM_SIZE)%BLOOM_SIZE,(h2+BLOOM_SIZE)%BLOOM_SIZE,(h3+BLOOM_SIZE)%BLOOM_SIZE];
+}
+
+function renderBloom(){
+  const c=document.getElementById('bloomBits');
+  let html='';
+  for(let i=0;i<BLOOM_SIZE;i++){
+    html+='<div class="bloom-bit'+(bloomArr[i]?' set':'')+'" id="bb'+i+'">'+(bloomArr[i]?'1':'0')+'</div>';
+  }
+  c.innerHTML=html;
+  const filled=bloomArr.filter(v=>v).length;
+  document.getElementById('bloomStats').textContent='已添加: '+bloomAdded.length+' 个元素 · 填充率: '+Math.round(filled/BLOOM_SIZE*100)+'%';
+}
+
+function bloomAdd(){
+  const s=document.getElementById('bloomInput').value.trim();
+  if(!s||bloomAdded.includes(s))return;
+  const hs=hashFns(s);
+  hs.forEach(h=>{bloomArr[h]=1;});
+  bloomAdded.push(s);
+  renderBloom();
+  // highlight
+  hs.forEach(h=>{const el=document.getElementById('bb'+h);if(el)el.style.transform='scale(1.3)';setTimeout(()=>{if(el)el.style.transform='';},400);});
+  document.getElementById('bloomResult').innerHTML='<span style="color:var(--success)">✓ "'+s+'" 已添加，哈希位: ['+hs.join(', ')+']</span>';
+  document.getElementById('bloomInput').value='';
+}
+
+function bloomCheck(){
+  const s=document.getElementById('bloomInput').value.trim();
+  if(!s)return;
+  const hs=hashFns(s);
+  const allSet=hs.every(h=>bloomArr[h]);
+
+  // Animate checking
+  let i=0;
+  function checkNext(){
+    if(i>=hs.length){
+      if(allSet){
+        if(bloomAdded.includes(s)){
+          document.getElementById('bloomResult').innerHTML='<span style="color:var(--success)">✓ "'+s+'" 可能存在 → 实际存在（真阳性）</span>';
+        }else{
+          document.getElementById('bloomResult').innerHTML='<span class="yes">⚠ "'+s+'" 可能存在 → 但实际不存在（假阳性！）</span>';
+        }
+      }else{
+        document.getElementById('bloomResult').innerHTML='<span class="no">✓ "'+s+'" 一定不存在（真阴性，无假阴性）</span>';
+      }
+      return;
+    }
+    const el=document.getElementById('bb'+hs[i]);
+    if(el)el.classList.add('checking');
+    setTimeout(()=>{
+      if(el){
+        el.classList.remove('checking');
+        if(!bloomArr[hs[i]])el.classList.add('miss');
+      }
+      i++;checkNext();
+    },300);
+  }
+  checkNext();
+}
+
+function bloomReset(){
+  bloomArr=new Array(BLOOM_SIZE).fill(0);
+  bloomAdded=[];
+  renderBloom();
+  document.getElementById('bloomResult').innerHTML='';
+}
+
+renderBloom();
+
+// ===== Row vs Column Store =====
+const storeData=[
+  {id:1001,user:'张三',amount:'¥500',status:'成功',time:'10:01'},
+  {id:1002,user:'李四',amount:'¥200',status:'成功',time:'10:02'},
+  {id:1003,user:'王五',amount:'¥800',status:'失败',time:'10:03'},
+  {id:1004,user:'赵六',amount:'¥150',status:'成功',time:'10:04'},
+  {id:1005,user:'钱七',amount:'¥350',status:'退款',time:'10:05'}
+];
+const headers=['id','user','amount','status','time'];
+const amtIdx=2;
+
+function renderStores(){
+  const rc=document.getElementById('rowStore');
+  const cc=document.getElementById('colStore');
+
+  // Row store
+  let rhtml='';
+  rhtml+='<div class="store-cell hdr">id</div><div class="store-cell hdr">user</div><div class="store-cell hdr">amount</div><div class="store-cell hdr">status</div><div class="store-cell hdr">time</div>';
+  storeData.forEach(row=>{
+    headers.forEach((h,hi)=>{
+      rhtml+='<div class="store-cell" data-col="'+hi+'">'+row[h]+'</div>';
+    });
+  });
+  rc.innerHTML=rhtml;
+
+  // Column store (same data, but visually arranged by column)
+  let chtml='';
+  headers.forEach((h,hi)=>{
+    chtml+='<div class="store-cell hdr">'+h+'</div>';
+  });
+  storeData.forEach(row=>{
+    headers.forEach((h,hi)=>{
+      chtml+='<div class="store-cell" data-col="'+hi+'">'+row[h]+'</div>';
+    });
+  });
+  cc.innerHTML=chtml;
+}
+
+function highlightAmount(){
+  document.querySelectorAll('#rowStore .store-cell').forEach(c=>{
+    if(c.dataset.col==amtIdx)c.classList.add('hl-row');
+  });
+  document.querySelectorAll('#colStore .store-cell').forEach(c=>{
+    if(c.dataset.col==amtIdx)c.classList.add('hl-col');
+  });
+}
+
+function clearHighlight(){
+  document.querySelectorAll('.store-cell').forEach(c=>{c.classList.remove('hl-row');c.classList.remove('hl-col');});
+}
+
+renderStores();
+</script>
+</body>
+</html>
