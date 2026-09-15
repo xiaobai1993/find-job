@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenHands — 开源 AI 智能体平台 | 能力与场景全景</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<header class="nav">
+  <div class="nav-inner">
+    <div class="logo">
+      <span class="logo-mark">✦</span>
+      <span>OpenHands</span>
+    </div>
+    <nav class="nav-links">
+      <a href="#capabilities">核心能力</a>
+      <a href="#scenarios">使用场景</a>
+      <a href="#architecture">架构概览</a>
+      <a href="sandbox.html">沙箱环境</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+    <a class="nav-cta" href="https://github.com/All-Hands-AI/OpenHands" target="_blank" rel="noopener">GitHub →</a>
+  </div>
+</header>
+
+<!-- Hero 区 -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-inner">
+    <div class="hero-badge">
+      <span class="pulse"></span>
+      开源 · 全平台 · 可自托管
+    </div>
+    <h1>让 AI Agent <span class="gradient-text">真正动手写代码</span></h1>
+    <p class="hero-desc">
+      OpenHands 是一个开源的 AI 软件开发智能体平台，能像真实开发者一样理解需求、编写代码、
+      运行测试、调试错误，在安全的沙箱环境中完成端到端的软件工程任务。
+    </p>
+    <div class="hero-actions">
+      <a href="#capabilities" class="btn btn-primary">探索能力</a>
+      <a href="sandbox.html" class="btn btn-secondary">了解沙箱机制</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-num">40k+</div>
+        <div class="stat-label">GitHub Stars</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">100+</div>
+        <div class="stat-label">Languages</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">3 种</div>
+        <div class="stat-label">沙箱模式</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">MIT</div>
+        <div class="stat-label">开源协议</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 核心能力 -->
+<section id="capabilities" class="section">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">核心能力</span>
+      <h2>一个平台，覆盖软件开发全流程</h2>
+      <p class="section-sub">从需求理解到代码交付，OpenHands 在隔离的沙箱环境中自主完成复杂任务。</p>
+    </div>
+
+    <div class="cap-grid">
+      <div class="cap-card">
+        <div class="cap-icon">🧠</div>
+        <h3>多模型智能体</h3>
+        <p>支持 Claude、GPT、Gemini、Ollama 等主流大模型，可自由切换或组合使用，适配不同任务的成本与能力需求。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">💻</div>
+        <h3>实时代码执行</h3>
+        <p>内置终端与文件编辑器，Agent 可以像人一样运行命令、编译项目、执行测试，并根据输出即时调整策略。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">🧰</div>
+        <h3>丰富工具生态</h3>
+        <p>通过 MCP 协议对接外部工具——GitHub、Jira、Slack、数据库、浏览器等，让 Agent 融入你已有的工作流。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">🛡️</div>
+        <h3>安全沙箱隔离</h3>
+        <p>支持本地进程、Docker 容器、Kubernetes Pod 三种沙箱模式，从个人开发到企业级多租户都能安全运行。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">🔄</div>
+        <h3>自主迭代能力</h3>
+        <p>Agent 具备自我纠错与迭代机制——代码报错？测试失败？它会阅读错误信息、定位问题、反复修改直至通过。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">🧩</div>
+        <h3>可扩展 Agent 框架</h3>
+        <p>基于 LangChain 与自研 Agent 框架，支持自定义提示词、工具、工作流，轻松构建面向特定领域的专属 Agent。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">📊</div>
+        <h3>可观测与评估</h3>
+        <p>完整的会话追踪、日志记录与评估框架（SWE-bench 等），可量化 Agent 的表现并持续优化。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">🌐</div>
+        <h3>Web UI + API</h3>
+        <p>提供现代化的 Web 交互界面，同时支持 REST API 与 SDK 集成，可嵌入到你自己的产品或 CI/CD 流程中。</p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">🏢</div>
+        <h3>企业级多租户</h3>
+        <p>OpenHands Enterprise 支持 SSO、RBAC、审计日志、配额管理，结合 K8s 沙箱实现安全的多租户部署。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 使用场景 -->
+<section id="scenarios" class="section section-alt">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">使用场景</span>
+      <h2>真实世界中的 OpenHands</h2>
+      <p class="section-sub">从个人开发者到大型团队，OpenHands 正在重塑软件开发的协作方式。</p>
+    </div>
+
+    <div class="scenario-list">
+      <div class="scenario-item">
+        <div class="scenario-num">01</div>
+        <div class="scenario-content">
+          <h3>🐛 自动化 Issue 修复</h3>
+          <p>
+            给 OpenHands 一个 GitHub Issue，它会自动克隆仓库、理解问题、编写修复代码、运行测试，
+            并直接提交 Pull Request。特别适合 Bug 修复、文档更新、依赖升级等重复性任务。
+          </p>
+          <div class="scenario-tags">
+            <span>GitHub</span><span>PR 自动生成</span><span>CI 联动</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">02</div>
+        <div class="scenario-content">
+          <h3>🔍 代码审查与重构</h3>
+          <p>
+            将 PR 或整个代码库交给 OpenHands，它能进行深度代码审查——找出潜在 Bug、性能瓶颈、
+            安全漏洞，并给出具体的重构建议甚至直接生成修复代码。
+          </p>
+          <div class="scenario-tags">
+            <span>Code Review</span><span>重构</span><span>安全审计</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">03</div>
+        <div class="scenario-content">
+          <h3>🚀 新功能快速原型</h3>
+          <p>
+            用自然语言描述一个新功能，OpenHands 可以从零搭建项目骨架、实现核心逻辑、
+            编写单元测试，让你在几分钟内拿到可运行的 MVP，大大缩短从想法到原型的距离。
+          </p>
+          <div class="scenario-tags">
+            <span>快速原型</span><span>全栈开发</span><span>测试驱动</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">04</div>
+        <div class="scenario-content">
+          <h3>📚 文档生成与维护</h3>
+          <p>
+            自动阅读代码仓库，生成 API 文档、架构说明、README、贡献指南。
+            代码变更后还能自动同步更新文档，让文档永远不会过时。
+          </p>
+          <div class="scenario-tags">
+            <span>文档自动化</span><span>API Docs</span><span>知识库</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">05</div>
+        <div class="scenario-content">
+          <h3>🔧 DevOps 与运维自动化</h3>
+          <p>
+            处理日常运维任务——日志分析、故障排查、配置修改、CI/CD 流水线调试。
+            结合 MCP 工具，Agent 可以操作 Kubernetes、云平台、监控系统等基础设施。
+          </p>
+          <div class="scenario-tags">
+            <span>DevOps</span><span>K8s</span><span>故障排查</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">06</div>
+        <div class="scenario-content">
+          <h3>🎓 编程学习与辅助</h3>
+          <p>
+            对于初学者，OpenHands 是耐心的编程导师——一步步讲解代码、解答问题、
+            引导调试。对于经验开发者，它是高效的"副驾驶"，帮你处理琐碎工作。
+          </p>
+          <div class="scenario-tags">
+            <span>编程教育</span><span>结对编程</span><span>代码解释</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">07</div>
+        <div class="scenario-content">
+          <h3>🏢 企业内部开发者平台</h3>
+          <p>
+            部署在企业内部，结合 K8s 多租户沙箱，为研发团队提供统一的 AI 编程平台。
+            对接内部代码仓库、工单系统、知识库，让 AI Agent 成为团队的"数字员工"。
+          </p>
+          <div class="scenario-tags">
+            <span>企业级</span><span>多租户</span><span>私有化部署</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scenario-item">
+        <div class="scenario-num">08</div>
+        <div class="scenario-content">
+          <h3>🔬 研究与基准测试</h3>
+          <p>
+            作为 AI Agent 研究平台，研究者可以在 SWE-bench 等标准基准上测试新算法，
+            也可以自定义任务集，快速验证 Agent 能力的改进效果。
+          </p>
+          <div class="scenario-tags">
+            <span>AI 研究</span><span>SWE-bench</span><span>基准测试</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 架构概览 -->
+<section id="architecture" class="section">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">架构概览</span>
+      <h2>模块化设计，灵活部署</h2>
+      <p class="section-sub">OpenHands 采用分层架构，各模块解耦，可根据需求灵活组合。</p>
+    </div>
+
+    <div class="arch-diagram">
+      <div class="arch-layer">
+        <div class="arch-layer-title">交互层</div>
+        <div class="arch-boxes">
+          <div class="arch-box">Web UI</div>
+          <div class="arch-box">REST API</div>
+          <div class="arch-box">CLI</div>
+          <div class="arch-box">SDK</div>
+        </div>
+      </div>
+
+      <div class="arch-arrow">↓</div>
+
+      <div class="arch-layer">
+        <div class="arch-layer-title">Agent 层</div>
+        <div class="arch-boxes">
+          <div class="arch-box arch-highlight">CodeAct Agent</div>
+          <div class="arch-box">Planner Agent</div>
+          <div class="arch-box">Reviewer Agent</div>
+          <div class="arch-box">自定义 Agent</div>
+        </div>
+      </div>
+
+      <div class="arch-arrow">↓</div>
+
+      <div class="arch-layer">
+        <div class="arch-layer-title">工具与模型层</div>
+        <div class="arch-boxes">
+          <div class="arch-box">LLM 网关</div>
+          <div class="arch-box">MCP 工具</div>
+          <div class="arch-box">文件系统</div>
+          <div class="arch-box">终端</div>
+        </div>
+      </div>
+
+      <div class="arch-arrow">↓</div>
+
+      <div class="arch-layer">
+        <div class="arch-layer-title">沙箱运行时</div>
+        <div class="arch-boxes">
+          <div class="arch-box arch-sandbox">本地进程</div>
+          <div class="arch-box arch-sandbox">Docker</div>
+          <div class="arch-box arch-sandbox">Kubernetes</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 沙箱 CTA -->
+<section class="cta-section">
+  <div class="container cta-inner">
+    <div>
+      <h2>想深入了解沙箱环境机制？</h2>
+      <p>从本地开发到企业级 K8s 多容器部署，一文读懂 OpenHands 沙箱的设计与实现。</p>
+    </div>
+    <a href="sandbox.html" class="btn btn-primary btn-lg">查看沙箱详解 →</a>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq" class="section section-alt">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">常见问题</span>
+      <h2>你可能想了解的</h2>
+    </div>
+
+    <div class="faq-grid">
+      <details class="faq-item">
+        <summary>OpenHands 与 Cursor / GitHub Copilot 有什么区别？</summary>
+        <p>
+          Cursor 和 Copilot 是代码补全/编辑辅助工具，工作在 IDE 中，需要人来主导。
+          OpenHands 是一个自主 Agent 平台——它能独立完成从理解需求到交付代码的全过程，
+          运行在沙箱环境中，可以执行命令、跑测试、调试错误，更像是一个"AI 同事"而非"补全工具"。
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>支持哪些编程语言？</summary>
+        <p>
+          OpenHands 本身不限定语言——只要沙箱环境中有对应的工具链（Python、Node.js、Java、Go、Rust 等），
+          Agent 就能编写和运行对应语言的代码。它对 Python、JavaScript/TypeScript 等主流语言支持尤其成熟。
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>数据安全如何保障？</summary>
+        <p>
+          OpenHands 可完全私有化部署，所有代码和数据都在你的基础设施内。
+          沙箱环境提供进程/容器级隔离，企业版还支持 SSO、RBAC、审计日志等安全特性。
+          你也可以选择使用本地模型（如 Ollama），数据完全不出网。
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>可以自定义 Agent 的行为吗？</summary>
+        <p>
+          完全可以。你可以通过自定义提示词、添加 MCP 工具、编写新的 Agent 类来定制 OpenHands 的行为。
+          社区已经贡献了面向各种场景的 Agent 实现，你也可以基于 SDK 构建完全自定义的工作流。
+        </p>
+      </details>
+
+      <details class="faq-item">
+        <summary>沙箱环境会被 Agent 搞坏吗？</summary>
+        <p>
+          不会。每个会话都运行在独立的沙箱中——Docker 模式下每个会话一个容器，
+          K8s 模式下每个会话一个 Pod。会话结束后沙箱即被销毁，不会影响宿主系统或其他会话。
+          <a href="sandbox.html">了解更多 →</a>
+        </p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-col">
+      <div class="logo logo-light">
+        <span class="logo-mark">✦</span>
+        <span>OpenHands</span>
+      </div>
+      <p class="footer-desc">开源的 AI 软件开发智能体平台，让每个开发者都拥有自己的 AI 搭档。</p>
+    </div>
+    <div class="footer-col">
+      <h4>文档</h4>
+      <a href="#">快速开始</a>
+      <a href="#">用户指南</a>
+      <a href="#">API 参考</a>
+      <a href="sandbox.html">沙箱机制</a>
+    </div>
+    <div class="footer-col">
+      <h4>社区</h4>
+      <a href="https://github.com/All-Hands-AI/OpenHands" target="_blank" rel="noopener">GitHub</a>
+      <a href="#">Discord</a>
+      <a href="#">Discussions</a>
+      <a href="#">贡献指南</a>
+    </div>
+    <div class="footer-col">
+      <h4>企业</h4>
+      <a href="#">OpenHands Enterprise</a>
+      <a href="#">部署方案</a>
+      <a href="#">联系我们</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <div class="container">
+      <p>© 2025 OpenHands Community. Open-sourced under MIT License.</p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
