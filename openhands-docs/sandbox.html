@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>沙箱环境机制详解 | OpenHands</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<header class="nav">
+  <div class="nav-inner">
+    <div class="logo">
+      <span class="logo-mark">✦</span>
+      <span>OpenHands</span>
+    </div>
+    <nav class="nav-links">
+      <a href="index.html">首页</a>
+      <a href="#overview">概述</a>
+      <a href="#local">本地模式</a>
+      <a href="#docker">Docker 模式</a>
+      <a href="#k8s">Kubernetes 模式</a>
+      <a href="#multi-container">多容器部署</a>
+    </nav>
+    <a class="nav-cta" href="index.html">← 返回</a>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="hero hero-sandbox">
+  <div class="hero-bg"></div>
+  <div class="hero-inner">
+    <div class="hero-badge">
+      <span class="pulse"></span>
+      沙箱环境 · 安全隔离
+    </div>
+    <h1>OpenHands <span class="gradient-text">沙箱环境机制</span></h1>
+    <p class="hero-desc">
+      三种运行模式，从本地开发到企业级多租户部署，为 AI Agent 提供安全、隔离、可扩展的执行环境。
+    </p>
+    <div class="mode-tabs">
+      <a href="#local" class="mode-tab">
+        <span class="mode-icon">🖥️</span>
+        <span>本地模式</span>
+      </a>
+      <a href="#docker" class="mode-tab">
+        <span class="mode-icon">🐳</span>
+        <span>Docker 模式</span>
+      </a>
+      <a href="#k8s" class="mode-tab">
+        <span class="mode-icon">☸️</span>
+        <span>Kubernetes 模式</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- 沙箱概述 -->
+<section id="overview" class="section">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">设计理念</span>
+      <h2>为什么需要沙箱？</h2>
+      <p class="section-sub">
+        AI Agent 会真实地执行代码和命令，沙箱是安全运行的基石。
+      </p>
+    </div>
+
+    <div class="overview-grid">
+      <div class="overview-card">
+        <div class="overview-num">1</div>
+        <h3>安全隔离</h3>
+        <p>Agent 生成的代码可能存在风险——误删文件、安装恶意包、访问敏感数据。沙箱将 Agent 的执行环境与宿主系统完全隔离，即使出现问题也不会扩散。</p>
+      </div>
+
+      <div class="overview-card">
+        <div class="overview-num">2</div>
+        <h3>环境一致性</h3>
+        <p>每个会话都在干净、可复现的环境中开始。预装了常用开发工具链，确保 Agent 的执行结果可预测，不会因"我这里可以跑"而出错。</p>
+      </div>
+
+      <div class="overview-card">
+        <div class="overview-num">3</div>
+        <h3>资源管控</h3>
+        <p>通过容器或 Pod 的资源限制（CPU、内存、磁盘），防止 Agent 的无限循环或内存泄漏耗尽宿主资源，保障系统整体稳定性。</p>
+      </div>
+
+      <div class="overview-card">
+        <div class="overview-num">4</div>
+        <h3>多租户隔离</h3>
+        <p>在企业或云服务场景下，不同用户的 Agent 会话运行在完全独立的沙箱中，数据互不可见，满足安全合规要求。</p>
+      </div>
+    </div>
+
+    <!-- 三种模式对比 -->
+    <div class="compare-wrap">
+      <h3 class="compare-title">三种模式对比</h3>
+      <div class="compare-table">
+        <div class="compare-row compare-head">
+          <div class="compare-cell">特性</div>
+          <div class="compare-cell">🖥️ 本地模式</div>
+          <div class="compare-cell">🐳 Docker 模式</div>
+          <div class="compare-cell">☸️ Kubernetes 模式</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">隔离级别</div>
+          <div class="compare-cell">进程级（弱隔离）</div>
+          <div class="compare-cell">容器级（强隔离）</div>
+          <div class="compare-cell">Pod 级（最强隔离）</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">适用场景</div>
+          <div class="compare-cell">本地开发、调试</div>
+          <div class="compare-cell">单机会话、小规模</div>
+          <div class="compare-cell">企业级、多租户</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">部署复杂度</div>
+          <div class="compare-cell">⭐ 极简</div>
+          <div class="compare-cell">⭐⭐ 简单</div>
+          <div class="compare-cell">⭐⭐⭐⭐ 复杂</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">可扩展性</div>
+          <div class="compare-cell">单机有限</div>
+          <div class="compare-cell">单机扩展</div>
+          <div class="compare-cell">集群水平扩展</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">多租户</div>
+          <div class="compare-cell">❌ 不支持</div>
+          <div class="compare-cell">⚠️ 有限支持</div>
+          <div class="compare-cell">✅ 原生支持</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">资源管控</div>
+          <div class="compare-cell">❌ 无</div>
+          <div class="compare-cell">✅ cgroup 限制</div>
+          <div class="compare-cell">✅ K8s 资源配额</div>
+        </div>
+        <div class="compare-row">
+          <div class="compare-cell">网络策略</div>
+          <div class="compare-cell">宿主网络</div>
+          <div class="compare-cell">Docker 网络</div>
+          <div class="compare-cell">NetworkPolicy</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 本地模式 -->
+<section id="local" class="section section-alt">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">模式一</span>
+      <h2>🖥️ 本地模式 (Local Mode)</h2>
+      <p class="section-sub">最简单的运行方式，直接在本机运行，适合开发调试和个人使用。</p>
+    </div>
+
+    <div class="mode-detail">
+      <div class="mode-detail-main">
+        <h3>工作原理</h3>
+        <p>
+          本地模式下，OpenHands 的 Agent 进程直接运行在宿主机上，文件系统、网络、进程都与宿主共享。
+          Agent 通过子进程（如 bash、python）执行命令，读写宿主文件系统。
+        </p>
+
+        <div class="diagram-box">
+          <pre class="diagram">
+┌─────────────────────────────────────────────────┐
+│                   宿主机 OS                      │
+│  ┌──────────────────────────────────────────┐   │
+│  │           OpenHands 主进程               │   │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  │   │
+│  │  │ Agent   │  │ Agent   │  │ Agent   │  │   │
+│  │  │ Session │  │ Session │  │ Session │  │   │
+│  │  └────┬────┘  └────┬────┘  └────┬────┘  │   │
+│  │       │            │            │        │   │
+│  │  ┌────▼────────────▼────────────▼────┐   │   │
+│  │  │        共享文件系统/Shell         │   │   │
+│  │  └───────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────┘   │
+│                                                  │
+│  共享网络 · 共享进程空间 · 共享用户权限          │
+└─────────────────────────────────────────────────┘</pre>
+        </div>
+
+        <h3>使用方式</h3>
+        <div class="code-block">
+<pre><code><span class="code-comment"># 安装 OpenHands</span>
+pip install openhands
+
+<span class="code-comment"># 直接运行（默认本地模式）</span>
+openhands
+
+<span class="code-comment"># 或显式指定</span>
+openhands --sandbox local</code></pre>
+        </div>
+
+        <h3>优缺点</h3>
+        <div class="pros-cons">
+          <div class="pros">
+            <h4>✅ 优点</h4>
+            <ul>
+              <li>零配置，开箱即用</li>
+              <li>性能最好，无虚拟化开销</li>
+              <li>可直接使用宿主已安装的所有工具</li>
+              <li>调试方便，问题易定位</li>
+            </ul>
+          </div>
+          <div class="cons">
+            <h4>❌ 缺点</h4>
+            <ul>
+              <li><strong>无隔离</strong>：Agent 可能误删文件或破坏系统</li>
+              <li>无资源限制，可能耗尽宿主资源</li>
+              <li>不适合多用户场景</li>
+              <li>环境不一致，依赖宿主配置</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="tip-box warn">
+          <strong>⚠️ 安全提示：</strong>本地模式下 Agent 拥有与启动用户相同的权限，
+          请勿在生产环境或不信任的任务中使用。仅推荐用于本地开发、调试和可信的个人使用场景。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Docker 模式 -->
+<section id="docker" class="section">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">模式二</span>
+      <h2>🐳 Docker 模式 (Docker Mode)</h2>
+      <p class="section-sub">推荐的标准运行方式，每个会话一个独立容器，兼顾安全性与易用性。</p>
+    </div>
+
+    <div class="mode-detail">
+      <div class="mode-detail-main">
+        <h3>工作原理</h3>
+        <p>
+          Docker 模式下，OpenHands 为每个 Agent 会话创建一个独立的 Docker 容器。
+          容器内预装了完整的开发环境（Python、Node.js、Git 等工具链），Agent 在容器内执行所有操作。
+          通过 Docker API 实现容器生命周期管理和文件同步。
+        </p>
+
+        <div class="diagram-box">
+          <pre class="diagram">
+┌──────────────────────────────────────────────────────────┐
+│                       宿主机 OS                          │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │           OpenHands 主进程                       │    │
+│  │  管理容器生命周期 · 文件同步 · 命令转发           │    │
+│  └──────────┬───────────────────────────┬──────────┘    │
+│             │ Docker API                │             │
+│  ┌──────────▼───────────────────────────▼──────────┐    │
+│  │              Docker Daemon                      │    │
+│  │  ┌───────────┐  ┌───────────┐  ┌───────────┐   │    │
+│  │  │ Container │  │ Container │  │ Container │   │    │
+│  │  │  Session  │  │  Session  │  │  Session  │   │    │
+│  │  │ ┌───────┐ │  │ ┌───────┐ │  │ ┌───────┐ │   │    │
+│  │  │ │ Agent │ │  │ │ Agent │ │  │ │ Agent │ │   │    │
+│  │  │ │ +Tools│ │  │ │ +Tools│ │  │ │ +Tools│ │   │    │
+│  │  │ └───────┘ │  │ └───────┘ │  │ └───────┘ │   │    │
+│  │  │ 独立FS    │  │ 独立FS    │  │ 独立FS    │   │    │
+│  │  └───────────┘  └───────────┘  └───────────┘   │    │
+│  │  cgroup 资源限制 · 独立网络命名空间              │    │
+│  └─────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────┘</pre>
+        </div>
+
+        <h3>关键特性</h3>
+        <div class="feature-grid">
+          <div class="feature-item">
+            <strong>📦 会话级隔离</strong>
+            <p>每个会话一个容器，会话结束容器销毁。环境干净，互不干扰。</p>
+          </div>
+          <div class="feature-item">
+            <strong>🔄 文件双向同步</strong>
+            <p>宿主与容器间通过文件同步机制交换代码和数据，支持热更新。</p>
+          </div>
+          <div class="feature-item">
+            <strong>🛠 预装开发环境</strong>
+            <p>官方镜像预装 Python、Node.js、Go、Java、Git 等常用工具，开箱即用。</p>
+          </div>
+          <div class="feature-item">
+            <strong>📈 资源限制</strong>
+            <p>通过 Docker cgroup 限制每个容器的 CPU、内存使用，防止资源耗尽。</p>
+          </div>
+          <div class="feature-item">
+            <strong>🧩 自定义镜像</strong>
+            <p>支持自定义 Docker 镜像，可按需预装特定语言、框架或内部工具。</p>
+          </div>
+          <div class="feature-item">
+            <strong>🔌 端口转发</strong>
+            <p>支持将容器内端口映射到宿主，便于 Agent 开发的 Web 服务预览。</p>
+          </div>
+        </div>
+
+        <h3>使用方式</h3>
+        <div class="code-block">
+<pre><code><span class="code-comment"># 确保 Docker 已启动</span>
+docker info
+
+<span class="code-comment"># Docker 模式启动（推荐）</span>
+openhands --sandbox docker
+
+<span class="code-comment"># 指定自定义镜像</span>
+openhands --sandbox docker --base-image my-custom-openhands:latest
+
+<span class="code-comment"># 限制资源</span>
+openhands --sandbox docker \
+  --docker-cpu-limit 2 \
+  --docker-memory-limit 4g</code></pre>
+        </div>
+
+        <h3>容器生命周期</h3>
+        <div class="lifecycle">
+          <div class="lifecycle-step">
+            <div class="lifecycle-num">1</div>
+            <div class="lifecycle-text">
+              <strong>创建</strong><br/>
+              会话开始时，拉取/复用镜像，创建容器
+            </div>
+          </div>
+          <div class="lifecycle-arrow">→</div>
+          <div class="lifecycle-step">
+            <div class="lifecycle-num">2</div>
+            <div class="lifecycle-text">
+              <strong>初始化</strong><br/>
+              注入 Agent 代码，同步工作目录
+            </div>
+          </div>
+          <div class="lifecycle-arrow">→</div>
+          <div class="lifecycle-step">
+            <div class="lifecycle-num">3</div>
+            <div class="lifecycle-text">
+              <strong>运行</strong><br/>
+              Agent 在容器内执行命令、读写文件
+            </div>
+          </div>
+          <div class="lifecycle-arrow">→</div>
+          <div class="lifecycle-step">
+            <div class="lifecycle-num">4</div>
+            <div class="lifecycle-text">
+              <strong>销毁</strong><br/>
+              会话结束，同步结果，删除容器
+            </div>
+          </div>
+        </div>
+
+        <div class="tip-box info">
+          <strong>💡 提示：</strong>Docker 模式是 OpenHands 的默认推荐模式，
+          适合大多数个人和小团队场景。对于需要多租户、大规模部署的企业用户，建议使用 Kubernetes 模式。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- K8s 模式 -->
+<section id="k8s" class="section section-alt">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">模式三</span>
+      <h2>☸️ Kubernetes 模式 (K8s Mode)</h2>
+      <p class="section-sub">企业级部署方案，每个会话一个 Pod，支持多租户、水平扩展与精细权限管控。</p>
+    </div>
+
+    <div class="mode-detail">
+      <div class="mode-detail-main">
+        <h3>工作原理</h3>
+        <p>
+          Kubernetes 模式下，OpenHands 通过 K8s API 在集群中为每个会话创建独立的 Pod。
+          这是最强大的部署模式——支持资源配额、网络策略、持久化存储、自动伸缩等企业级特性。
+          OpenHands Enterprise 版本就是基于此模式构建的多租户 SaaS 平台。
+        </p>
+
+        <div class="diagram-box">
+          <pre class="diagram">
+┌──────────────────────────────────────────────────────────────┐
+│                     Kubernetes Cluster                       │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Control Plane                                       │   │
+│  │  API Server · Scheduler · etcd · Controller          │   │
+│  └───────────────────────┬──────────────────────────────┘   │
+│                          │                                   │
+│  ┌───────────────────────▼──────────────────────────────┐   │
+│  │  Namespace: openhands                               │   │
+│  │  ┌───────────────────────────────────────────────┐  │   │
+│  │  │  OpenHands API / Controller                   │  │   │
+│  │  │  (管理 Pod 生命周期、调度、配额)               │  │   │
+│  │  └──────────┬────────────────────────────────────┘  │   │
+│  │             │ K8s API                               │   │
+│  │  ┌──────────▼──────────┬──────────┬──────────┐     │   │
+│  │  │  Pod (Session 1)    │  Pod 2   │  Pod 3   │ ... │   │
+│  │  │ ┌─────────────────┐ │          │          │     │   │
+│  │  │ │  agent 容器     │ │  ...     │  ...     │     │   │
+│  │  │ │  (主进程)       │ │          │          │     │   │
+│  │  │ ├─────────────────┤ │          │          │     │   │
+│  │  │ │  tools 容器     │ │          │          │     │   │
+│  │  │ │  (执行环境)     │ │          │          │     │   │
+│  │  │ └─────────────────┘ │          │          │     │   │
+│  │  │  ResourceQuota      │          │          │     │   │
+│  │  │  NetworkPolicy      │          │          │     │   │
+│  │  │  PersistentVolume   │          │          │     │   │
+│  │  └─────────────────────┴──────────┴──────────┘     │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  Node Pool 可水平扩展 · 多 Namespace 隔离 · RBAC 权限        │
+└──────────────────────────────────────────────────────────────┘</pre>
+        </div>
+
+        <h3>核心架构组件</h3>
+
+        <div class="k8s-components">
+          <div class="k8s-component">
+            <h4>🎛 控制平面 (Control Plane)</h4>
+            <p>
+              OpenHands 的 API 服务运行在集群中，负责接收会话请求、调度 Pod、
+              管理生命周期、收集日志与指标。它相当于集群中的"大脑"。
+            </p>
+          </div>
+
+          <div class="k8s-component">
+            <h4>📦 会话 Pod (Session Pod)</h4>
+            <p>
+              每个用户会话对应一个 Pod，Pod 内可包含多个容器（sidecar 模式）：
+              Agent 主容器 + 执行环境容器 + 日志/监控 sidecar。
+              Pod 之间完全隔离，各自拥有独立的网络和文件系统。
+            </p>
+          </div>
+
+          <div class="k8s-component">
+            <h4>📊 资源管控 (Resource Management)</h4>
+            <p>
+              通过 <code>ResourceQuota</code> 和 <code>LimitRange</code> 限制每个命名空间、
+              每个 Pod 的 CPU、内存、存储使用。结合 HPA (Horizontal Pod Autoscaler) 可自动扩缩容。
+            </p>
+          </div>
+
+          <div class="k8s-component">
+            <h4>🔒 网络策略 (NetworkPolicy)</h4>
+            <p>
+              使用 K8s NetworkPolicy 精细控制每个 Pod 的网络访问——
+              哪些可以出公网、哪些只能访问内部服务、哪些完全隔离。
+              满足企业安全合规要求。
+            </p>
+          </div>
+
+          <div class="k8s-component">
+            <h4>💾 存储管理 (Storage)</h4>
+            <p>
+              通过 PersistentVolumeClaim (PVC) 为会话提供持久化存储，
+              用户代码和数据可以在会话间保留。也支持空目录（会话即销毁）的无状态模式。
+            </p>
+          </div>
+
+          <div class="k8s-component">
+            <h4>👤 多租户隔离 (Multi-tenancy)</h4>
+            <p>
+              每个租户 / 团队使用独立的 Namespace，配合 RBAC、NetworkPolicy、
+              ResourceQuota 实现硬隔离。OpenHands Enterprise 进一步提供 SSO 集成、
+              审计日志、用量计量等企业特性。
+            </p>
+          </div>
+        </div>
+
+        <h3>部署架构</h3>
+        <div class="deploy-arch">
+          <div class="deploy-tier">
+            <div class="deploy-tier-title">🌐 入口层</div>
+            <div class="deploy-items">
+              <span class="deploy-item">Ingress / LoadBalancer</span>
+              <span class="deploy-item">SSL Termination</span>
+              <span class="deploy-item">身份认证 (SSO/OIDC)</span>
+            </div>
+          </div>
+          <div class="deploy-arrow">↓</div>
+          <div class="deploy-tier">
+            <div class="deploy-tier-title">⚙️ 服务层</div>
+            <div class="deploy-items">
+              <span class="deploy-item">OpenHands API Server</span>
+              <span class="deploy-item">会话管理器 (Session Manager)</span>
+              <span class="deploy-item">WebSocket 网关</span>
+              <span class="deploy-item">文件服务</span>
+            </div>
+          </div>
+          <div class="deploy-arrow">↓</div>
+          <div class="deploy-tier">
+            <div class="deploy-tier-title">🧠 工作负载层</div>
+            <div class="deploy-items">
+              <span class="deploy-item pod">Pod A - 用户1会话</span>
+              <span class="deploy-item pod">Pod B - 用户2会话</span>
+              <span class="deploy-item pod">Pod C - 用户3会话</span>
+              <span class="deploy-item pod">Pod D - ...</span>
+            </div>
+          </div>
+          <div class="deploy-arrow">↓</div>
+          <div class="deploy-tier">
+            <div class="deploy-tier-title">☁️ 基础设施层</div>
+            <div class="deploy-items">
+              <span class="deploy-item">Kubernetes Node Pool</span>
+              <span class="deploy-item">持久化存储 (PV)</span>
+              <span class="deploy-item">镜像仓库 (Registry)</span>
+              <span class="deploy-item">监控/日志 (Prometheus/Loki)</span>
+            </div>
+          </div>
+        </div>
+
+        <h3>使用方式</h3>
+        <div class="code-block">
+<pre><code><span class="code-comment"># 使用 Helm 部署 OpenHands 到 K8s 集群</span>
+helm repo add openhands https://charts.all-hands.dev
+helm install openhands openhands/openhands \
+  --namespace openhands \
+  --create-namespace \
+  --set sandbox.kubernetes.enabled=true
+
+<span class="code-comment"># 配置资源限制（values.yaml 示例）</span>
+sandbox:
+  kubernetes:
+    enabled: true
+    namespace: openhands-sessions
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+    storage:
+      enabled: true
+      size: 10Gi
+    networkPolicy:
+      enabled: true
+      allowEgress: true
+
+<span class="code-comment"># 查看会话 Pod</span>
+kubectl get pods -n openhands-sessions</code></pre>
+        </div>
+
+        <div class="tip-box success">
+          <strong>✅ 适用场景：</strong>企业内部 AI 编程平台、多团队共享环境、
+          需要强安全隔离的研发场景、面向客户的 SaaS 服务。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 多容器部署 -->
+<section id="multi-container" class="section">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">进阶</span>
+      <h2>🚢 多容器部署与高级模式</h2>
+      <p class="section-sub">
+        当单个容器不足以满足需求时，OpenHands 支持更复杂的多容器编排方案。
+      </p>
+    </div>
+
+    <div class="multi-container-content">
+      <h3>为什么需要多容器？</h3>
+      <p>
+        有些场景下，Agent 不仅仅需要一个 shell 环境——它可能需要连接数据库、
+        调用微服务、使用浏览器进行端到端测试、或者运行需要多个进程协作的应用。
+        这时候就需要多容器环境来支撑。
+      </p>
+
+      <div class="multi-patterns">
+        <div class="pattern-card">
+          <div class="pattern-icon">🔗</div>
+          <h4>Sidecar 模式</h4>
+          <p>
+            主 Agent 容器 + 辅助 sidecar 容器（如浏览器、代理、日志收集）。
+            共享网络命名空间，通过 localhost 互相通信。
+          </p>
+          <div class="pattern-demo">
+            <span class="container-tag main">agent</span>
+            <span class="container-tag side">browser</span>
+            <span class="container-tag side">proxy</span>
+          </div>
+        </div>
+
+        <div class="pattern-card">
+          <div class="pattern-icon">🎯</div>
+          <h4>服务依赖模式</h4>
+          <p>
+            Agent 容器 + 依赖服务容器（如 PostgreSQL、Redis、MySQL）。
+            Agent 可以真实地连接和操作数据库，进行数据库开发和测试。
+          </p>
+          <div class="pattern-demo">
+            <span class="container-tag main">agent</span>
+            <span class="container-tag dep">postgres</span>
+            <span class="container-tag dep">redis</span>
+          </div>
+        </div>
+
+        <div class="pattern-card">
+          <div class="pattern-icon">🌐</div>
+          <h4>微服务模式</h4>
+          <p>
+            模拟完整的微服务环境，多个应用容器 + Agent 容器。
+            Agent 可以在类生产环境中开发、测试和调试分布式系统。
+          </p>
+          <div class="pattern-demo">
+            <span class="container-tag main">agent</span>
+            <span class="container-tag app">api-svc</span>
+            <span class="container-tag app">auth-svc</span>
+            <span class="container-tag dep">db</span>
+          </div>
+        </div>
+
+        <div class="pattern-card">
+          <div class="pattern-icon">🧪</div>
+          <h4>E2E 测试模式</h4>
+          <p>
+            Agent + 应用服务 + 浏览器（Playwright/Puppeteer）。
+            Agent 编写代码后，可以自动启动应用并运行端到端测试验证。
+          </p>
+          <div class="pattern-demo">
+            <span class="container-tag main">agent</span>
+            <span class="container-tag app">web-app</span>
+            <span class="container-tag side">browser</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>Kubernetes 中的多容器实现</h3>
+      <p>
+        在 Kubernetes 模式下，多容器通过 Pod 内多容器 + Service/Ingress 组合实现：
+      </p>
+
+      <div class="diagram-box">
+        <pre class="diagram">
+  Pod: session-abc123
+ ┌───────────────────────────────────────────────┐
+ │                                               │
+ │  ┌─────────────┐    共享网络 (localhost)      │
+ │  │  agent      │ ──────────────────────────── │──→ 出网
+ │  │  (主容器)   │                              │
+ │  └──────┬──────┘                              │
+ │         │ 共享存储卷 (emptyDir / PVC)          │
+ │  ┌──────▼──────┐   ┌──────────┐  ┌─────────┐  │
+ │  │  tools      │   │ postgres │  │  redis  │  │
+ │  │  (执行环境)  │   │  (依赖)  │  │ (依赖)  │  │
+ │  └─────────────┘   └──────────┘  └─────────┘  │
+ │                                               │
+ └───────────────────────────────────────────────┘
+          ▲
+          │ Service (可选，暴露端口)
+          ▼
+     Ingress / 端口转发</pre>
+      </div>
+
+      <h3>Docker Compose 中的多容器</h3>
+      <p>
+        对于 Docker 模式，也可以通过自定义 compose 文件实现多容器环境：
+      </p>
+
+      <div class="code-block">
+<pre><code><span class="code-comment"># docker-compose.yml 示例</span>
+<span class="code-yaml">services:</span>
+  <span class="code-yaml-key">openhands-agent:</span>
+    <span class="code-yaml-key">image:</span> ghcr.io/all-hands-ai/openhands:latest
+    <span class="code-yaml-key">depends_on:</span>
+      - postgres
+      - redis
+    <span class="code-yaml-key">environment:</span>
+      - DATABASE_URL=postgres://user:pass@postgres:5432/app
+      - REDIS_URL=redis://redis:6379
+
+  <span class="code-yaml-key">postgres:</span>
+    <span class="code-yaml-key">image:</span> postgres:16-alpine
+    <span class="code-yaml-key">environment:</span>
+      - POSTGRES_PASSWORD=pass
+
+  <span class="code-yaml-key">redis:</span>
+    <span class="code-yaml-key">image:</span> redis:7-alpine</code></pre>
+      </div>
+
+      <h3>关键技术要点</h3>
+      <div class="key-points">
+        <div class="key-point">
+          <strong>📡 服务发现</strong>
+          <p>K8s 中通过 DNS（service-name.namespace.svc.cluster.local）互相发现；Docker 模式下通过 compose 的默认网络。</p>
+        </div>
+        <div class="key-point">
+          <strong>📂 数据共享</strong>
+          <p>Pod 内容器共享 emptyDir 卷或 PVC；Docker 中使用共享 volume。Agent 与执行环境通过共享目录交换文件。</p>
+        </div>
+        <div class="key-point">
+          <strong>⏱ 生命周期绑定</strong>
+          <p>所有辅助容器与会话生命周期绑定——会话开始时创建，结束时一并销毁，无残留。</p>
+        </div>
+        <div class="key-point">
+          <strong>🔌 端口暴露</strong>
+          <p>Agent 开发的 Web 服务可通过 Service + Ingress 或端口转发访问，支持实时预览。</p>
+        </div>
+        <div class="key-point">
+          <strong>🎛 资源调度</strong>
+          <p>K8s 根据 Pod 总资源需求调度到合适的节点，支持节点亲和性、污点容忍等高级调度策略。</p>
+        </div>
+        <div class="key-point">
+          <strong>🔐 安全加固</strong>
+          <p>每个容器可独立配置 SecurityContext——非 root 用户、只读根文件系统、seccomp/AppArmor 配置。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 选择指南 -->
+<section class="section section-alt">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">决策指南</span>
+      <h2>我该选择哪种模式？</h2>
+    </div>
+
+    <div class="decision-tree">
+      <div class="decision-step">
+        <div class="decision-q">你是个人开发者，本地使用？</div>
+        <div class="decision-yes">✅ 是 → <strong>本地模式</strong> 或 <strong>Docker 模式</strong></div>
+        <div class="decision-no">❌ 否 → 继续</div>
+      </div>
+      <div class="decision-step">
+        <div class="decision-q">小团队共享，需要一定隔离？</div>
+        <div class="decision-yes">✅ 是 → <strong>Docker 模式</strong>（单机部署）</div>
+        <div class="decision-no">❌ 否 → 继续</div>
+      </div>
+      <div class="decision-step">
+        <div class="decision-q">企业级部署 / 多租户 / 需要高可用？</div>
+        <div class="decision-yes">✅ 是 → <strong>Kubernetes 模式</strong></div>
+        <div class="decision-no">❌ 否 → 根据实际规模选择</div>
+      </div>
+      <div class="decision-step">
+        <div class="decision-q">Agent 需要数据库/浏览器等依赖服务？</div>
+        <div class="decision-yes">✅ 是 → <strong>Docker Compose</strong> 或 <strong>K8s 多容器 Pod</strong></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="container cta-inner">
+    <div>
+      <h2>返回首页，了解更多 OpenHands 能力</h2>
+      <p>探索 OpenHands 的核心功能与真实使用场景。</p>
+    </div>
+    <a href="index.html" class="btn btn-primary btn-lg">← 返回首页</a>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-col">
+      <div class="logo logo-light">
+        <span class="logo-mark">✦</span>
+        <span>OpenHands</span>
+      </div>
+      <p class="footer-desc">开源的 AI 软件开发智能体平台，让每个开发者都拥有自己的 AI 搭档。</p>
+    </div>
+    <div class="footer-col">
+      <h4>文档</h4>
+      <a href="index.html">首页</a>
+      <a href="#">快速开始</a>
+      <a href="#">用户指南</a>
+      <a href="sandbox.html">沙箱机制</a>
+    </div>
+    <div class="footer-col">
+      <h4>社区</h4>
+      <a href="https://github.com/All-Hands-AI/OpenHands" target="_blank" rel="noopener">GitHub</a>
+      <a href="#">Discord</a>
+      <a href="#">Discussions</a>
+      <a href="#">贡献指南</a>
+    </div>
+    <div class="footer-col">
+      <h4>企业</h4>
+      <a href="#">OpenHands Enterprise</a>
+      <a href="#">部署方案</a>
+      <a href="#">联系我们</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <div class="container">
+      <p>© 2025 OpenHands Community. Open-sourced under MIT License.</p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
